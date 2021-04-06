@@ -43,42 +43,47 @@ def main():
 
     logger.remove()
     loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan>  <level>{message}</level>'
-    logger.add(sys.stdout, colorize=True, format=loguru_format, level='DEBUG')
-    os.makedirs('runs', exist_ok=True)
-    run_dir = utils.auto_index_dir('runs', cfg.train.rundir_name)
-    ckpts_dir = os.path.join(run_dir, 'ckpts')
-    utils.make_new_dirs(ckpts_dir, logger)
 
-    logger.add(os.path.join(run_dir, 'log.txt'), format=loguru_format, level=0, mode='w')
-    logger.info('preparing for training...')
-    with open(os.path.join(run_dir, 'config.yaml'), 'w') as f:
-        f.write(cfg.to_yaml())
+    if local_rank in (-1, 0):
+        logger.add(sys.stdout, colorize=True, format=loguru_format, level='DEBUG')
+        os.makedirs('runs', exist_ok=True)
+        run_dir = utils.auto_index_dir('runs', cfg.train.rundir_name)
+        ckpts_dir = os.path.join(run_dir, 'ckpts')
+        utils.make_new_dirs(ckpts_dir, logger)
 
-    # Tensorboard
-    tb_logdir = os.path.join(run_dir, 'tb_logdir')
-    utils.make_new_dirs(tb_logdir, logger)
-    if cfg.train.resume_tensorboard:
-        try:
-            last_tb_dir = os.path.join(os.path.split(os.path.split(cfg.train.resume_from_ckpt)[0])[0],
-                                       'tb_logdir')
-            for log_file in os.listdir(last_tb_dir):
-                shutil.copy(os.path.join(last_tb_dir, log_file), tb_logdir)
-        except Exception as e:
-            e.args = (*e.args, 'Error when copying tensorboard log')
-            raise e
-        else:
-            logger.info(f'resumed tensorboard log file(s) in {last_tb_dir}')
+        logger.add(os.path.join(run_dir, 'log.txt'), format=loguru_format, level=0, mode='w')
+        logger.info('preparing for training...')
+        with open(os.path.join(run_dir, 'config.yaml'), 'w') as f:
+            f.write(cfg.to_yaml())
 
-    tb_writer = SummaryWriter(tb_logdir)
-    tb_program = program.TensorBoard()
-    tb_program.configure(argv=[None, '--logdir', tb_logdir])
-    tb_url = tb_program.launch()
-    logger.info(f'TensorBoard {tensorboard.__version__} at {tb_url}')
+        # Tensorboard
+        tb_logdir = os.path.join(run_dir, 'tb_logdir')
+        utils.make_new_dirs(tb_logdir, logger)
+        if cfg.train.resume_tensorboard:
+            try:
+                last_tb_dir = os.path.join(os.path.split(os.path.split(cfg.train.resume_from_ckpt)[0])[0],
+                                           'tb_logdir')
+                for log_file in os.listdir(last_tb_dir):
+                    shutil.copy(os.path.join(last_tb_dir, log_file), tb_logdir)
+            except Exception as e:
+                e.args = (*e.args, 'Error when copying tensorboard log')
+                raise e
+            else:
+                logger.info(f'resumed tensorboard log file(s) in {last_tb_dir}')
 
-    train(cfg, logger, tb_writer, ckpts_dir, local_rank)
+        tb_writer = SummaryWriter(tb_logdir)
+        tb_program = program.TensorBoard()
+        tb_program.configure(argv=[None, '--logdir', tb_logdir, '--port', '6008'])
+        tb_url = tb_program.launch()
+        logger.info(f'TensorBoard {tensorboard.__version__} at {tb_url}')
+
+        train(cfg, local_rank, logger, tb_writer, ckpts_dir)
+        
+    else:
+        train(cfg, local_rank, logger)
 
 
-def train(cfg: Config, logger, tb_writer, ckpts_dir, local_rank):
+def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
     # Parallel training
     world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
@@ -89,6 +94,7 @@ def train(cfg: Config, logger, tb_writer, ckpts_dir, local_rank):
         dist.init_process_group(backend='nccl', init_method='env://')
         assert cfg.train.batch_size % world_size == 0, '--batch-size must be multiple of CUDA device count'
         process_batch_size = cfg.train.batch_size // world_size
+
     else:
         process_batch_size = cfg.train.batch_size
     logger.info(f'world_size: {world_size}, global_rank: {global_rank}, local_rank: {local_rank}')
@@ -105,23 +111,26 @@ def train(cfg: Config, logger, tb_writer, ckpts_dir, local_rank):
     try:
         PointCompressor = importlib.import_module(cfg.model_path).PointCompressor
     except Exception as e:
-        raise ImportError(e)
+        raise ImportError(*e.args)
     model = PointCompressor(cfg.model)
     if device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() == 1 and False:  # disabled for now
         model = model.to(device)
         logger.info('using single GPU')
-    elif device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() >= 1:
-        model = torch.nn.DataParallel(model)
+    elif device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() >= 1:  # TODO: debug
+        model = torch.nn.DataParallel(model.to(device), device_ids=[int(i) for i in cfg.train.device.split(',')])
         logger.info('using DataParallel')
-    elif device.type != 'cpu' and global_rank != -1:  # TODO: test DDP mode
+    elif device.type != 'cpu' and global_rank != -1:
         logger.info('using DistributedDataParallel')
-        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+        model = DDP(model.to(device), device_ids=[local_rank], output_device=local_rank)
+        if not cfg.train.shuffle:
+            logger.warning('ignore cfg.train.shuffle == False due to DDP mode')
     else: logger.info('using CPU')
 
     # Initialize dataset
     dataset: torch.utils.data.Dataset = getattr(dataset_module, cfg.dataset.class_name)(cfg.dataset, True)
     dataset_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if global_rank != -1 else None
-    dataloader = torch.utils.data.DataLoader(dataset, process_batch_size, cfg.train.shuffle,
+    dataloader = torch.utils.data.DataLoader(dataset, process_batch_size,
+                                             cfg.train.shuffle if dataset_sampler is None else None,
                                              sampler=dataset_sampler, num_workers=cfg.train.num_workers, drop_last=True)
 
     # Initialize optimizer and scheduler
@@ -137,7 +146,7 @@ def train(cfg: Config, logger, tb_writer, ckpts_dir, local_rank):
     # Resume checkpoint
     start_epoch = 0
     if cfg.train.resume_from_ckpt != '':
-        ckpt = torch.load(cfg.train.resume_from_ckpt)
+        ckpt = torch.load(cfg.train.resume_from_ckpt, map_location=torch.device('cpu'))
         if 'state_dict' in cfg.train.resume_items:
             try:
                 if torch_utils.is_parallel(model):
@@ -150,6 +159,7 @@ def train(cfg: Config, logger, tb_writer, ckpts_dir, local_rank):
 
         if 'start_epoch' in cfg.train.resume_items:
             start_epoch = ckpt['scheduler_state_dict']['last_epoch']
+            scheduler.last_epoch = int(start_epoch)
             logger.info('start training from epoch {}'.format(start_epoch))
 
         if 'scheduler_state_dict' in cfg.train.resume_items:
@@ -198,25 +208,35 @@ def train(cfg: Config, logger, tb_writer, ckpts_dir, local_rank):
                             f'eta(total): {eta} in {expected_total_time}')
 
                 # tensorboard items
-                for item_name, item in loss_dict.items():
-                    if item_name == 'loss':
-                        tb_writer.add_scalar('Train/Loss/total', item.detach().cpu().item(), global_step)
-                    else:
-                        tb_writer.add_scalar('Train/Loss/' + item_name, item, global_step)
-                tb_writer.add_scalar('Train/Learning_rate/', optimizer.param_groups[0]['lr'], global_step)
+                if local_rank in (-1, 0):
+                    tb_writer.add_scalar('Train/Learning_rate', optimizer.param_groups[0]['lr'], global_step)
+                    total_loss_wo_aux = 0
+                    # logger_loss_info = ['loss_wo_aux: ', ]
+                    for item_name, item in loss_dict.items():
+                        if item_name == 'loss':
+                            pass
+                        else:
+                            item_categroy = item_name.rsplit("_", 1)[-1].capitalize()
+                            if item_categroy == 'Loss':
+                                if item_name != 'aux_loss': total_loss_wo_aux += item
+                                # logger_loss_info.append(f' {item_name}: {item:.3f}')
+                            tb_writer.add_scalar(f'Train/{item_categroy}/{item_name}', item, global_step)
+                    tb_writer.add_scalar('Train/Loss/total_wo_aux', total_loss_wo_aux, global_step)
+                    # logger_loss_info.insert(1, f'{total_loss_wo_aux:.3f}')
+                    # logger.info(''.join(logger_loss_info))
 
             global_step += 1
             # break  # TODO
         scheduler.step()
 
         # Model test
-        if cfg.train.test_frequency > 0 and epoch % cfg.train.test_frequency == 0 and global_rank in [-1, 0]:
+        if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and epoch % cfg.train.test_frequency == 0:
             test_items = test(cfg, logger, model)
             for item_name, item in test_items.items():
                 tb_writer.add_scalar('Test/' + item_name, item, len(dataloader) * epoch)
 
         # Save checkpoints
-        if epoch % cfg.train.ckpt_frequency == 0:
+        if local_rank in (-1, 0) and epoch % cfg.train.ckpt_frequency == 0:
             ckpt_name = 'epoch_{}.pt'.format(epoch)
             ckpt = {
                 'state_dict': model.module.state_dict() if torch_utils.is_parallel(model) else model.state_dict(),

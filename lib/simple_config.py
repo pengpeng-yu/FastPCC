@@ -39,6 +39,8 @@ class SimpleConfig:
     def merge_with_dotdict(self, dotdict: Dict):
         for keys_seq, var in dotdict.items():
             assert type(keys_seq) == str, f'unexpected arg format: "{keys_seq: var}"'
+            if keys_seq.startswith('--'): keys_seq = keys_seq[2:]
+            keys_seq.replace('-', '_')
 
             keys = keys_seq.split('.')
             sub_obj = self
@@ -58,12 +60,11 @@ class SimpleConfig:
     def merge_with_dotlist(self, dotlist: List[str]):
         dotdict = {}
         for arg in dotlist:
+            arg = arg.replace('==', '=')
             try:
                 keys_seq, var = arg.split('=')
             except Exception as e:
                 raise ValueError(f'unexpected arg format: "{arg}"')
-
-            if keys_seq.startswith('--'): keys_seq = keys_seq[2:]
 
             if var[0] == '[' and var[-1] == ']':
                 dotdict[keys_seq] = [self.format_str(i) for i in var[1:-1].split(',')]

@@ -15,22 +15,6 @@ def pc_normalize(pc):
     pc = pc / m
     return pc
 
-def square_distance(src, dst):
-    """
-    Calculate Euclid distance between each two points.
-    src^T * dst = xn * xm + yn * ym + zn * zm；
-    sum(src^2, dim=-1) = xn*xn + yn*yn + zn*zn;
-    sum(dst^2, dim=-1) = xm*xm + ym*ym + zm*zm;
-    dist = (xn - xm)^2 + (yn - ym)^2 + (zn - zm)^2
-         = sum(src**2,dim=-1)+sum(dst**2,dim=-1)-2*src^T*dst
-    Input:
-        src: source points, [B, N, C]
-        dst: target points, [B, M, C]
-    Output:
-        dist: per-point square distance, [B, N, M]
-    """
-    return torch.sum((src[:, :, None] - dst[:, None]) ** 2, dim=-1)
-
 
 def index_points(points, idx):
     """
@@ -116,8 +100,8 @@ def sample_and_group(nsample, sample_method, group_radius, ngroup, xyz, points_f
         raise NotImplementedError
 
     if knn:
-        dists = square_distance(sampled_xyz, xyz)  # B x npoint x N
-        grouped_idx = dists.argsort()[:, :, :ngroup]  # B x npoint x K
+        dists = torch.cdist(sampled_xyz, xyz)  # B x npoint x N
+        grouped_idx = dists.topk(ngroup, dim=-1, largest=False, sorted=False)[1]  # argsort()[:, :, :ngroup]  # B x npoint x K
     else:
         grouped_idx = query_ball_point(group_radius, ngroup, xyz, sampled_xyz)
     torch.cuda.empty_cache()
@@ -150,7 +134,6 @@ class PointNetSetAbstraction(nn.Module):
         last_channel = in_channels
         for out_channel in mlp_channels:
             self.mlps.append(nn.Linear(last_channel, out_channel))
-            # TODO: batchnorm
             self.mlps.append(nn.ReLU(inplace=True))
             last_channel = out_channel
         self.mlps = nn.Sequential(*self.mlps)
@@ -164,6 +147,7 @@ class PointNetSetAbstraction(nn.Module):
             sampled_xyz: sampled points position data, [B, S, C]
             new_points_concat: sample points feature data, [B, S, D']
         """
+        # TODO: recompute knn_idx to avoid duplicated computation
         sampled_xyz, sampled_points = sample_and_group(self.nsample, self.sample_method, self.group_radius, self.ngroup,
                                                        xyz, points_fea, knn=self.knn)
         # sampled_xyz: sampled points position data, [B, npoint, C]

@@ -47,7 +47,7 @@ def test(cfg: Config, logger=None, model: torch.nn.Module=None):
         try:
             PointCompressor = importlib.import_module(cfg.model_path).PointCompressor
         except Exception as e:
-            raise ImportError
+            raise ImportError(*e.args)
         model: torch.nn.Module = PointCompressor(cfg.model)
         model.load_state_dict(torch.load(cfg.test.weights_from_ckpt)['state_dict'])
         device = torch.device(cfg.test.device)
@@ -59,10 +59,11 @@ def test(cfg: Config, logger=None, model: torch.nn.Module=None):
     model.entropy_bottleneck.update()
 
     for batch_idx, data in enumerate(dataloader):
-        data = data.to(device)
-        test_res = model(data)
-        # break  # TODO
-        # TODO: compute loss and compression rate
+        data = data.to(device, non_blocking=True)
+        with torch.no_grad():
+            test_res = model(data)
+            break  # TODO
+            # TODO: compute loss and compression rate
 
     return {'bpp': 0,
             'point2point_loss': 0,

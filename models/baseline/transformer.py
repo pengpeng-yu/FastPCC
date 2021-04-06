@@ -1,11 +1,11 @@
-from lib.pointnet_utils import index_points, square_distance
+from lib.pointnet_utils import index_points
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_points, d_model, nneighbor) -> None:
+    def __init__(self, d_in, d_model, nneighbor, d_out=None) -> None:
         """
         d_points: input channels num
         d_model: block channels num
@@ -18,7 +18,7 @@ class TransformerBlock(nn.Module):
             nn.Linear(d_model, d_model)
         )
 
-        self.fc1 = nn.Linear(d_points, d_model)
+        self.fc1 = nn.Linear(d_in, d_model)
         self.w_qs = nn.Linear(d_model, d_model, bias=False)
         self.w_ks = nn.Linear(d_model, d_model, bias=False)
         self.w_vs = nn.Linear(d_model, d_model, bias=False)
@@ -29,14 +29,15 @@ class TransformerBlock(nn.Module):
             nn.Linear(d_model, d_model)
         )
 
-        self.fc2 = nn.Linear(d_model, d_points)
+        if d_out is None: d_out = d_in
+        self.fc2 = nn.Linear(d_model, d_out)
+        self.shortout_fc = nn.Linear(d_in, d_out)
         
-    # xyz: b, n, 3, features: b, n, f
+    # xyz: b, n, 3, features: b, n, d_in
     def forward(self, xyz, features, require_attn=False):
-        dists = square_distance(xyz, xyz)
-        knn_idx = dists.argsort()[:, :, :self.k]  # knn_idx b, n, k
+        knn_idx = torch.cdist(xyz, xyz).topk(self.k, dim=-1, largest=False, sorted=False)[1]  # knn_idx b, n, k  # TODO: recompute knn_idx to avoid duplicated computation
         knn_xyz = index_points(xyz, knn_idx)  # knn_xyz: b, n, k, 3
-        pos_enc = self.fc_delta(xyz[:, :, None, :] - knn_xyz)  # pos_enc: b, n, k, d_model
+        pos_enc = self.fc_delta(xyz[:, :, None, :] - knn_xyz)  # pos_enc: b, n, k, d_model  # TODO: pos_encoding
 
         shortcut = features
         features = self.fc1(features)  # features: b, n, d_model
@@ -48,9 +49,9 @@ class TransformerBlock(nn.Module):
         attn = F.softmax(attn / np.sqrt(key.size(-1)), dim=-2)  # attn: b, n, k, d_model
         
         res = torch.einsum('bmnf,bmnf->bmf', attn, value + pos_enc)  # (attn * (value + pos_enc)).sum(dim=2) res: b, n, d_model
-        res = self.fc2(res) + shortcut  # res: b, n, f
+        res = self.fc2(res) + self.shortout_fc(shortcut)  # res: b, n, d_out
         if require_attn:
-            return res, attn  # res: b, n, f  attn: b, n, k, d_model
+            return res, attn  # res: b, n, d_out  attn: b, n, k, d_model
         else:
             return res
 
@@ -58,10 +59,8 @@ class TransformerBlock(nn.Module):
 def main_t():
     input_xyz = torch.rand(16, 1024, 3)  # B, N, C
     input_feature = torch.rand(16, 1024, 32)  # B, N, C
-    transfomer_block = TransformerBlock(d_points=32, d_model=512, nneighbor=16)
-    output = transfomer_block(input_xyz, input_feature)
-    points_fea = output[0]
-    assert points_fea.shape == input_feature.shape
+    transfomer_block = TransformerBlock(d_in=32, d_model=512, nneighbor=16, d_out=64)
+    output_fea = transfomer_block(input_xyz, input_feature)
     print('Done')
 
 
