@@ -21,7 +21,7 @@ def main():
         cfg.merge_with_dotlist(sys.argv[1:])
 
     os.makedirs('runs', exist_ok=True)
-    run_dir = utils.auto_index_dir('runs', cfg.test.rundir_name)
+    run_dir = utils.autoindex_obj(os.path.join('runs', cfg.test.rundir_name))
     os.makedirs(run_dir, exist_ok=False)
 
     with open(os.path.join(run_dir, 'config.yaml'), 'w') as f:
@@ -49,19 +49,27 @@ def test(cfg: Config, logger=None, model: torch.nn.Module=None):
         except Exception as e:
             raise ImportError(*e.args)
         model: torch.nn.Module = PointCompressor(cfg.model)
-        model.load_state_dict(torch.load(cfg.test.weights_from_ckpt)['state_dict'])
-        device = torch.device(cfg.test.device)
+        ckpt_path = utils.autoindex_obj(cfg.test.weights_from_ckpt)
+        logger.info(f'loading weights from {ckpt_path}')
+        model.load_state_dict(torch.load(ckpt_path, map_location=torch.device('cpu'))['state_dict'])
+        device = torch.device(cfg.test.device if cfg.test.device == 'cpu' or cfg.test.device.startswith('cuda')
+                              else f'cuda:{cfg.test.device}')
         model.to(device)
         model.eval()
 
     if torch_utils.is_parallel(model):
         model = model.module
-    model.entropy_bottleneck.update()
+    if hasattr(model, 'entropy_bottleneck'):
+        model.entropy_bottleneck.update()
+    else:
+        logger.warning('no entropy_bottleneck was found in model')
 
     for batch_idx, data in enumerate(dataloader):
         data = data.to(device, non_blocking=True)
         with torch.no_grad():
-            test_res = model(data)
+            model_output = model(data)
+            torch.save(data, 'runs/train_-1/data.pt')
+            torch.save(model_output['decoder_output'], 'runs/train_-1/decoder_output.pt')
             break  # TODO
             # TODO: compute loss and compression rate
 

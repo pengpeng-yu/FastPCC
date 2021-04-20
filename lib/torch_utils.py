@@ -102,3 +102,120 @@ def profile(x, ops, n=100, device=None):
 
 def is_parallel(model):
     return type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
+
+
+class MLPBlock(nn.Module):
+    """
+    if version == 'linear':
+        input: (N, L, C_in)
+        output: (N, L, C_out)
+    elif version == 'conv':
+        input: (N, C_in, L)
+        output: (N, C_out, L)
+    """
+    def __init__(self, in_channels, out_channels, activation='leaky_relu(0.2)', batchnorm='nn.bn1d', version='linear'):
+        super(MLPBlock, self).__init__()
+        assert version in ['linear', 'conv']
+        assert activation is None or activation.split('(', 1)[0] in ['relu', 'leaky_relu']
+        assert batchnorm in ['nn.bn1d', 'custom', None]
+
+        if batchnorm == 'nn.bn1d':
+            self.bn = nn.BatchNorm1d(out_channels)
+        elif batchnorm == 'custom':
+            assert version == 'linear'
+            self.bn = BatchNorm1dChnlLast(out_channels)
+        elif batchnorm is None:
+            self.bn = None
+        else: raise NotImplementedError
+
+        if version == 'linear':
+            self.mlp = nn.Linear(in_channels, out_channels, bias=self.bn is None)
+        elif version == 'conv':
+            self.mlp = nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=self.bn is None)
+
+        if activation is None:
+            self.activation = None
+        elif activation == 'relu':
+            self.activation = nn.ReLU(inplace=True)
+        elif activation.startswith('leaky_relu'):
+            self.activation = nn.LeakyReLU(negative_slope=float(activation.split('(', 1)[1].split(')', 1)[0]), inplace=True)
+        else: raise NotImplementedError
+
+        self.version = version
+
+    def forward(self, x):
+        if self.version == 'linear':
+            x = self.mlp(x)
+            if isinstance(self.bn, nn.BatchNorm1d):
+                x = x.permute(0, 2, 1)
+                x = self.bn(x)
+                x = x.permute(0, 2, 1)
+            else:
+                x = self.bn(x)
+            if self.activation: x = self.activation(x)
+            return x
+
+        elif self.version == 'conv':
+            x = self.mlp(x)
+            if self.bn is not None: x = self.bn(x)
+            if self.activation: x = self.activation(x)
+            return x
+
+
+class BatchNorm1dChnlLast(nn.Module):
+    # very slow
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
+        super(BatchNorm1dChnlLast, self).__init__()
+        self.num_features = num_features
+        self.eps = eps
+        self.momentum = momentum
+        self.affine = affine
+        self.track_running_stats = track_running_stats
+        if self.affine:
+            self.weight = nn.Parameter(torch.Tensor(num_features))
+            self.bias = nn.Parameter(torch.Tensor(num_features))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+        if self.track_running_stats:
+            self.register_buffer('running_mean', torch.zeros(num_features))
+            self.register_buffer('running_var', torch.ones(num_features))
+        else:
+            self.register_parameter('running_mean', None)
+            self.register_parameter('running_var', None)
+        self.reset_parameters()
+
+    def reset_running_stats(self) -> None:
+        if self.track_running_stats:
+            self.running_mean.zero_()
+            self.running_var.fill_(1)
+
+    def reset_parameters(self) -> None:
+        self.reset_running_stats()
+        if self.affine:
+            nn.init.ones_(self.weight)
+            nn.init.zeros_(self.bias)
+
+    def forward(self, x):
+        if self.training:
+            var, mean = torch.var_mean(x, dim=[0, 1], keepdim=True, unbiased=False)
+            x = (x - mean) / torch.sqrt(var + self.eps)
+            if self.track_running_stats:
+                self.running_mean = self.running_mean * (1 - self.momentum) + mean * self.momentum
+                self.running_var = self.running_var * (1 - self.momentum) + var * self.momentum
+
+        else:
+            if self.track_running_stats:
+                x = (x - self.running_mean) / torch.sqrt(self.running_var + self.eps)
+            else:
+                var, mean = torch.var_mean(x, dim=[0, 1], keepdim=True, unbiased=False)
+                x = (x - mean) / torch.sqrt(var + self.eps)
+
+        if self.affine:
+            x = self.weight * x + self.bias
+        return x
+
+
+if __name__ == '__main__':
+    pass
+

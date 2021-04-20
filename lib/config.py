@@ -28,11 +28,27 @@ class TrainConfig(SimpleConfig):
     ckpt_frequency: int = 2  # (epochs)
     test_frequency: int = 0  # (epochs) 0 means no test in training phase
 
+    def merge_setattr(self, key, value):
+        if key == 'resume_items':
+            if 'all' in value:
+                value = ('start_epoch', 'state_dict', 'optimizer_state_dict', 'scheduler_state_dict')
+        super().merge_setattr(key, value)
+
+    def check_local_value(self):
+        if 'scheduler_state_dict' in self.resume_items:
+            assert 'start_epoch' in self.resume_items
+        all_resume_items = ('start_epoch', 'state_dict', 'optimizer_state_dict', 'scheduler_state_dict')
+        for item in self.resume_items:
+            assert item in all_resume_items
+        if self.resume_tensorboard:
+            assert self.resume_from_ckpt != ''
+        assert self.ckpt_frequency > 0
+
 
 @dataclass
 class TestConfig(SimpleConfig):
     rundir_name: str = 'test_<autoindex>'
-    device: str = 'cuda'  # 'cpu' or 'cuda'(only single gpu supported)
+    device: str = 'cuda:3'  # 'cpu' or 'cuda'(only single gpu supported)
     batch_size: int = 1
     num_workers: int = 4
     weights_from_ckpt: str = ''
@@ -51,26 +67,29 @@ class DatasetConfig(SimpleConfig):
 
 @dataclass
 class Config(SimpleConfig):
-    model_path: str = 'models.exp0'  # require model_path.ModelConfig and model_path.PointCompressor exist
+    model_path: str = 'models.baseline'  # model_path.ModelConfig and model_path.PointCompressor are required
     model: SimpleConfig = None
     train: TrainConfig = TrainConfig()
     test: TestConfig = TestConfig()
     dataset: DatasetConfig = DatasetConfig()
 
     def __post_init__(self):
-        try:
-            self.model = importlib.import_module(self.model_path).ModelConfig()
-        except Exception as e:
-            raise ImportError(*e.args)
+        self.import_model_config()
         self.check()
 
-    def check_value(self):
-        for item in self.train.resume_items:
-            assert item in ('start_epoch', 'state_dict', 'optimizer_state_dict', 'scheduler_state_dict')
-        if 'scheduler_state_dict' in self.train.resume_items:
-            assert 'start_epoch' in self.train.resume_items
+    def merge_setattr(self, key, value):
+        if key == 'model_path':
+            super().merge_setattr(key, value)
+            self.import_model_config()
+        else: super().merge_setattr(key, value)
+
+    def import_model_config(self):
+        try:
+            self.__dict__['model'] = importlib.import_module(self.model_path).ModelConfig()
+        except Exception as e:
+            raise ImportError(*e.args)
+
+    def check_local_value(self):
         if hasattr(self.model, 'input_points_num') and hasattr(self.dataset, 'input_points_num'):
             assert self.model.input_points_num == self.dataset.input_points_num
-        if self.train.resume_tensorboard:
-            assert self.train.resume_from_ckpt != ''
-        assert self.train.ckpt_frequency > 0
+

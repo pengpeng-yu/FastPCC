@@ -132,10 +132,10 @@ class PointNetSetAbstraction(nn.Module):
         self.attn_xyz = attn_xyz
         self.mlps = []
         last_channel = in_channels
-        for out_channel in mlp_channels:
-            self.mlps.append(nn.Linear(last_channel, out_channel))
+        for channels in mlp_channels:
+            self.mlps.append(nn.Linear(last_channel, channels))
             self.mlps.append(nn.ReLU(inplace=True))
-            last_channel = out_channel
+            last_channel = channels
         self.mlps = nn.Sequential(*self.mlps)
 
     def forward(self, xyz, points_fea):
@@ -147,7 +147,6 @@ class PointNetSetAbstraction(nn.Module):
             sampled_xyz: sampled points position data, [B, S, C]
             new_points_concat: sample points feature data, [B, S, D']
         """
-        # TODO: recompute knn_idx to avoid duplicated computation
         sampled_xyz, sampled_points = sample_and_group(self.nsample, self.sample_method, self.group_radius, self.ngroup,
                                                        xyz, points_fea, knn=self.knn)
         # sampled_xyz: sampled points position data, [B, npoint, C]
@@ -157,7 +156,7 @@ class PointNetSetAbstraction(nn.Module):
 
         sampled_points = self.mlps(sampled_points)
 
-        # TODO: AttentivePooling
+        # TODO: AttentivePooling?
         if self.attn_xyz:
             sampled_points, neighbor_index = torch.max(sampled_points, 2)
 

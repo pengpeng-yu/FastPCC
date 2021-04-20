@@ -45,10 +45,11 @@ def main():
     loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan>  <level>{message}</level>'
 
     if local_rank in (-1, 0):
-        logger.add(sys.stdout, colorize=True, format=loguru_format, level='DEBUG')
+        logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
         os.makedirs('runs', exist_ok=True)
-        run_dir = utils.auto_index_dir('runs', cfg.train.rundir_name)
+        run_dir = utils.autoindex_obj(os.path.join('runs', cfg.train.rundir_name))
         ckpts_dir = os.path.join(run_dir, 'ckpts')
+        utils.make_new_dirs(run_dir, logger)
         utils.make_new_dirs(ckpts_dir, logger)
 
         logger.add(os.path.join(run_dir, 'log.txt'), format=loguru_format, level=0, mode='w')
@@ -61,8 +62,7 @@ def main():
         utils.make_new_dirs(tb_logdir, logger)
         if cfg.train.resume_tensorboard:
             try:
-                last_tb_dir = os.path.join(os.path.split(os.path.split(cfg.train.resume_from_ckpt)[0])[0],
-                                           'tb_logdir')
+                last_tb_dir = os.path.join(os.path.split(os.path.split(cfg.train.resume_from_ckpt)[0])[0], 'tb_logdir')
                 for log_file in os.listdir(last_tb_dir):
                     shutil.copy(os.path.join(last_tb_dir, log_file), tb_logdir)
             except Exception as e:
@@ -73,8 +73,17 @@ def main():
 
         tb_writer = SummaryWriter(tb_logdir)
         tb_program = program.TensorBoard()
-        tb_program.configure(argv=[None, '--logdir', tb_logdir, '--port', '6008'])
-        tb_url = tb_program.launch()
+        tb_ports = ['6006', '6007', '6008']
+        for tb_port in tb_ports:
+            try:
+                tb_program.configure(argv=[None, '--logdir', tb_logdir, '--port', tb_port])
+                tb_url = tb_program.launch()
+            except Exception as e:
+                logger.warning(f'fail to launch Tensorboard at http://localhost:{int(tb_port)}')
+            else: break
+        else:
+            logger.error(f'fail to launch Tensorboard at port{tb_ports}')
+            return
         logger.info(f'TensorBoard {tensorboard.__version__} at {tb_url}')
 
         train(cfg, local_rank, logger, tb_writer, ckpts_dir)
@@ -113,11 +122,11 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
     except Exception as e:
         raise ImportError(*e.args)
     model = PointCompressor(cfg.model)
-    if device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() == 1 and False:  # disabled for now
+    if device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() == 1 and False:  # disabled
         model = model.to(device)
         logger.info('using single GPU')
     elif device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() >= 1:  # TODO: debug
-        model = torch.nn.DataParallel(model.to(device), device_ids=[int(i) for i in cfg.train.device.split(',')])
+        model = torch.nn.DataParallel(model.to(device))
         logger.info('using DataParallel')
     elif device.type != 'cpu' and global_rank != -1:
         logger.info('using DistributedDataParallel')
@@ -146,7 +155,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
     # Resume checkpoint
     start_epoch = 0
     if cfg.train.resume_from_ckpt != '':
-        ckpt = torch.load(cfg.train.resume_from_ckpt, map_location=torch.device('cpu'))
+        ckpt = torch.load(utils.autoindex_obj(cfg.train.resume_from_ckpt), map_location=torch.device('cpu'))
         if 'state_dict' in cfg.train.resume_items:
             try:
                 if torch_utils.is_parallel(model):
@@ -210,20 +219,16 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
                 # tensorboard items
                 if local_rank in (-1, 0):
                     tb_writer.add_scalar('Train/Learning_rate', optimizer.param_groups[0]['lr'], global_step)
-                    total_loss_wo_aux = 0
-                    # logger_loss_info = ['loss_wo_aux: ', ]
+                    total_wo_aux = 0.0
                     for item_name, item in loss_dict.items():
                         if item_name == 'loss':
                             pass
                         else:
                             item_categroy = item_name.rsplit("_", 1)[-1].capitalize()
-                            if item_categroy == 'Loss':
-                                if item_name != 'aux_loss': total_loss_wo_aux += item
-                                # logger_loss_info.append(f' {item_name}: {item:.3f}')
                             tb_writer.add_scalar(f'Train/{item_categroy}/{item_name}', item, global_step)
-                    tb_writer.add_scalar('Train/Loss/total_wo_aux', total_loss_wo_aux, global_step)
-                    # logger_loss_info.insert(1, f'{total_loss_wo_aux:.3f}')
-                    # logger.info(''.join(logger_loss_info))
+                            if item_categroy == 'Loss' and item_name != 'aux_loss':
+                                total_wo_aux += loss_dict[item_name]
+                    tb_writer.add_scalar('Train/Loss/total_wo_aux', total_wo_aux, global_step)
 
             global_step += 1
             # break  # TODO

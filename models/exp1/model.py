@@ -10,51 +10,24 @@ from models.baseline.transformer import TransformerBlock
 from models.baseline.model_config import ModelConfig
 
 
-class TransitionDown(nn.Module):
-    def __init__(self, nsample, sample_method):
-        super(TransitionDown, self).__init__()
-        self.nsample = nsample
-        self.sample_method = sample_method
-
-    def forward(self, x):
-        xyz, points_fea, *args = x
-        if self.sample_method == 'uniform':
-            return xyz[:, : self.nsample], points_fea[:, : self.nsample], *args
-        else:
-            raise NotImplementedError
-
-    def __repr__(self):
-        return f'TransitionDown({self.nsample}, {self.sample_method})'
-
-
 class PointCompressor(nn.Module):
     def __init__(self, cfg: ModelConfig) -> None:
         super().__init__()
         self.cfg = cfg
 
-        self.encoder = [TransformerBlock(3, 24, cfg.neighbor_num, True),
-                        TransformerBlock(24, 64, cfg.neighbor_num, False),
-                        TransitionDown(cfg.input_points_num // 2, 'uniform'),
-                        TransformerBlock(64, 128, cfg.neighbor_num, False),
-                        TransitionDown(cfg.input_points_num // 4, 'uniform'),
-                        TransformerBlock(128, 256, cfg.neighbor_num, False),
-                        TransitionDown(cfg.input_points_num // 8, 'uniform'),
-                        TransformerBlock(256, 512, cfg.neighbor_num, False),
-                        TransitionDown(cfg.input_points_num // 16, 'uniform'),
-                        TransformerBlock(512, 1024, cfg.neighbor_num, False),
-                        TransitionDown(cfg.input_points_num // 32, 'uniform'),
-                        TransformerBlock(1024, 1024, cfg.neighbor_num, False)]
+        self.encoder = [TransformerBlock(3, 32, cfg.neighbor_num, True),
+                        TransformerBlock(32, 64, cfg.neighbor_num, False),
+                        TransformerBlock(64, 128, cfg.neighbor_num, False),]
         self.encoder = nn.Sequential(*self.encoder)
-        self.mlp_enc_out = MLPBlock(1024, 1024,  activation=None, batchnorm='nn.bn1d')
-        self.encoded_points_num = cfg.input_points_num // 32
-        self.encoded_points_dim = 1024
+        self.mlp_enc_out = MLPBlock(128, 128,  activation=None, batchnorm='nn.bn1d')
+        self.encoded_points_num = cfg.input_points_num
+        self.encoded_points_dim = 128
 
         self.entropy_bottleneck = compressai.entropy_models.EntropyBottleneck(self.encoded_points_dim)
 
-        self.decoder = [TransformerBlock(1024, 512, cfg.neighbor_num, True),
-                        TransformerBlock(512, 256, cfg.neighbor_num, True),
-                        TransformerBlock(256, 96, cfg.neighbor_num, False)]
-        self.mlp_dec_out = MLPBlock(96, 96, activation=None, batchnorm='nn.bn1d')
+        self.decoder = [TransformerBlock(128, 64, cfg.neighbor_num, False),
+                        TransformerBlock(64, 32, cfg.neighbor_num, False)]
+        self.mlp_dec_out = MLPBlock(32, 3, activation=None, batchnorm='nn.bn1d')
         self.decoder = nn.Sequential(*self.decoder)
         self.init_weights()
 
