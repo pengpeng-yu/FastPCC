@@ -4,6 +4,5 @@ __pycache__/
 .DS_Store
 
 runs/*
-dataset/*
+datasets/*
 weights/*
-config/*

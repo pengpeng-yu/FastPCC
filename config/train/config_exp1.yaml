@@ -1,8 +1,8 @@
 model_path: models.exp1
 train:
-  rundir_name: 'train_-1'
-  device: '0,1,2'
-  batch_size: 24
+  rundir_name: 'train_<autoindex>'
+  device: '0,1'
+  batch_size: 16
   epochs: 200
   ckpt_frequency: 9
   lr_step_size: 30

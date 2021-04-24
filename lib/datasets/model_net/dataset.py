@@ -2,7 +2,7 @@ import os
 import numpy as np
 import torch
 import torch.utils.data
-from lib.config import DatasetConfig
+from .dataset_config import DatasetConfig
 
 
 class ModelNetDataset(torch.utils.data.Dataset):

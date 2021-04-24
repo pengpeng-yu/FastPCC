@@ -9,7 +9,6 @@ import torch.utils.data
 from lib import torch_utils
 from lib.config import Config
 from lib import utils
-from lib import dataset as dataset_module
 
 def main():
     # Initialize config
@@ -31,7 +30,11 @@ def main():
 
 
 def test(cfg: Config, logger=None, model: torch.nn.Module=None):
-    dataset: torch.utils.data.Dataset = getattr(dataset_module, cfg.dataset.class_name)(cfg.dataset, False)
+    try:
+        Dataset = importlib.import_module(cfg.dataset_path).Dataset
+    except Exception as e:
+        raise ImportError(*e.args)
+    dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, True)
     dataloader = torch.utils.data.DataLoader(dataset, cfg.test.batch_size, shuffle=False,
                                              num_workers=cfg.test.num_workers, drop_last=False)
     if model is not None:
@@ -45,10 +48,10 @@ def test(cfg: Config, logger=None, model: torch.nn.Module=None):
     else:
         from loguru import logger
         try:
-            PointCompressor = importlib.import_module(cfg.model_path).PointCompressor
+            Model = importlib.import_module(cfg.model_path).Model
         except Exception as e:
             raise ImportError(*e.args)
-        model: torch.nn.Module = PointCompressor(cfg.model)
+        model = Model(cfg.model)
         ckpt_path = utils.autoindex_obj(cfg.test.weights_from_ckpt)
         logger.info(f'loading weights from {ckpt_path}')
         model.load_state_dict(torch.load(ckpt_path, map_location=torch.device('cpu'))['state_dict'])
@@ -68,8 +71,8 @@ def test(cfg: Config, logger=None, model: torch.nn.Module=None):
         data = data.to(device, non_blocking=True)
         with torch.no_grad():
             model_output = model(data)
-            torch.save(data, 'runs/train_-1/data.pt')
-            torch.save(model_output['decoder_output'], 'runs/train_-1/decoder_output.pt')
+            torch.save(data, 'runs/data.pt')
+            torch.save(model_output['decoder_output'], 'runs/decoder_output.pt')
             break  # TODO
             # TODO: compute loss and compression rate
 

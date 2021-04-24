@@ -1,16 +1,18 @@
 from copy import deepcopy
 from typing import List, Tuple, Dict
 from dataclasses import dataclass
+import importlib
 import yaml
 
 
 class SimpleConfig:
     def __init__(self):
         super(SimpleConfig, self).__init__()
+        self.auto_import()
 
     def check(self):
         """
-        Called by a series of merge_xxx func. You can also call it in __init__().
+        Called by a series of merge_xxx func to check all the atributes. You can also call it in __init__().
         """
         self.check_type()
         self.check_value()
@@ -53,8 +55,25 @@ class SimpleConfig:
             else:
                 raise AssertionError(f'unexpected type {type(value)} of attirbute {key}')
 
+    def auto_import(self, keys=None):
+        if keys is None: keys = self.__dict__
+        elif isinstance(keys, str):
+            keys = [keys]
+
+        for key in keys:
+            if isinstance(key, str) and key.endswith('_path'):
+                target_key = key[:-len('_path')]
+                if target_key in self.__dict__:
+                    assert issubclass(self.__annotations__[target_key], SimpleConfig)
+                    try:
+                        self.__dict__[target_key] = importlib.import_module(self.__dict__[key]).Config()
+                        assert issubclass(type(self.__dict__[target_key]), SimpleConfig)
+                    except Exception as e:
+                        raise ImportError(*e.args)
+
     def merge_setattr(self, key, value):
         self.__dict__[key] = value
+        self.auto_import(key)
 
     def merge_with_dotdict(self, dotdict: Dict):
         """

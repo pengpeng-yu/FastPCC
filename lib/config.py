@@ -55,41 +55,18 @@ class TestConfig(SimpleConfig):
 
 
 @dataclass
-class DatasetConfig(SimpleConfig):
-    class_name: str = 'ModelNetDataset'
-    root: str = 'dataset/modelnet40_normal_resampled'
-    train_filelist_path: str = 'train_list.txt'
-    test_filelist_path: str = 'test_list.txt'
-    input_points_num: int = 8192
-    sample_method: str = 'uniform'
-    with_normal_channel: bool = False
-
-
-@dataclass
 class Config(SimpleConfig):
-    model_path: str = 'models.baseline'  # model_path.ModelConfig and model_path.PointCompressor are required
+    model_path: str = 'models.baseline'  # model_path.Config and model_path.Model are required
     model: SimpleConfig = None
     train: TrainConfig = TrainConfig()
     test: TestConfig = TestConfig()
-    dataset: DatasetConfig = DatasetConfig()
+    dataset_path: str = 'lib.datasets.model_net'  # dataset_path.Dataset and dataset_path.Config are required
+    dataset: SimpleConfig = None
 
     def __post_init__(self):
-        self.import_model_config()
+        self.auto_import()
         self.check()
-
-    def merge_setattr(self, key, value):
-        if key == 'model_path':
-            super().merge_setattr(key, value)
-            self.import_model_config()
-        else: super().merge_setattr(key, value)
-
-    def import_model_config(self):
-        try:
-            self.__dict__['model'] = importlib.import_module(self.model_path).ModelConfig()
-        except Exception as e:
-            raise ImportError(*e.args)
 
     def check_local_value(self):
         if hasattr(self.model, 'input_points_num') and hasattr(self.dataset, 'input_points_num'):
             assert self.model.input_points_num == self.dataset.input_points_num
-

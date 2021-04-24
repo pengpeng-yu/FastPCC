@@ -1,6 +1,6 @@
 model_path: models.baseline
 train:
-  rundir_name: 'train_-1'
+  rundir_name: 'train_<autoindex>'
   device: '0,1'
   batch_size: 64
   epochs: 200

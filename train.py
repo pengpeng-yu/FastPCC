@@ -20,7 +20,6 @@ from test import test
 from lib.config import Config
 from lib import utils
 from lib import torch_utils
-from lib import dataset as dataset_module
 
 
 def main():
@@ -62,7 +61,7 @@ def main():
         utils.make_new_dirs(tb_logdir, logger)
         if cfg.train.resume_tensorboard:
             try:
-                last_tb_dir = os.path.join(os.path.split(os.path.split(cfg.train.resume_from_ckpt)[0])[0], 'tb_logdir')
+                last_tb_dir = os.path.join(os.path.dirname(os.path.dirname(cfg.train.resume_from_ckpt)), 'tb_logdir')
                 for log_file in os.listdir(last_tb_dir):
                     shutil.copy(os.path.join(last_tb_dir, log_file), tb_logdir)
             except Exception as e:
@@ -118,14 +117,19 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
 
     # Initialize model
     try:
-        PointCompressor = importlib.import_module(cfg.model_path).PointCompressor
+        Model = importlib.import_module(cfg.model_path).Model
     except Exception as e:
         raise ImportError(*e.args)
-    model = PointCompressor(cfg.model)
+    model = Model(cfg.model)
     if device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() == 1 and False:  # disabled
         model = model.to(device)
         logger.info('using single GPU')
-    elif device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() >= 1:  # TODO: debug
+    elif device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() >= 1:
+        if torch.cuda.device_count() > 1:
+            logger.error('These are bugs with DP mode when device_count() > 1 due to the output format of model. '
+                         'Please use DDP')
+            logger.error('terminated')
+            return
         model = torch.nn.DataParallel(model.to(device))
         logger.info('using DataParallel')
     elif device.type != 'cpu' and global_rank != -1:
@@ -136,7 +140,11 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
     else: logger.info('using CPU')
 
     # Initialize dataset
-    dataset: torch.utils.data.Dataset = getattr(dataset_module, cfg.dataset.class_name)(cfg.dataset, True)
+    try:
+        Dataset = importlib.import_module(cfg.dataset_path).Dataset
+    except Exception as e:
+        raise ImportError(*e.args)
+    dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, True)
     dataset_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if global_rank != -1 else None
     dataloader = torch.utils.data.DataLoader(dataset, process_batch_size,
                                              cfg.train.shuffle if dataset_sampler is None else None,

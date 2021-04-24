@@ -6,8 +6,8 @@ from compressai.models.utils import update_registered_buffers
 
 from lib import loss_function
 from lib.torch_utils import MLPBlock
-from models.baseline.transformer import TransformerBlock
-from models.baseline.model_config import ModelConfig
+from models.exp1.transformer import TransformerBlock
+from models.exp1.model_config import ModelConfig
 
 
 class PointCompressor(nn.Module):
