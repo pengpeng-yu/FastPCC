@@ -7,7 +7,7 @@ from compressai.models.utils import update_registered_buffers
 from lib import loss_function
 from lib.pointnet_utils import index_points
 from lib.torch_utils import MLPBlock
-from models.exp4.model_config import ModelConfig
+from models.exp6.model_config import ModelConfig
 
 
 class LocalFeatureAggregation(nn.Module):
@@ -31,7 +31,6 @@ class LocalFeatureAggregation(nn.Module):
 
         if ori_relative_feature is None or neighbors_idx is None:
             feature, ori_relative_feature, neighbors_idx = self.gather_neighbors(xyz, feature)
-            torch.cuda.empty_cache()
         else:
             feature = index_points(feature, neighbors_idx)
 
@@ -93,33 +92,34 @@ class PointCompressor(nn.Module):
                                LocalFeatureAggregation(48, cfg.neighbor_num, 24, 64, True),
                                LocalFeatureAggregation(64, cfg.neighbor_num, 24, 64, False),
                                TransitionDown(cfg.input_points_num // 2, 'uniform'),
-                               LocalFeatureAggregation(64, cfg.neighbor_num, 24, 128, True),
+                               LocalFeatureAggregation(64, cfg.neighbor_num, 32, 64, True),
+                               LocalFeatureAggregation(64, cfg.neighbor_num, 32, 128, True),
                                LocalFeatureAggregation(128, cfg.neighbor_num, 32, 128, False),
                                TransitionDown(cfg.input_points_num // 4, 'uniform'),
+                               LocalFeatureAggregation(128, cfg.neighbor_num, 32, 128, True),
                                LocalFeatureAggregation(128, cfg.neighbor_num, 32, 256, True),
                                LocalFeatureAggregation(256, cfg.neighbor_num, 32, 256, False),
                                TransitionDown(cfg.input_points_num // 8, 'uniform'),
+                               LocalFeatureAggregation(256, cfg.neighbor_num, 32, 256, True),
                                LocalFeatureAggregation(256, cfg.neighbor_num, 32, 512, True),
                                LocalFeatureAggregation(512, cfg.neighbor_num, 32, 512, False),
                                TransitionDown(cfg.input_points_num // 16, 'uniform'),
                                LocalFeatureAggregation(512, cfg.neighbor_num, 64, 1024, True),
                                LocalFeatureAggregation(1024, cfg.neighbor_num, 128, 1024, False),
-                               TransitionDown(cfg.input_points_num // 32, 'uniform'),
-                               ]
+                               TransitionDown(cfg.input_points_num // 32, 'uniform'),]
         self.encoded_points_num = cfg.input_points_num // 32
         self.encoder_layers = nn.Sequential(*self.encoder_layers)
         self.mlp_enc_out = nn.Sequential(MLPBlock(1024, 1024, activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
                                          MLPBlock(1024, 1024, activation=None, batchnorm='nn.bn1d'))
 
-        self.entropy_bottleneck = compressai.entropy_models.EntropyBottleneck(1024)
+        self.entropy_bottleneck = None
 
-        self.decoder_layers = [LocalFeatureAggregation(1024, cfg.neighbor_num, 128, 1024, True),
+        self.decoder_layers = [nn.Conv1d(1024, ),
+                               LocalFeatureAggregation(1024, cfg.neighbor_num, 128, 1024, True),
                                LocalFeatureAggregation(1024, cfg.neighbor_num, 128, 1024, False)]
         self.decoder_layers = nn.Sequential(*self.decoder_layers)
         self.mlp_dec_out = nn.Sequential(MLPBlock(1024, 256, activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
                                          MLPBlock(256, 96, activation=None, batchnorm='nn.bn1d'))
-
-        self.init_weights()
 
     def forward(self, fea):
         if self.training: ori_fea = fea
@@ -156,30 +156,6 @@ class PointCompressor(nn.Module):
                     'decompressed_tensors': decompressed_tensors,
                     'decoder_output': fea}
 
-    def init_weights(self):
-        torch.nn.init.uniform_(self.mlp_enc_out[-1].bn.weight, -10, 10)
-        torch.nn.init.uniform_(self.mlp_enc_out[-1].bn.bias, -10, 10)
-
-    def load_state_dict(self, state_dict, strict: bool = True):
-        # Dynamically update the entropy bottleneck buffers related to the CDFs
-        update_registered_buffers(
-            self.entropy_bottleneck,
-            "entropy_bottleneck",
-            ["_quantized_cdf", "_offset", "_cdf_length"],
-            state_dict,
-        )
-        super().load_state_dict(state_dict, strict=strict)
-
-    def entropy_bottleneck_compress(self, encoder_output):
-        assert not self.training
-        encoder_output = encoder_output.permute(0, 2, 1).unsqueeze(3).contiguous()
-        return self.entropy_bottleneck.compress(encoder_output)
-
-    def entropy_bottleneck_decompress(self, compressed_strings):
-        assert not self.training
-        decompressed_tensors = self.entropy_bottleneck.decompress(compressed_strings, size=(self.encoded_points_num, 1))
-        decompressed_tensors = decompressed_tensors.squeeze(3).permute(0, 2, 1)
-        return decompressed_tensors
 
 def main_t():
     torch.cuda.set_device('cuda:0')

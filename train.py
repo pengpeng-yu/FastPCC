@@ -3,9 +3,7 @@ import shutil
 import sys
 import importlib
 import time
-import datetime
 
-from loguru import logger
 import numpy as np
 import torch
 import torch.utils.data
@@ -40,11 +38,13 @@ def main():
     else:
         cfg.merge_with_dotlist(sys.argv[1:])
 
+    from loguru import logger
     logger.remove()
-    loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan>  <level>{message}</level>'
 
     if local_rank in (-1, 0):
+        loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan>  <level>{message}</level>'
         logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
+
         os.makedirs('runs', exist_ok=True)
         run_dir = utils.autoindex_obj(os.path.join('runs', cfg.train.rundir_name))
         ckpts_dir = os.path.join(run_dir, 'ckpts')
@@ -148,7 +148,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
     dataset_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if global_rank != -1 else None
     dataloader = torch.utils.data.DataLoader(dataset, process_batch_size,
                                              cfg.train.shuffle if dataset_sampler is None else None,
-                                             sampler=dataset_sampler, num_workers=cfg.train.num_workers, drop_last=True)
+                                             sampler=dataset_sampler, num_workers=cfg.train.num_workers, drop_last=True,
+                                             pin_memory=True)
 
     # Initialize optimizer and scheduler
     if cfg.train.optimizer == 'adam': Optimizer = torch.optim.Adam
@@ -201,11 +202,15 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
         if global_rank != -1:
             dataloader.sampler.set_epoch(epoch)
 
-        for step_idx, data in enumerate(dataloader):
+        for step_idx, batch_data in enumerate(dataloader):
             start_time = time.time()
-            data = data.to(device)
+            if isinstance(batch_data, torch.Tensor):
+                batch_data = batch_data.to(device, non_blocking=True)
+            elif isinstance(batch_data, list):
+                batch_data = [d.to(device, non_blocking=True) for d in batch_data if isinstance(d, torch.Tensor)]
+            else: raise NotImplementedError
 
-            loss_dict = model(data)
+            loss_dict = model(batch_data)
             loss = loss_dict['loss']
 
             optimizer.zero_grad()
@@ -217,7 +222,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
             ave_time_onestep = time_this_step if ave_time_onestep is None \
                                else ave_time_onestep * 0.9 + time_this_step * 0.1
 
-            if cfg.train.log_frequency > 0 and step_idx % cfg.train.log_frequency == 0:
+            if cfg.train.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.train.log_frequency == 0):
                 expected_total_time, eta = utils.eta_by_seconds((total_steps - global_step - 1) * ave_time_onestep)
                 logger.info(f'step {step_idx + 1}/{steps_one_epoch} of epoch {epoch + 1}/{cfg.train.epochs}, '
                             f'speed: {utils.totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/epoch, '
@@ -243,13 +248,13 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
         scheduler.step()
 
         # Model test
-        if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and epoch % cfg.train.test_frequency == 0:
+        if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and (epoch + 1) % cfg.train.test_frequency == 0:
             test_items = test(cfg, logger, model)
             for item_name, item in test_items.items():
                 tb_writer.add_scalar('Test/' + item_name, item, len(dataloader) * epoch)
 
         # Save checkpoints
-        if local_rank in (-1, 0) and epoch % cfg.train.ckpt_frequency == 0:
+        if local_rank in (-1, 0) and (epoch + 1) % cfg.train.ckpt_frequency == 0:
             ckpt_name = 'epoch_{}.pt'.format(epoch)
             ckpt = {
                 'state_dict': model.module.state_dict() if torch_utils.is_parallel(model) else model.state_dict(),
@@ -259,13 +264,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
             torch.save(ckpt, os.path.join(ckpts_dir, ckpt_name))
             del ckpt
 
-    if torch_utils.is_parallel(model):
-        model.module.entropy_bottleneck.update()
-    else:
-        model.entropy_bottleneck.update()
-
     dist.destroy_process_group()
-    torch.cuda.empty_cache()
+    logger.info('train end')
 
 
 if __name__ == '__main__':

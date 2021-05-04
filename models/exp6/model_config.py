@@ -5,9 +5,8 @@ from lib.config import SimpleConfig
 class ModelConfig(SimpleConfig):
     input_points_num: int = 8192
     input_points_dim: int = 3
-    neighbor_num: int = 16
+    sample_method: str = 'uniform'
+    neighbor_num: int = 4
 
-    bottleneck_scaler: int = 2 ** 10
-
-    bpp_loss_factor: float = 1e-4
-    aux_loss_factor: float = 1e6
+    bpp_loss_factor: float = 1e-5
+    aux_loss_factor: float = 1000.0

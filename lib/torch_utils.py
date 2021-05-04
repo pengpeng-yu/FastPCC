@@ -141,6 +141,10 @@ class MLPBlock(nn.Module):
             self.activation = nn.LeakyReLU(negative_slope=float(activation.split('(', 1)[1].split(')', 1)[0]), inplace=True)
         else: raise NotImplementedError
 
+        if self.bn is None and self.activation is None:
+            print('Warning: You are using a MLPBlock without activation nor batchnorm, '
+                  'which is identical to a nn.Linear(bias=True) object')
+
         self.version = version
 
     def forward(self, x):
@@ -150,15 +154,16 @@ class MLPBlock(nn.Module):
                 x = x.permute(0, 2, 1)
                 x = self.bn(x)
                 x = x.permute(0, 2, 1)
-            else:
+            elif self.bn is not None:
                 x = self.bn(x)
-            if self.activation: x = self.activation(x)
+            if self.activation is not None:
+                x = self.activation(x)
             return x
 
         elif self.version == 'conv':
             x = self.mlp(x)
             if self.bn is not None: x = self.bn(x)
-            if self.activation: x = self.activation(x)
+            if self.activation is not None: x = self.activation(x)
             return x
 
 

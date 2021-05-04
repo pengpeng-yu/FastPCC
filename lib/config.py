@@ -49,9 +49,10 @@ class TrainConfig(SimpleConfig):
 class TestConfig(SimpleConfig):
     rundir_name: str = 'test_<autoindex>'
     device: str = 'cuda:3'  # 'cpu' or 'cuda'(only single gpu supported)
-    batch_size: int = 1
+    batch_size: int = 8
     num_workers: int = 4
     weights_from_ckpt: str = ''
+    log_frequency: int = 50  # (steps) used for logging
 
 
 @dataclass
@@ -60,7 +61,7 @@ class Config(SimpleConfig):
     model: SimpleConfig = None
     train: TrainConfig = TrainConfig()
     test: TestConfig = TestConfig()
-    dataset_path: str = 'lib.datasets.model_net'  # dataset_path.Dataset and dataset_path.Config are required
+    dataset_path: str = 'lib.datasets.modelnet'  # dataset_path.Dataset and dataset_path.Config are required
     dataset: SimpleConfig = None
 
     def __post_init__(self):

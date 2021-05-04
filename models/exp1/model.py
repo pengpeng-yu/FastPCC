@@ -16,20 +16,20 @@ class PointCompressor(nn.Module):
         self.cfg = cfg
 
         self.encoder = [TransformerBlock(3, 32, cfg.neighbor_num, True),
-                        TransformerBlock(32, 64, cfg.neighbor_num, False),
+                        TransformerBlock(32, 64, cfg.neighbor_num, True),
                         TransformerBlock(64, 128, cfg.neighbor_num, False),]
         self.encoder = nn.Sequential(*self.encoder)
         self.mlp_enc_out = MLPBlock(128, 128,  activation=None, batchnorm='nn.bn1d')
         self.encoded_points_num = cfg.input_points_num
         self.encoded_points_dim = 128
 
-        self.entropy_bottleneck = compressai.entropy_models.EntropyBottleneck(self.encoded_points_dim)
+        self.entropy_bottleneck = compressai.entropy_models.EntropyBottleneck(self.encoded_points_dim,
+                                                                              init_scale=cfg.bottleneck_scaler * 4)
 
-        self.decoder = [TransformerBlock(128, 64, cfg.neighbor_num, False),
+        self.decoder = [TransformerBlock(128, 64, cfg.neighbor_num, True),
                         TransformerBlock(64, 32, cfg.neighbor_num, False)]
         self.mlp_dec_out = MLPBlock(32, 3, activation=None, batchnorm='nn.bn1d')
         self.decoder = nn.Sequential(*self.decoder)
-        self.init_weights()
 
     def forward(self, fea):
         if self.training: ori_fea = fea
@@ -38,9 +38,11 @@ class PointCompressor(nn.Module):
         # encode
         xyz, fea = self.encoder((xyz, fea, None, None))[:2]
         fea = self.mlp_enc_out(fea)
+        fea *= self.cfg.bottleneck_scaler
 
         if self.training:
             fea, likelihoods = self.entropy_bottleneck(fea.permute(0, 2, 1).unsqueeze(3).contiguous())
+            fea /= self.cfg.bottleneck_scaler
             fea = fea.squeeze(3).permute(0, 2, 1).contiguous()
             likelihoods = likelihoods.squeeze(3).permute(0, 2, 1).contiguous()
             fea = self.decoder((xyz, fea, None, None))[1]
@@ -58,6 +60,7 @@ class PointCompressor(nn.Module):
         else:
             compressed_strings = self.entropy_bottleneck_compress(fea)
             decompressed_tensors = self.entropy_bottleneck_decompress(compressed_strings)
+            fea /= self.cfg.bottleneck_scaler
             decoder_output = self.decoder((xyz, decompressed_tensors, None, None))[1]
             decoder_output = self.mlp_dec_out(decoder_output)
             decoder_output = decoder_output.reshape(batch_size, self.cfg.input_points_num, self.cfg.input_points_dim)
@@ -66,10 +69,6 @@ class PointCompressor(nn.Module):
                     'compressed_strings': compressed_strings,
                     'decompressed_tensors': decompressed_tensors,
                     'decoder_output': decoder_output}
-
-    def init_weights(self):
-        torch.nn.init.uniform_(self.mlp_enc_out.bn.weight, -10, 10)
-        torch.nn.init.uniform_(self.mlp_enc_out.bn.bias, -10, 10)
 
     def load_state_dict(self, state_dict, strict: bool = True):
         # Dynamically update the entropy bottleneck buffers related to the CDFs

@@ -39,7 +39,7 @@ class TransformerBlock(nn.Module):
     def forward(self, x):
         xyz, feature, relative_knn_xyz, knn_idx = x
         if relative_knn_xyz is None or knn_idx is None:
-            knn_idx = torch.cdist(xyz, xyz).topk(self.nneighbor, dim=-1, largest=False, sorted=False)[1]
+            knn_idx = torch.cdist(xyz, xyz, compute_mode='donot_use_mm_for_euclid_dist').topk(self.nneighbor, dim=-1, largest=False, sorted=True)[1]
             relative_knn_xyz = xyz[:, :, None, :] - index_points(xyz, knn_idx)  # knn_xyz: b, n, k, 3
         else:
             assert feature.shape[1] == relative_knn_xyz.shape[1] == knn_idx.shape[1]

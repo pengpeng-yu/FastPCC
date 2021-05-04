@@ -10,3 +10,5 @@ class DatasetConfig(SimpleConfig):
     input_points_num: int = 8192
     sample_method: str = 'uniform'
     with_normal_channel: bool = False
+    with_classes: bool = False
+    classes_names: str = 'modelnet40_shape_names.txt'

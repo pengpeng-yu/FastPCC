@@ -182,6 +182,21 @@ def chamfer_loss_t2():
     print('Done')
 
 
+def pyae_t():
+    import lib.arithmetic_encoding.pyae as pyae
+    frequency_table = {"1": 1,
+                       "0": 9}
+    AE = pyae.ArithmeticEncoding(frequency_table=frequency_table, save_stages=True)
+    original_msg = "100000000010000000001000000000"
+    encoded_msg, encoder, interval_min_value, interval_max_value = AE.encode(msg=original_msg,
+                                                                             probability_table=AE.probability_table)
+    binary_code, encoder_binary = AE.encode_binary(float_interval_min=interval_min_value,
+                                                   float_interval_max=interval_max_value)
+    print(len(binary_code) - 2)
+    print('Done')
+
+
 if __name__ == '__main__':
-    chamfer_loss_t2()
+    pyae_t()
+    # chamfer_loss_t2()
     # open3d_draw('dataset/airplane_0001.txt')

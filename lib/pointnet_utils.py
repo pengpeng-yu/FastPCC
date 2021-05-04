@@ -23,11 +23,30 @@ def index_points(points, idx):
         idx: sample index data, [B, S, [K]]
     Return:
         new_points:, indexed points data, [B, S, [K], C]
+        new_points[i, j, k, l] == old_points[i, idx[i, j, k], l]
     """
     raw_size = idx.size()
     idx = idx.reshape(raw_size[0], -1)
     res = torch.gather(points, 1, idx[..., None].expand(-1, -1, points.size(-1)))
     return res.reshape(*raw_size, -1)
+
+
+def index_points_dists(dists, idx1, idx2):
+    """
+    Input:
+        dists: [B, N, M]
+        idx1: [B, *idx_shape] (value < N)
+        idx2: [B, *idx_shape] (value < M)
+    Return:
+        dists: [B, *idx_shape]
+        new_dists[i, j, k, ...] == old_dists[i, idx1[i, j, k, ...], idx2[i, j, k, ...]]
+    """
+    batch_size, n, m = dists.shape
+    idx_shape = idx1.shape
+    new_dists = torch.gather(dists, dim=1, index=idx1.reshape(batch_size, -1, 1).expand(-1, -1, m))
+    new_dists = torch.gather(new_dists, dim=2, index=idx2.reshape(batch_size, -1, 1))
+    new_dists = new_dists.reshape(*idx_shape)
+    return new_dists
 
 
 def farthest_point_sample(xyz, npoint):
@@ -100,8 +119,8 @@ def sample_and_group(nsample, sample_method, group_radius, ngroup, xyz, points_f
         raise NotImplementedError
 
     if knn:
-        dists = torch.cdist(sampled_xyz, xyz)  # B x npoint x N
-        grouped_idx = dists.topk(ngroup, dim=-1, largest=False, sorted=False)[1]  # argsort()[:, :, :ngroup]  # B x npoint x K
+        dists = torch.cdist(sampled_xyz, xyz, compute_mode='donot_use_mm_for_euclid_dist')  # B x npoint x N
+        grouped_idx = dists.topk(ngroup, dim=-1, largest=False, sorted=True)[1]  # argsort()[:, :, :ngroup]  # B x npoint x K
     else:
         grouped_idx = query_ball_point(group_radius, ngroup, xyz, sampled_xyz)
     torch.cuda.empty_cache()

@@ -1,0 +1,22 @@
+model_path: models.classification.baseline
+train:
+  rundir_name: 'train_classification_<autoindex>'
+  device: '2,3'
+  batch_size: 8
+  num_workers: 8
+  epochs: 100
+  ckpt_frequency: 5
+  lr_step_size: 20
+  lr_step_gamma: 0.3
+  resume_from_ckpt: ''
+  resume_items: ['state_dict']
+  learning_rate: 0.05
+  test_frequency: 5
+test:
+  batch_size: 8
+  num_workers: 8
+model:
+  input_points_num: 1024
+dataset:
+  input_points_num: 1024
+  with_classes: True
