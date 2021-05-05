@@ -12,3 +12,4 @@ class DatasetConfig(SimpleConfig):
     with_normal_channel: bool = False
     with_classes: bool = False
     classes_names: str = 'modelnet40_shape_names.txt'
+    random_rotation: bool = False

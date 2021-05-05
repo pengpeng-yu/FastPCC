@@ -2,6 +2,7 @@ import os
 import numpy as np
 import torch
 import torch.utils.data
+from scipy.spatial.transform import Rotation as R
 from lib.datasets.modelnet.dataset_config import DatasetConfig
 
 
@@ -24,16 +25,26 @@ class ModelNetDataset(torch.utils.data.Dataset):
             return len(self.file_list)
 
         def __getitem__(self, index):
+            # load
             point_cloud = np.loadtxt(self.file_list[index], dtype=np.float32, delimiter=',')
+
+            # sampling
             if self.cfg.sample_method == 'uniform':
                 assert point_cloud.shape[0] >= self.cfg.input_points_num
                 point_cloud = point_cloud[: self.cfg.input_points_num]
             else:
                 raise NotImplementedError
 
+            # normals
             if not self.cfg.with_normal_channel:
                 point_cloud = point_cloud[:, :3]
 
+            # random rotation
+            if self.cfg.random_rotation:
+                if self.cfg.with_normal_channel: raise NotImplementedError
+                point_cloud = R.random().apply(point_cloud).astype(np.float32)
+
+            # classes
             if self.cfg.with_classes:
                 cls_idx = self.classes_idx[os.path.split(self.file_list[index])[1].rsplit('_', 1)[0]]
                 return point_cloud, cls_idx
@@ -48,6 +59,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
 if __name__ == '__main__':
     config = DatasetConfig()
     config.with_classes = True
+    config.random_rotation = True
     dataset = ModelNetDataset(config, True)
     dataloader = torch.utils.data.DataLoader(dataset, 16, shuffle=True)
     dataloader = iter(dataloader)

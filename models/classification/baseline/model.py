@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from itertools import combinations
 
 from lib.pointnet_utils import index_points, index_points_dists
 from lib.torch_utils import MLPBlock
@@ -10,19 +11,20 @@ from models.classification.baseline import Config
 
 class LFA(nn.Module):
     def __init__(self, in_channels, neighbors_num, relative_fea_chnls, out_channels, return_neighbor_based_fea=True,
-                 anchor_points=4):
+                 anchor_points=6):
         super(LFA, self).__init__()
-        if anchor_points == 4:
-            ori_relative_fea_chnls = 6 + 6 + 4
+        if anchor_points >= 6:
+            raw_relative_fea_chnls = (anchor_points * (anchor_points - 1) // 2) * 2 + anchor_points
         else:
             raise NotImplementedError
 
-        self.mlp_relative_fea = MLPBlock(ori_relative_fea_chnls, relative_fea_chnls, 'leaky_relu(0.2)', 'nn.bn1d')
+        self.mlp_raw_relative_fea = MLPBlock(raw_relative_fea_chnls, relative_fea_chnls, 'leaky_relu(0.2)', 'nn.bn1d')
         self.mlp_attn = nn.Linear(in_channels + relative_fea_chnls, in_channels + relative_fea_chnls, bias=False)
         self.mlp_out = MLPBlock(in_channels + relative_fea_chnls, out_channels, None, 'nn.bn1d')
-        self.mlp_shortcut = MLPBlock(in_channels, out_channels, None, 'nn.bn1d')
+        if in_channels != 0: self.mlp_shortcut = MLPBlock(in_channels, out_channels, None, 'nn.bn1d')
+        else: self.mlp_shortcut = None
 
-        self.in_channels = in_channels
+        self.in_channels = in_channels  # feature channels
         self.neighbors_num = neighbors_num
         self.out_channels = out_channels
         self.relative_fea_chnls = relative_fea_chnls
@@ -42,57 +44,66 @@ class LFA(nn.Module):
         # This format of inputs and outputs is aimed to simplify the forward function of top-level module.
 
         xyz, feature, raw_relative_feature, neighbors_idx = x
-        batch_size, n_points, _ = feature.shape
+        if self.in_channels == 0: assert feature is None
+        batch_size, n_points, _ = xyz.shape
         ori_feature = feature
 
         if raw_relative_feature is None or neighbors_idx is None:
             xyz_dists = torch.cdist(xyz, xyz, compute_mode='donot_use_mm_for_euclid_dist')
             neighbors_dists, neighbors_idx = xyz_dists.topk(max(self.neighbors_num, self.anchor_points),
                                                             dim=2, largest=False, sorted=True)
-            feature, raw_relative_feature = self.gather_neighbors(xyz_dists, feature, neighbors_dists, neighbors_idx)
+            raw_relative_feature = self.gather_dists(xyz_dists, neighbors_dists, neighbors_idx)
             del xyz_dists
             torch.cuda.empty_cache()
-        else:
-            feature = index_points(feature, neighbors_idx)
+
+        if self.in_channels != 0:
+            feature = index_points(feature, neighbors_idx[:, :, :self.neighbors_num])
 
         relative_feature = raw_relative_feature.reshape(batch_size, n_points * self.neighbors_num, -1)
-        relative_feature = self.mlp_relative_fea(relative_feature)
+        relative_feature = self.mlp_raw_relative_fea(relative_feature)
         relative_feature = relative_feature.reshape(batch_size, n_points, self.neighbors_num, -1)
-        feature = torch.cat([feature, relative_feature], dim=3)
+
+        if self.in_channels != 0:
+            feature = torch.cat([feature, relative_feature], dim=3)
+        else:
+            feature = relative_feature
+
         feature = self.attn_pooling(feature)
-        feature = F.leaky_relu(self.mlp_shortcut(ori_feature) + self.mlp_out(feature), negative_slope=0.2)
+
+        if self.in_channels != 0:
+            feature = F.leaky_relu(self.mlp_shortcut(ori_feature) + self.mlp_out(feature), negative_slope=0.2)
+        else:
+            feature = F.leaky_relu(self.mlp_out(feature), negative_slope=0.2)
 
         if not self.return_neighbor_based_fea:
             raw_relative_feature = neighbors_idx = None
             torch.cuda.empty_cache()
         return xyz, feature, raw_relative_feature, neighbors_idx
 
-    def gather_neighbors(self, xyz_dists, feature, neighbors_dists, neighbors_idx):
+    def gather_dists(self, xyz_dists, neighbors_dists, neighbors_idx):
         # xyz_dists is still necessary here and can not be replaced by neighbors_dists
-        # (B, N, self.neighbor_num, self.channels)
-        feature = index_points(feature, neighbors_idx[:, :, :self.neighbors_num])
 
-        # (B, N, 6 if self.anchor_points == 4)  TODO: anchors will change if sampling is performed. Is this rational?
+        # (B, N, 15 if self.anchor_points == 6)  TODO: anchors will change if sampling is performed. Is this rational?
         intra_anchor_dists = self.gen_intra_anchor_dists(xyz_dists, neighbors_dists, neighbors_idx[:, :, :self.anchor_points])
         # (B, N, self.neighbor_num, self.anchor_points)
-        inter_anchor_dists = self.gen_inter_anchor_dists(xyz_dists, neighbors_idx[:, :, :self.neighbors_num])
-        # (B, N, self.neighbor_num, 6)
+        inter_anchor_dists = self.gen_inter_anchor_dists(xyz_dists, neighbors_idx)
+        # (B, N, self.neighbor_num, 15)
         center_intra_anchor_dists = intra_anchor_dists[:, :, None, :].expand(-1, -1, self.neighbors_num, -1)
-        # (B, N, self.neighbor_num, 6)
+        # (B, N, self.neighbor_num, 15)
         nerigbor_intra_anchor_dists = index_points(intra_anchor_dists, neighbors_idx[:, :, :self.neighbors_num])
-        # (B, N, self.neighbor_num, 6 + 6 + self.anchor_points)
+        # (B, N, self.neighbor_num, 15 + 15 + self.anchor_points)
         relative_feature = torch.cat([center_intra_anchor_dists, nerigbor_intra_anchor_dists, inter_anchor_dists], dim=3)
 
-        return feature, relative_feature
+        return relative_feature
 
     def gen_intra_anchor_dists(self, xyz_dists, neighbors_dists, neighbors_idx):
-        if self.anchor_points == 4:
-            sub_anchor_dists1 = index_points_dists(xyz_dists, neighbors_idx[:, :, 1:2], neighbors_idx[:, :, 2:3])
-            sub_anchor_dists2 = index_points_dists(xyz_dists, neighbors_idx[:, :, 2:3], neighbors_idx[:, :, 3:4])
-            sub_anchor_dists3 = index_points_dists(xyz_dists, neighbors_idx[:, :, 3:4], neighbors_idx[:, :, 1:2])
-
-            intra_anchor_dists = torch.cat([neighbors_dists[:, :, 1:],
-                                            sub_anchor_dists1, sub_anchor_dists2, sub_anchor_dists3], dim=2)
+        if self.anchor_points >= 6:
+            sub_anchor_dists = []
+            for pi, pj in combinations(range(1, self.anchor_points), 2):
+                sub_anchor_dists.append(index_points_dists(xyz_dists,
+                                                           neighbors_idx[:, :, pi],
+                                                           neighbors_idx[:, :, pj])[:, :, None])
+            intra_anchor_dists = torch.cat([neighbors_dists[:, :, 1:], *sub_anchor_dists], dim=2)
             return intra_anchor_dists
 
         else:
@@ -100,6 +111,8 @@ class LFA(nn.Module):
 
     def gen_inter_anchor_dists(self, xyz_dists, neighbors_idx):
         anchor_points_idx = neighbors_idx[:, :, :self.anchor_points]
+        neighbors_idx = neighbors_idx[:, :, :self.neighbors_num]
+
         neighbors_anchor_points_idx = index_points(anchor_points_idx, neighbors_idx)
 
         anchor_points_idx = anchor_points_idx[:, :, None, :].expand(-1, -1, self.neighbors_num, -1)
@@ -117,7 +130,8 @@ class Model(nn.Module):
     def __init__(self, cfg: Config):
         super(Model, self).__init__()
         self.cfg = cfg
-        self.layers = nn.Sequential(LFA(3, cfg.neighbor_num, 32, 64),
+        # the first layer has no features, thus its in_channels == 0 and mlp_shortcut == False
+        self.layers = nn.Sequential(LFA(0, cfg.neighbor_num, 32, 64),
                                     LFA(64, cfg.neighbor_num, 64, 128),
                                     LFA(128, cfg.neighbor_num, 64, 256),
                                     LFA(256, cfg.neighbor_num, 128, 512),
@@ -155,7 +169,7 @@ class Model(nn.Module):
 
     def forward(self, x):
         xyz, target = x
-        feature = self.layers((xyz, xyz, None, None))[1]
+        feature = self.layers((xyz, None, None, None))[1]
         feature = torch.max(feature, dim=1).values
         feature = self.head(feature)
 
@@ -172,12 +186,16 @@ class Model(nn.Module):
 
 
 def main_t():
+    from scipy.spatial.transform import Rotation as R
+
     cfg = Config()
     cfg.input_points_num = 8192
+
     model = Model(cfg).cuda()
     model = torch.nn.DataParallel(model, device_ids=[0])
-    xyz = torch.rand(4, cfg.input_points_num, 3).cuda()
-    target = torch.randint(0, 40, (4,)).cuda()
+    xyz = torch.rand(cfg.input_points_num, 3)
+    xyz = torch.stack([xyz, torch.tensor(R.random().apply(xyz.numpy()).astype(np.float32))], dim=0).cuda()
+    target = torch.randint(0, 40, (2,)).cuda()
 
     y = model((xyz, target))
     y['loss'].backward()
