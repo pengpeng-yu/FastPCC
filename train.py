@@ -224,7 +224,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
 
             if cfg.train.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.train.log_frequency == 0):
                 expected_total_time, eta = utils.eta_by_seconds((total_steps - global_step - 1) * ave_time_onestep)
-                logger.info(f'step {step_idx + 1}/{steps_one_epoch} of epoch {epoch + 1}/{cfg.train.epochs}, '
+                logger.info(f'step {step_idx}/{steps_one_epoch - 1} of epoch {epoch}/{cfg.train.epochs - 1}, '
                             f'speed: {utils.totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/epoch, '
                             f'eta(current): {utils.eta_by_seconds((steps_one_epoch - step_idx - 1) * ave_time_onestep)[1]}, '
                             f'eta(total): {eta} in {expected_total_time}')
@@ -246,12 +246,14 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
             global_step += 1
             # break  # TODO
         scheduler.step()
+        if local_rank in (-1, 0):
+            tb_writer.add_scalar('Train/Epochs', epoch, global_step - 1)
 
         # Model test
         if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and (epoch + 1) % cfg.train.test_frequency == 0:
             test_items = test(cfg, logger, model)
             for item_name, item in test_items.items():
-                tb_writer.add_scalar('Test/' + item_name, item, len(dataloader) * epoch)
+                tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
 
         # Save checkpoints
         if local_rank in (-1, 0) and (epoch + 1) % cfg.train.ckpt_frequency == 0:

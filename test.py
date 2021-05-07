@@ -92,7 +92,7 @@ def test(cfg: Config, logger, model: torch.nn.Module=None):
             # torch.save(data, 'runs/data.pt')
             # torch.save(model_output['decoder_output'], 'runs/decoder_output.pt')
             if cfg.test.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.test.log_frequency == 0):
-                logger.info(f'test step {step_idx + 1}/{steps_one_epoch}')
+                logger.info(f'test step {step_idx}/{steps_one_epoch - 1}')
             # break  # TODO
             # TODO: compute loss and compression rate of points compression model
 

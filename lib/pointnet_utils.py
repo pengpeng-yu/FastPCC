@@ -123,7 +123,6 @@ def sample_and_group(nsample, sample_method, group_radius, ngroup, xyz, points_f
         grouped_idx = dists.topk(ngroup, dim=-1, largest=False, sorted=True)[1]  # argsort()[:, :, :ngroup]  # B x npoint x K
     else:
         grouped_idx = query_ball_point(group_radius, ngroup, xyz, sampled_xyz)
-    torch.cuda.empty_cache()
 
     grouped_xyz = index_points(xyz, grouped_idx) # [B, npoint, nsample, C]
     grouped_xyz_relative = grouped_xyz - sampled_xyz[:, :, None, :]

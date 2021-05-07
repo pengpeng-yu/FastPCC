@@ -1,5 +1,6 @@
 from lib.simple_config import SimpleConfig
 from dataclasses import dataclass
+from typing import Tuple
 
 
 @dataclass
@@ -13,3 +14,11 @@ class DatasetConfig(SimpleConfig):
     with_classes: bool = False
     classes_names: str = 'modelnet40_shape_names.txt'
     random_rotation: bool = False
+
+    # precompute the neighborhood-based feature using cpu
+    # not implemented
+    # precompute: str = None  # 'RandLANeighborFea' or 'RotationInvariantDistFea' or None
+    # neighbor_num: int = 16
+    # anchors_points: int = 4  # for RotationInvariantDistFea
+    # model_sample_method: str = 'uniform'  # only uniform supported fro now. Input points are supposed to be shuffled.
+    # model_sample_rates: Tuple[float] = (1.0, 0.5, 0.25, 0.125)

@@ -2,128 +2,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from itertools import combinations
 
-from lib.pointnet_utils import index_points, index_points_dists
+from lib.points_layers import TransitionDown, RotationInvariantDistFea, LocalFeatureAggregation as LFA
 from lib.torch_utils import MLPBlock
 from models.classification.baseline import Config
-
-
-class LFA(nn.Module):
-    def __init__(self, in_channels, neighbors_num, relative_fea_chnls, out_channels, return_neighbor_based_fea=True,
-                 anchor_points=6):
-        super(LFA, self).__init__()
-        if anchor_points >= 6:
-            raw_relative_fea_chnls = (anchor_points * (anchor_points - 1) // 2) * 2 + anchor_points
-        else:
-            raise NotImplementedError
-
-        self.mlp_raw_relative_fea = MLPBlock(raw_relative_fea_chnls, relative_fea_chnls, 'leaky_relu(0.2)', 'nn.bn1d')
-        self.mlp_attn = nn.Linear(in_channels + relative_fea_chnls, in_channels + relative_fea_chnls, bias=False)
-        self.mlp_out = MLPBlock(in_channels + relative_fea_chnls, out_channels, None, 'nn.bn1d')
-        if in_channels != 0: self.mlp_shortcut = MLPBlock(in_channels, out_channels, None, 'nn.bn1d')
-        else: self.mlp_shortcut = None
-
-        self.in_channels = in_channels  # feature channels
-        self.neighbors_num = neighbors_num
-        self.out_channels = out_channels
-        self.relative_fea_chnls = relative_fea_chnls
-        # return_neighbor_based_fea should be True if next layer is not a sampling layer
-        self.return_neighbor_based_fea = return_neighbor_based_fea
-        self.anchor_points = anchor_points
-
-    def forward(self, x):
-        # There are three typical situations:
-        #   1. this layer is the first layer of the model. All the rest value will be calculated using xyz
-        #   and returned if self.return_neighbor_based_fea is True.
-        #   2. this layer is after a sampling layer, which is supposed to be the same as 1.
-        #   To do this, a sampling layer should return raw_relative_feature and neighbors_idx as None,
-        #   or, the layer before sampling should has return_neighbor_based_fea == False.
-        #   3. this layer is an normal layer in the model. raw_relative_feature and neighbors_idx from last layer
-        #   will be directly used.
-        # This format of inputs and outputs is aimed to simplify the forward function of top-level module.
-
-        xyz, feature, raw_relative_feature, neighbors_idx = x
-        if self.in_channels == 0: assert feature is None
-        batch_size, n_points, _ = xyz.shape
-        ori_feature = feature
-
-        if raw_relative_feature is None or neighbors_idx is None:
-            xyz_dists = torch.cdist(xyz, xyz, compute_mode='donot_use_mm_for_euclid_dist')
-            neighbors_dists, neighbors_idx = xyz_dists.topk(max(self.neighbors_num, self.anchor_points),
-                                                            dim=2, largest=False, sorted=True)
-            raw_relative_feature = self.gather_dists(xyz_dists, neighbors_dists, neighbors_idx)
-            del xyz_dists
-            torch.cuda.empty_cache()
-
-        if self.in_channels != 0:
-            feature = index_points(feature, neighbors_idx[:, :, :self.neighbors_num])
-
-        relative_feature = raw_relative_feature.reshape(batch_size, n_points * self.neighbors_num, -1)
-        relative_feature = self.mlp_raw_relative_fea(relative_feature)
-        relative_feature = relative_feature.reshape(batch_size, n_points, self.neighbors_num, -1)
-
-        if self.in_channels != 0:
-            feature = torch.cat([feature, relative_feature], dim=3)
-        else:
-            feature = relative_feature
-
-        feature = self.attn_pooling(feature)
-
-        if self.in_channels != 0:
-            feature = F.leaky_relu(self.mlp_shortcut(ori_feature) + self.mlp_out(feature), negative_slope=0.2)
-        else:
-            feature = F.leaky_relu(self.mlp_out(feature), negative_slope=0.2)
-
-        if not self.return_neighbor_based_fea:
-            raw_relative_feature = neighbors_idx = None
-            torch.cuda.empty_cache()
-        return xyz, feature, raw_relative_feature, neighbors_idx
-
-    def gather_dists(self, xyz_dists, neighbors_dists, neighbors_idx):
-        # xyz_dists is still necessary here and can not be replaced by neighbors_dists
-
-        # (B, N, 15 if self.anchor_points == 6)  TODO: anchors will change if sampling is performed. Is this rational?
-        intra_anchor_dists = self.gen_intra_anchor_dists(xyz_dists, neighbors_dists, neighbors_idx[:, :, :self.anchor_points])
-        # (B, N, self.neighbor_num, self.anchor_points)
-        inter_anchor_dists = self.gen_inter_anchor_dists(xyz_dists, neighbors_idx)
-        # (B, N, self.neighbor_num, 15)
-        center_intra_anchor_dists = intra_anchor_dists[:, :, None, :].expand(-1, -1, self.neighbors_num, -1)
-        # (B, N, self.neighbor_num, 15)
-        nerigbor_intra_anchor_dists = index_points(intra_anchor_dists, neighbors_idx[:, :, :self.neighbors_num])
-        # (B, N, self.neighbor_num, 15 + 15 + self.anchor_points)
-        relative_feature = torch.cat([center_intra_anchor_dists, nerigbor_intra_anchor_dists, inter_anchor_dists], dim=3)
-
-        return relative_feature
-
-    def gen_intra_anchor_dists(self, xyz_dists, neighbors_dists, neighbors_idx):
-        if self.anchor_points >= 6:
-            sub_anchor_dists = []
-            for pi, pj in combinations(range(1, self.anchor_points), 2):
-                sub_anchor_dists.append(index_points_dists(xyz_dists,
-                                                           neighbors_idx[:, :, pi],
-                                                           neighbors_idx[:, :, pj])[:, :, None])
-            intra_anchor_dists = torch.cat([neighbors_dists[:, :, 1:], *sub_anchor_dists], dim=2)
-            return intra_anchor_dists
-
-        else:
-            raise NotImplementedError
-
-    def gen_inter_anchor_dists(self, xyz_dists, neighbors_idx):
-        anchor_points_idx = neighbors_idx[:, :, :self.anchor_points]
-        neighbors_idx = neighbors_idx[:, :, :self.neighbors_num]
-
-        neighbors_anchor_points_idx = index_points(anchor_points_idx, neighbors_idx)
-
-        anchor_points_idx = anchor_points_idx[:, :, None, :].expand(-1, -1, self.neighbors_num, -1)
-        relative_dists = index_points_dists(xyz_dists, anchor_points_idx, neighbors_anchor_points_idx)
-        return relative_dists
-
-    def attn_pooling(self, feature):
-        attn = F.softmax(self.mlp_attn(feature), dim=2)
-        feature = attn * feature
-        feature = torch.sum(feature, dim=2)
-        return feature
 
 
 class Model(nn.Module):
@@ -131,12 +13,26 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.cfg = cfg
         # the first layer has no features, thus its in_channels == 0 and mlp_shortcut == False
-        self.layers = nn.Sequential(LFA(0, cfg.neighbor_num, 32, 64),
-                                    LFA(64, cfg.neighbor_num, 64, 128),
-                                    LFA(128, cfg.neighbor_num, 64, 256),
-                                    LFA(256, cfg.neighbor_num, 128, 512),
-                                    LFA(512, cfg.neighbor_num, 256, 1024))
-        self.head = nn.Linear(1024, cfg.classes_num, bias=True)
+        # TODO: 'inverse_knn_density' sampling will increase the differences between original and the rotated. Why?
+        neighbor_fea_generator = RotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points)
+
+        self.layers = nn.Sequential(LFA(0, neighbor_fea_generator, 32, 64),
+                                    LFA(64, neighbor_fea_generator, 64, 128),
+                                    LFA(128, neighbor_fea_generator, 64, 256),
+                                    TransitionDown(sample_rate=0.5, sample_method='uniform'),
+
+                                    LFA(256, neighbor_fea_generator, 128, 512),
+                                    LFA(512, neighbor_fea_generator, 256, 512),
+                                    TransitionDown(sample_rate=0.5, sample_method='uniform'),
+
+                                    LFA(512, neighbor_fea_generator, 256, 512),
+                                    LFA(512, neighbor_fea_generator, 256, 1024),
+                                    TransitionDown(sample_rate=0.5, sample_method='uniform'),
+
+                                    LFA(1024, neighbor_fea_generator, 512, 1024),
+                                    LFA(1024, neighbor_fea_generator, 512, 1024))
+
+        self.head = nn.Linear(self.layers[-1].out_channels, cfg.classes_num, bias=True)
         self.log_pred_res('init')
 
     def log_pred_res(self, mode, pred=None, target=None):
@@ -167,7 +63,7 @@ class Model(nn.Module):
         else:
             raise NotImplementedError
 
-    def forward(self, x):
+    def forward(self, x, requires_fea_in_test=False):
         xyz, target = x
         feature = self.layers((xyz, None, None, None))[1]
         feature = torch.max(feature, dim=1).values
@@ -182,27 +78,48 @@ class Model(nn.Module):
             pred = torch.argmax(feature, dim=1)
             if target is not None:
                 self.log_pred_res('log', pred, target)
-            return {'pred': pred.detach().cpu()}
+            if requires_fea_in_test:
+                return {'pred': pred.detach().cpu(),
+                        'feature': feature}
+            else:
+                return {'pred': pred.detach().cpu()}
 
 
 def main_t():
     from scipy.spatial.transform import Rotation as R
+    from thop import profile
+    from thop import clever_format
 
     cfg = Config()
-    cfg.input_points_num = 8192
+    cfg.input_points_num = 1024
+    device = 1
+    torch.cuda.set_device(f'cuda:{device}')
 
-    model = Model(cfg).cuda()
-    model = torch.nn.DataParallel(model, device_ids=[0])
+    model = Model(cfg)
     xyz = torch.rand(cfg.input_points_num, 3)
-    xyz = torch.stack([xyz, torch.tensor(R.random().apply(xyz.numpy()).astype(np.float32))], dim=0).cuda()
-    target = torch.randint(0, 40, (2,)).cuda()
+    xyz = torch.stack([xyz, torch.tensor(R.random().apply(xyz.numpy()).astype(np.float32))], dim=0)
+    target = torch.randint(0, 40, (2,))
 
-    y = model((xyz, target))
-    y['loss'].backward()
+    macs, params = profile(model, inputs=((xyz, target),))
+    macs, params = clever_format([macs, params], "%.3f")
+    print(f'macs: {macs}, params: {params}')  # macs: 104.013G, params: 14.290M
+
+    model = model.cuda()
+    model = torch.nn.DataParallel(model, device_ids=[device])
+    xyz = xyz.cuda()
+    target = target.cuda()
+
+    train_out = model((xyz, target))
+    train_out['loss'].backward()
 
     model.eval()
     model.module.log_pred_res('reset')
-    _ = model((xyz, target))
+    with torch.no_grad():
+        test_out = model((xyz, target), True)
+
+    diff = (test_out['feature'][0] - test_out['feature'][1]).abs()
+    print(f'diff max: {diff.max()}, diff min: {diff.min()}, diff mean: {diff.mean()}')
+
     test_res = model.module.log_pred_res('show')
     print('Done')
 
