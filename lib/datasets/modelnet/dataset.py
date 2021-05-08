@@ -45,7 +45,8 @@ class ModelNetDataset(torch.utils.data.Dataset):
             # sampling
             if self.cfg.sample_method == 'uniform':
                 assert point_cloud.shape[0] >= self.cfg.input_points_num
-                point_cloud = point_cloud[: self.cfg.input_points_num]
+                uniform_choice = np.random.choice(point_cloud.shape[0], self.cfg.input_points_num, replace=False)
+                point_cloud = point_cloud[uniform_choice]
             else:
                 raise NotImplementedError
 

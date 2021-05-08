@@ -94,7 +94,8 @@ class TransitionDown(nn.Module):  # TODO: random sample
             assert nsample / points_num == self.sample_rate
 
         if self.sample_method == 'uniform':
-            return xyz[:, : nsample], feature[:, : nsample], None, None
+            uniform_choice = np.random.choice(points_num, nsample, replace=False)
+            return xyz[:, uniform_choice], feature[:, uniform_choice], None, None
 
         elif self.sample_method == 'inverse_knn_density':
             freqs = []  # (batch_size, points_num)
