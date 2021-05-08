@@ -6,25 +6,8 @@ from compressai.models.utils import update_registered_buffers
 
 from lib import loss_function
 from lib.torch_utils import MLPBlock
-from models.baseline.transformer import TransformerBlock
+from lib.points_layers import TransitionDown, TransformerBlock
 from models.baseline.model_config import ModelConfig
-
-
-class TransitionDown(nn.Module):
-    def __init__(self, nsample, sample_method):
-        super(TransitionDown, self).__init__()
-        self.nsample = nsample
-        self.sample_method = sample_method
-
-    def forward(self, x):
-        xyz, points_fea, *args = x
-        if self.sample_method == 'uniform':
-            return xyz[:, : self.nsample], points_fea[:, : self.nsample], *args
-        else:
-            raise NotImplementedError
-
-    def __repr__(self):
-        return f'TransitionDown({self.nsample}, {self.sample_method})'
 
 
 class PointCompressor(nn.Module):
@@ -32,18 +15,18 @@ class PointCompressor(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        self.encoder = [TransformerBlock(3, 24, cfg.neighbor_num, True),
-                        TransformerBlock(24, 64, cfg.neighbor_num, False),
-                        TransitionDown(cfg.input_points_num // 2, 'uniform'),
-                        TransformerBlock(64, 128, cfg.neighbor_num, False),
-                        TransitionDown(cfg.input_points_num // 4, 'uniform'),
-                        TransformerBlock(128, 256, cfg.neighbor_num, False),
-                        TransitionDown(cfg.input_points_num // 8, 'uniform'),
-                        TransformerBlock(256, 512, cfg.neighbor_num, False),
-                        TransitionDown(cfg.input_points_num // 16, 'uniform'),
-                        TransformerBlock(512, 1024, cfg.neighbor_num, False),
-                        TransitionDown(cfg.input_points_num // 32, 'uniform'),
-                        TransformerBlock(1024, 1024, cfg.neighbor_num, False)]
+        self.encoder = [TransformerBlock(3, 24, cfg.neighbor_num),
+                        TransformerBlock(24, 64, cfg.neighbor_num),
+                        TransitionDown(None, 0.5, 'uniform'),
+                        TransformerBlock(64, 128, cfg.neighbor_num),
+                        TransitionDown(None, 0.5, 'uniform'),
+                        TransformerBlock(128, 256, cfg.neighbor_num),
+                        TransitionDown(None, 0.5, 'uniform'),
+                        TransformerBlock(256, 512, cfg.neighbor_num),
+                        TransitionDown(None, 0.5, 'uniform'),
+                        TransformerBlock(512, 1024, cfg.neighbor_num),
+                        TransitionDown(None, 0.5, 'uniform'),
+                        TransformerBlock(1024, 1024, cfg.neighbor_num)]
         self.encoder = nn.Sequential(*self.encoder)
         self.mlp_enc_out = MLPBlock(1024, 1024,  activation=None, batchnorm='nn.bn1d')
         self.encoded_points_num = cfg.input_points_num // 32
@@ -121,7 +104,9 @@ class PointCompressor(nn.Module):
 
 
 def main_t():
+    torch.cuda.set_device('cuda:2')
     cfg = ModelConfig()
+    cfg.input_points_num = 1024
     model = PointCompressor(cfg)
     model = model.cuda()
     point_cloud = torch.rand(4, cfg.input_points_num, cfg.input_points_dim, device='cuda')
@@ -130,7 +115,6 @@ def main_t():
     model.eval()
     model.entropy_bottleneck.update()
     val_out = model(point_cloud)
-    torch.save(model.state_dict(), 't.pth')
 
 
 if __name__ == '__main__':

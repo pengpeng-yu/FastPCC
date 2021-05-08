@@ -6,25 +6,8 @@ from compressai.models.utils import update_registered_buffers
 
 from lib import loss_function
 from lib.torch_utils import MLPBlock
-from models.exp0.transformer import TransformerBlock
+from lib.points_layers import TransitionDown, TransformerBlock
 from models.exp0.model_config import ModelConfig
-
-
-class TransitionDown(nn.Module):
-    def __init__(self, nsample, sample_method):
-        super(TransitionDown, self).__init__()
-        self.nsample = nsample
-        self.sample_method = sample_method
-
-    def forward(self, x):
-        xyz, points_fea, *args = x
-        if self.sample_method == 'uniform':
-            return xyz[:, : self.nsample], points_fea[:, : self.nsample], *args
-        else:
-            raise NotImplementedError
-
-    def __repr__(self):
-        return f'TransitionDown({self.nsample}, {self.sample_method})'
 
 
 class PointEncoder(nn.Module):
@@ -32,27 +15,27 @@ class PointEncoder(nn.Module):
         super(PointEncoder, self).__init__()
         self.top_down_blocks = nn.ModuleList()
         self.top_down_blocks.extend((
-            nn.Sequential(TransformerBlock(3, 64, cfg.neighbor_num, True),
-                          TransformerBlock(64, 128, cfg.neighbor_num, False),
-                          TransitionDown(cfg.input_points_num // 4, 'uniform')),
+            nn.Sequential(TransformerBlock(3, 64, cfg.neighbor_num),
+                          TransformerBlock(64, 128, cfg.neighbor_num),
+                          TransitionDown(None, 0.25, 'uniform')),
 
-            nn.Sequential(TransformerBlock(128, 256, cfg.neighbor_num, False),
-                          TransitionDown(cfg.input_points_num // 8, 'uniform')),
+            nn.Sequential(TransformerBlock(128, 256, cfg.neighbor_num),
+                          TransitionDown(None, 0.5, 'uniform')),
 
-            nn.Sequential(TransformerBlock(256, 512, cfg.neighbor_num, False),
-                          TransitionDown(cfg.input_points_num // 16, 'uniform')),  # inter_fea[0]
+            nn.Sequential(TransformerBlock(256, 512, cfg.neighbor_num),
+                          TransitionDown(None, 0.5, 'uniform')),  # inter_fea[0]
 
-            nn.Sequential(TransformerBlock(512, 1024, cfg.neighbor_num, False),
-                          TransitionDown(cfg.input_points_num // 32, 'uniform')),  # inter_fea[1]
+            nn.Sequential(TransformerBlock(512, 1024, cfg.neighbor_num),
+                          TransitionDown(None, 0.5, 'uniform')),  # inter_fea[1]
 
-            nn.Sequential(TransformerBlock(1024, 1024, cfg.neighbor_num, False),
-                          TransitionDown(cfg.input_points_num // 64, 'uniform')),  # inter_fea[2]
+            nn.Sequential(TransformerBlock(1024, 1024, cfg.neighbor_num),
+                          TransitionDown(None, 0.5, 'uniform')),  # inter_fea[2]
         ))
         self.trainsition_blocks = nn.ModuleList()
-        self.trainsition_blocks.extend((nn.Sequential(TransformerBlock(512, 1024, cfg.neighbor_num, False),
-                                                      TransitionDown(cfg.input_points_num // 16, 'uniform')),
-                                        TransformerBlock(1024, 512, cfg.neighbor_num, False),
-                                        TransformerBlock(1024, 1024, cfg.neighbor_num, False)))
+        self.trainsition_blocks.extend((nn.Sequential(TransformerBlock(512, 1024, cfg.neighbor_num),
+                                                      TransitionDown(cfg.input_points_num // 16, None, 'uniform')),
+                                        TransformerBlock(1024, 512, cfg.neighbor_num),
+                                        TransformerBlock(1024, 1024, cfg.neighbor_num)))
 
         self.init_weights()
 
@@ -166,7 +149,9 @@ class PointCompressor(nn.Module):
 
 
 def main_t():
+    torch.cuda.set_device('cuda:2')
     cfg = ModelConfig()
+    cfg.input_points_num = 1024
     model = PointCompressor(cfg)
     model = model.cuda()
     point_cloud = torch.rand(4, cfg.input_points_num, cfg.input_points_dim, device='cuda')
@@ -175,7 +160,6 @@ def main_t():
     model.eval()
     model.entropy_bottleneck.update()
     val_out = model(point_cloud)
-    torch.save(model.state_dict(), 't.pth')
 
 
 def point_encoder_t():

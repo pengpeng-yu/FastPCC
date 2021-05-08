@@ -6,7 +6,7 @@ from compressai.models.utils import update_registered_buffers
 
 from lib import loss_function
 from lib.torch_utils import MLPBlock
-from models.exp1.transformer import TransformerBlock
+from lib.points_layers import TransformerBlock
 from models.exp1.model_config import ModelConfig
 
 
@@ -93,7 +93,9 @@ class PointCompressor(nn.Module):
 
 
 def main_t():
+    torch.cuda.set_device('cuda:2')
     cfg = ModelConfig()
+    cfg.input_points_num = 1024
     model = PointCompressor(cfg)
     model = model.cuda()
     point_cloud = torch.rand(4, cfg.input_points_num, cfg.input_points_dim, device='cuda')
@@ -102,7 +104,6 @@ def main_t():
     model.eval()
     model.entropy_bottleneck.update()
     val_out = model(point_cloud)
-    torch.save(model.state_dict(), 't.pth')
 
 
 if __name__ == '__main__':
