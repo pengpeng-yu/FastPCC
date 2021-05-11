@@ -3,6 +3,7 @@ import shutil
 import sys
 import importlib
 import time
+from functools import partial
 
 import numpy as np
 import torch
@@ -152,8 +153,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
                                              pin_memory=True)
 
     # Initialize optimizer and scheduler
-    if cfg.train.optimizer == 'adam': Optimizer = torch.optim.Adam
-    elif cfg.train.optimizer == 'sgd': Optimizer =  torch.optim.SGD
+    if cfg.train.optimizer == 'adam': Optimizer = partial(torch.optim.Adam, betas=(cfg.train.momentum, 0.999))
+    elif cfg.train.optimizer == 'sgd': Optimizer =  partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=True)
     else: raise NotImplementedError
     parameters = [p for n, p in model.named_parameters() if not n.endswith(".quantiles")]
     aux_parameters = [p for n, p in model.named_parameters() if n.endswith(".quantiles")]
@@ -197,6 +198,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
     total_steps = (cfg.train.epochs - start_epoch) * steps_one_epoch
     global_step = steps_one_epoch * start_epoch
     ave_time_onestep = None
+    scaler = amp.GradScaler()
     for epoch in range(start_epoch, cfg.train.epochs):
         model.train()
         if global_rank != -1:
@@ -210,12 +212,14 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
                 batch_data = [d.to(device, non_blocking=True) for d in batch_data if isinstance(d, torch.Tensor)]
             else: raise NotImplementedError
 
-            loss_dict = model(batch_data)
-            loss = loss_dict['loss']
+            with amp.autocast():
+                loss_dict = model(batch_data)
+                loss = loss_dict['loss']
 
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
 
             # logging
             time_this_step = time.time() - start_time

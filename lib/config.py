@@ -15,6 +15,7 @@ class TrainConfig(SimpleConfig):
 
     optimizer: str = 'sgd'
     learning_rate: float = 0.05
+    momentum: float = 0.9
     weight_decay: float = 0.0
     aux_weight_decay: float = 0.0
     lr_step_size: int = 25

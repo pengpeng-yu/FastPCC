@@ -107,17 +107,19 @@ def is_parallel(model):
 class MLPBlock(nn.Module):
     """
     if version == 'linear':
-        input: (N, L, C_in)
-        output: (N, L, C_out)
+        input: (N, L_1, ..., L_n, C_in)
+        output: (N, L_1, ..., L_n, C_out)
     elif version == 'conv':
-        input: (N, C_in, L)
-        output: (N, C_out, L)
+        input: (N, C_in, L_1, ..., L_n,)
+        output: (N, C_out, L_1, ..., L_n)
     """
-    def __init__(self, in_channels, out_channels, activation='leaky_relu(0.2)', batchnorm='nn.bn1d', version='linear'):
+    def __init__(self, in_channels, out_channels, activation='leaky_relu(0.2)', batchnorm='nn.bn1d', version='linear',
+                 skip_connection=None):
         super(MLPBlock, self).__init__()
         assert version in ['linear', 'conv']
         assert activation is None or activation.split('(', 1)[0] in ['relu', 'leaky_relu']
         assert batchnorm in ['nn.bn1d', 'custom', None]
+        assert skip_connection in ['sum', 'concat', None]
 
         if batchnorm == 'nn.bn1d':
             self.bn = nn.BatchNorm1d(out_channels)
@@ -145,10 +147,20 @@ class MLPBlock(nn.Module):
             print('Warning: You are using a MLPBlock without activation nor batchnorm, '
                   'which is identical to a nn.Linear(bias=True) object')
 
+        self.in_channels = in_channels
+        self.out_channels = out_channels
         self.version = version
+        self.skip_connection = skip_connection
 
     def forward(self, x):
+        ori_x = x
+
         if self.version == 'linear':
+
+            ori_shape = x.shape
+            if len(ori_shape) != 3:
+                x = x.reshape(ori_shape[0], -1, ori_shape[-1])
+
             x = self.mlp(x)
             if isinstance(self.bn, nn.BatchNorm1d):
                 x = x.permute(0, 2, 1)
@@ -156,14 +168,39 @@ class MLPBlock(nn.Module):
                 x = x.permute(0, 2, 1)
             elif self.bn is not None:
                 x = self.bn(x)
+
             if self.activation is not None:
                 x = self.activation(x)
+
+            if len(ori_shape) != 3:
+                x = x.reshape(*ori_shape[:-1], self.out_channels)
+
+            if self.skip_connection is None:
+                pass
+            elif self.skip_connection == 'sum':
+                x = x + ori_x
+            elif self.skip_connection == 'concat':
+                x = torch.cat([ori_x, x], dim=-1)
             return x
 
         elif self.version == 'conv':
+            ori_shape = x.shape
+            if len(ori_shape) != 3:
+                x = x.reshape(ori_shape[0], ori_shape[1], -1)
+
             x = self.mlp(x)
             if self.bn is not None: x = self.bn(x)
             if self.activation is not None: x = self.activation(x)
+
+            if len(ori_shape) != 3:
+                x = x.reshape(ori_shape[0], self.out_channels, *ori_shape[2:])
+
+            if self.skip_connection is None:
+                pass
+            elif self.skip_connection == 'sum':
+                x = x + ori_x
+            elif self.skip_connection == 'concat':
+                x = torch.cat([ori_x, x], dim=1)
             return x
 
 

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from lib.points_layers import TransitionDownWithDistFea, RotationInvariantDistFea, LocalFeatureAggregation as LFA
+from lib.points_layers import TransitionDownWithDistFea, RotationInvariantDistFea, DeepRotationInvariantDistFea, LocalFeatureAggregation as LFA
 from lib.torch_utils import MLPBlock
 from models.classification.baseline import Config
 
@@ -12,27 +12,29 @@ class Model(nn.Module):
     def __init__(self, cfg: Config):
         super(Model, self).__init__()
         self.cfg = cfg
-        neighbor_fea_generator = RotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, retain_xyz_dists=True)
+        # self.neighbor_fea_generator = DeepRotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, 16, 32, retain_xyz_dists=True)
+        self.neighbor_fea_generator = RotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, retain_xyz_dists=True)
 
         # the first layer has no features, thus its in_channels == 0 and mlp_shortcut == False
         # TODO: 'inverse_knn_density' sampling will increase the differences between original and the rotated. Why?
-        self.layers = nn.Sequential(LFA(0, neighbor_fea_generator, 32, 64),
-                                    LFA(64, neighbor_fea_generator, 64, 128),
-                                    LFA(128, neighbor_fea_generator, 64, 256),
-                                    TransitionDownWithDistFea(neighbor_fea_generator, 256, 512, sample_rate=0.5, sample_method='uniform'),
+        self.layers = nn.Sequential(LFA(0, self.neighbor_fea_generator, 128, 128),
+                                    LFA(128, self.neighbor_fea_generator, 128, 256, feature_transform=True),
+                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 256, 512, sample_rate=0.25, sample_method='uniform'),
 
-                                    LFA(512, neighbor_fea_generator, 128, 512),
-                                    LFA(512, neighbor_fea_generator, 256, 512),
-                                    TransitionDownWithDistFea(neighbor_fea_generator, 512, 512, sample_rate=0.5, sample_method='uniform'),
+                                    LFA(512, self.neighbor_fea_generator, 256, 512, feature_transform=True),
+                                    LFA(512, self.neighbor_fea_generator, 256, 512, feature_transform=True),
+                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 512, 1024, sample_rate=0.25, sample_method='uniform'),
 
-                                    LFA(512, neighbor_fea_generator, 256, 512),
-                                    LFA(512, neighbor_fea_generator, 256, 1024),
-                                    TransitionDownWithDistFea(neighbor_fea_generator, 1024, 1024, sample_rate=0.5, sample_method='uniform'),
+                                    LFA(1024, self.neighbor_fea_generator, 512, 1024, feature_transform=True),
+                                    LFA(1024, self.neighbor_fea_generator, 512, 1024, feature_transform=True),
+                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 1024, 1024, sample_rate=0.25, sample_method='uniform'),
 
-                                    LFA(1024, neighbor_fea_generator, 512, 1024),
-                                    LFA(1024, neighbor_fea_generator, 512, 512))
+                                    LFA(1024, self.neighbor_fea_generator, 512, 1024, feature_transform=True),
+                                    LFA(1024, self.neighbor_fea_generator, 512, 1024, feature_transform=True))
 
-        self.head = nn.Linear(self.layers[-1].out_channels, cfg.classes_num, bias=True)
+        self.head = nn.Sequential(nn.Linear(self.layers[-1].out_channels, 512, bias=True),
+                                  nn.LeakyReLU(0.2, inplace=True),
+                                  nn.Linear(512, cfg.classes_num, bias=True))
         self.log_pred_res('init')
 
     def log_pred_res(self, mode, pred=None, target=None):
@@ -92,7 +94,7 @@ def main_t():
 
     cfg = Config()
     cfg.input_points_num = 1024
-    device = 2
+    device = 0
     torch.cuda.set_device(f'cuda:{device}')
 
     model = Model(cfg)
@@ -100,9 +102,9 @@ def main_t():
     xyz = torch.stack([xyz, torch.tensor(R.random().apply(xyz.numpy()).astype(np.float32))], dim=0)
     target = torch.randint(0, 40, (2,))
 
-    macs, params = profile(model, inputs=((xyz, target),))
-    macs, params = clever_format([macs, params], "%.3f")
-    print(f'macs: {macs}, params: {params}')  # macs: 52.372G, params: 17.291M
+    # macs, params = profile(model, inputs=((xyz, target),))
+    # macs, params = clever_format([macs, params], "%.3f")
+    # print(f'macs: {macs}, params: {params}')  # macs: 47.312G, params: 23.910M
 
     for module_name, module in model.named_modules():
         if isinstance(module, TransitionDownWithDistFea):
