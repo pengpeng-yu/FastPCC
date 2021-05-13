@@ -3,10 +3,10 @@ from lib.config import SimpleConfig
 
 @dataclass
 class ModelConfig(SimpleConfig):
-    input_points_num: int = 8192
+    input_points_num: int = 4096
     input_points_dim: int = 3
     sample_method: str = 'uniform'
-    neighbor_num: int = 16
+    neighbor_num: int = 8
 
     bpp_loss_factor: float = 1e-5
     aux_loss_factor: float = 1000.0

@@ -16,38 +16,45 @@ class PointCompressor(nn.Module):
         self.cfg = cfg
         neighbor_fea_generator = RandLANeighborFea(cfg.neighbor_num)
 
-        self.encoder_layers = [LFA(3, neighbor_fea_generator, 16, 24),
-                               LFA(24, neighbor_fea_generator, 16, 32),
-                               LFA(32, neighbor_fea_generator, 16, 48),
-                               LFA(48, neighbor_fea_generator, 24, 48),
-                               LFA(48, neighbor_fea_generator, 24, 64),
-                               LFA(64, neighbor_fea_generator, 24, 64),
-                               TransitionDown(None, 0.5, 'uniform'),
-                               LFA(64, neighbor_fea_generator, 24, 128),
-                               LFA(128, neighbor_fea_generator, 32, 128),
-                               TransitionDown(None, 0.5, 'uniform'),
-                               LFA(128, neighbor_fea_generator, 32, 256),
+        self.encoder_layers = [LFA(3, neighbor_fea_generator, 8, 16),
+                               LFA(16, neighbor_fea_generator, 8, 16),
+                               TransitionDown(None, 0.25, cfg.sample_method),
+                               LFA(16, neighbor_fea_generator, 16, 64),
+                               LFA(64, neighbor_fea_generator, 16, 64),
+                               TransitionDown(None, 0.25, cfg.sample_method),
+                               LFA(64, neighbor_fea_generator, 32, 256),
                                LFA(256, neighbor_fea_generator, 32, 256),
-                               TransitionDown(None, 0.5, 'uniform'),
-                               LFA(256, neighbor_fea_generator, 32, 512),
-                               LFA(512, neighbor_fea_generator, 32, 512),
-                               TransitionDown(None, 0.5, 'uniform'),
-                               LFA(512, neighbor_fea_generator, 64, 1024),
-                               LFA(1024, neighbor_fea_generator, 128, 1024),
-                               TransitionDown(None, 0.5, 'uniform')]
+                               TransitionDown(None, 0.25, cfg.sample_method),
+                               LFA(256, neighbor_fea_generator, 64, 1024),
+                               LFA(1024, neighbor_fea_generator, 64, 1024),
+                               TransitionDown(None, 0.5, cfg.sample_method),
+                               LFA(1024, neighbor_fea_generator, 128, 2048),
+                               LFA(2048, neighbor_fea_generator, 128, 2048),
+                               TransitionDown(None, 0.5, cfg.sample_method),
+                               LFA(2048, neighbor_fea_generator, 256, 4096),]
 
-        self.encoded_points_num = cfg.input_points_num // 32
+        self.encoded_points_num = 1
         self.encoder_layers = nn.Sequential(*self.encoder_layers)
-        self.mlp_enc_out = nn.Sequential(MLPBlock(1024, 1024, activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
-                                         MLPBlock(1024, 1024, activation=None, batchnorm='nn.bn1d'))
+        self.mlp_enc_out = nn.Sequential(MLPBlock(4096, 6144, activation=None, batchnorm='nn.bn1d'))
 
-        self.entropy_bottleneck = compressai.entropy_models.EntropyBottleneck(1024)
+        self.entropy_bottleneck = compressai.entropy_models.EntropyBottleneck(6144)
 
-        self.decoder_layers = [LFA(1024, neighbor_fea_generator, 128, 1024),
-                               LFA(1024, neighbor_fea_generator, 128, 1024)]
-        self.decoder_layers = nn.Sequential(*self.decoder_layers)
-        self.mlp_dec_out = nn.Sequential(MLPBlock(1024, 256, activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
-                                         MLPBlock(256, 96, activation=None, batchnorm='nn.bn1d'))
+        self.decoder_layers = nn.Sequential(nn.Conv1d(1, 1, 3, padding=1, bias=False),
+                                            nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
+
+                                            nn.Conv1d(1, 1, 3, padding=1, bias=False),
+                                            nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
+
+                                            nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1, bias=False),
+                                            nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
+
+                                            nn.Conv1d(1, 1, 3, padding=1, bias=False),
+                                            nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
+
+                                            nn.Conv1d(1, 1, 3, padding=1, bias=False),
+                                            nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
+
+                                            nn.Conv1d(1, 1, 3, padding=1, bias=True))
 
         self.init_weights()
 
@@ -56,15 +63,15 @@ class PointCompressor(nn.Module):
         batch_size = fea.shape[0]
         xyz = fea[..., :3]  # B, N, C
         # encode
-        xyz, fea = self.encoder_layers((xyz, fea, None, None))[:2]
+        fea = self.encoder_layers((xyz, fea, None, None))[1]
         fea = self.mlp_enc_out(fea)
+        fea = torch.max(fea, dim=1, keepdim=True).values
 
         if self.training:
             fea, likelihoods = self.entropy_bottleneck(fea.permute(0, 2, 1).unsqueeze(3).contiguous())
             fea = fea.squeeze(3).permute(0, 2, 1).contiguous()
             likelihoods = likelihoods.squeeze(3).permute(0, 2, 1).contiguous()
-            fea = self.decoder_layers((xyz, fea, None, None))[1]
-            fea = self.mlp_dec_out(fea)
+            fea = self.decoder_layers(fea)
             fea = fea.reshape(batch_size, self.cfg.input_points_num, 3)
 
             bpp_loss = torch.log2(likelihoods).sum() * (-self.cfg.bpp_loss_factor / (ori_fea.shape[0] * ori_fea.shape[1]))
@@ -78,8 +85,7 @@ class PointCompressor(nn.Module):
         else:
             compressed_strings = self.entropy_bottleneck_compress(fea)
             decompressed_tensors = self.entropy_bottleneck_decompress(compressed_strings)
-            fea = self.decoder_layers((xyz, decompressed_tensors, None, None))[1]
-            fea = self.mlp_dec_out(fea)
+            fea = self.decoder_layers(fea)
             fea = fea.reshape(batch_size, self.cfg.input_points_num, 3)
 
             return {'compressed_strings': compressed_strings,
@@ -112,13 +118,22 @@ class PointCompressor(nn.Module):
         return decompressed_tensors
 
 def main_t():
+    from thop import profile
+    from thop import clever_format
+
     cfg = ModelConfig()
-    cfg.input_points_num = 1024
-    torch.cuda.set_device('cuda:1')
+    cfg.input_points_num = 4096
+    torch.cuda.set_device('cuda:2')
     model = PointCompressor(cfg).cuda()
     model.train()
-    batch_points = torch.rand(1, cfg.input_points_num, 3).cuda()
+    batch_points = torch.rand(2, cfg.input_points_num, 3).cuda()
     out =  model(batch_points)
+    model.entropy_bottleneck.update()
+
+    macs, params = profile(model, inputs=(batch_points,))
+    macs, params = clever_format([macs, params], "%.3f")
+    print(f'macs: {macs}, params: {params}')  # macs: 47.906G, params: 498.756M
+
     print('Done')
 
 if __name__ == '__main__':

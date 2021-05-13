@@ -17,42 +17,41 @@ class PointCompressor(nn.Module):
 
         self.encoder_layers = [LFA(3, neighbor_fea_generator, 16, 32),
                                LFA(32, neighbor_fea_generator, 32, 64),
+                               TransitionDown(sample_method='uniform', sample_rate=0.25),
                                LFA(64, neighbor_fea_generator, 64, 128),
                                LFA(128, neighbor_fea_generator, 128, 256),
+                               TransitionDown(sample_method='uniform', sample_rate=0.25),
                                LFA(256, neighbor_fea_generator, 256, 512),
-                               LFA(512, neighbor_fea_generator, 256, 1024),
-                               LFA(1024, neighbor_fea_generator, 512, 2048),
-                               LFA(2048, neighbor_fea_generator, 1024, 4096)]
+                               LFA(512, neighbor_fea_generator, 256, 1024)]
 
         sample_rate = reduce(lambda x, y: x * y, [t.sample_rate for t in self.encoder_layers if isinstance(t, TransitionDown)] + [1])
         self.encoded_points_num = int(cfg.input_points_num * sample_rate)
         self.encoder_layers = nn.Sequential(*self.encoder_layers)
 
         # conv kernel moves in channels dimension
-        self.conv_enc_out = nn.Sequential(nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1),
+        self.conv_enc_out = nn.Sequential(nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1, bias=False),
                                           nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
-                                          nn.Conv1d(1, 1, 3, padding=1),
-                                          nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
-
-                                          nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1),
-                                          nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
-                                          nn.Conv1d(1, 1, 3, padding=1),
+                                          nn.Conv1d(1, 1, 3, padding=1, bias=False),
                                           nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
 
-                                          nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1),
+                                          nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1, bias=False),
                                           nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
-                                          nn.Conv1d(1, 1, 3, padding=1),
-                                          nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
-
-                                          nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1),
-                                          nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
-                                          nn.Conv1d(1, 1, 3, padding=1),
+                                          nn.Conv1d(1, 1, 3, padding=1, bias=False),
                                           nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
 
-                                          nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1),
+                                          nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1, bias=False),
                                           nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
-                                          nn.Conv1d(1, 1, 3, padding=1),
-                                          nn.BatchNorm1d(1))
+                                          nn.Conv1d(1, 1, 3, padding=1, bias=False),
+                                          nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
+
+                                          nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1, bias=False),
+                                          nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
+                                          nn.Conv1d(1, 1, 3, padding=1, bias=False),
+                                          nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
+
+                                          nn.ConvTranspose1d(1, 1, 3, 2, padding=1, output_padding=1, bias=False),
+                                          nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),
+                                          nn.Conv1d(1, 1, 3, padding=1, bias=True))
         # 1024 * 32 * 3 / 4096 = 24, 2 ** 5 = 32, 4096 * 32 = 2 ** 17
 
         self.decoder_layers = [nn.Conv1d(1, 1, 3, stride=2, padding=1),
@@ -122,7 +121,6 @@ def main_t():
 
     torch.cuda.set_device('cuda:1')
     cfg = ModelConfig()
-    cfg.input_points_num = 1024
 
     xyz = torch.rand(2, cfg.input_points_num, 3)
     model = PointCompressor(cfg)

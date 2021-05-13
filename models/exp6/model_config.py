@@ -3,7 +3,7 @@ from lib.config import SimpleConfig
 
 @dataclass
 class ModelConfig(SimpleConfig):
-    input_points_num: int = 1024
+    input_points_num: int = 4096
     input_points_dim: int = 3
     sample_method: str = 'uniform'
     neighbor_num: int = 16
