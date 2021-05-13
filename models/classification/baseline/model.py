@@ -16,25 +16,25 @@ class Model(nn.Module):
         self.neighbor_fea_generator = RotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, retain_xyz_dists=True)
 
         # the first layer has no features, thus its in_channels == 0 and mlp_shortcut == False
-        # TODO: 'inverse_knn_density' sampling will increase the differences between original and the rotated. Why?
-        self.layers = nn.Sequential(LFA(0, self.neighbor_fea_generator, 128, 128),
-                                    LFA(128, self.neighbor_fea_generator, 128, 256, feature_transform=True),
-                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 256, 512, sample_rate=0.25, sample_method='uniform'),
+        self.layers = nn.Sequential(LFA(0, self.neighbor_fea_generator, 8, 8),
+                                    LFA(8, self.neighbor_fea_generator, 8, 16),
+                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 16, 16, 32, 'uniform', 0.25),
 
-                                    LFA(512, self.neighbor_fea_generator, 256, 512, feature_transform=True),
-                                    LFA(512, self.neighbor_fea_generator, 256, 512, feature_transform=True),
-                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 512, 1024, sample_rate=0.25, sample_method='uniform'),
+                                    LFA(32, self.neighbor_fea_generator, 32, 32),
+                                    LFA(32, self.neighbor_fea_generator, 32, 64),
+                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 64, 64, 128, 'uniform', 0.25),
 
-                                    LFA(1024, self.neighbor_fea_generator, 512, 1024, feature_transform=True),
-                                    LFA(1024, self.neighbor_fea_generator, 512, 1024, feature_transform=True),
-                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 1024, 1024, sample_rate=0.25, sample_method='uniform'),
+                                    LFA(128, self.neighbor_fea_generator, 64, 128),
+                                    LFA(128, self.neighbor_fea_generator, 64, 128),
+                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 128, 128, 128, 'uniform', 0.25),
 
-                                    LFA(1024, self.neighbor_fea_generator, 512, 1024, feature_transform=True),
-                                    LFA(1024, self.neighbor_fea_generator, 512, 1024, feature_transform=True))
+                                    LFA(128, self.neighbor_fea_generator, 128, 256),
+                                    LFA(256, self.neighbor_fea_generator, 128, 256),
+                                    )
 
-        self.head = nn.Sequential(nn.Linear(self.layers[-1].out_channels, 512, bias=True),
+        self.head = nn.Sequential(nn.Linear(self.layers[-1].out_channels, 256, bias=True),
                                   nn.LeakyReLU(0.2, inplace=True),
-                                  nn.Linear(512, cfg.classes_num, bias=True))
+                                  nn.Linear(256, cfg.classes_num, bias=True))
         self.log_pred_res('init')
 
     def log_pred_res(self, mode, pred=None, target=None):
@@ -93,7 +93,6 @@ def main_t():
     from thop import clever_format
 
     cfg = Config()
-    cfg.input_points_num = 1024
     device = 0
     torch.cuda.set_device(f'cuda:{device}')
 
@@ -102,9 +101,9 @@ def main_t():
     xyz = torch.stack([xyz, torch.tensor(R.random().apply(xyz.numpy()).astype(np.float32))], dim=0)
     target = torch.randint(0, 40, (2,))
 
-    # macs, params = profile(model, inputs=((xyz, target),))
-    # macs, params = clever_format([macs, params], "%.3f")
-    # print(f'macs: {macs}, params: {params}')  # macs: 47.312G, params: 23.910M
+    macs, params = profile(model, inputs=((xyz, target),))
+    macs, params = clever_format([macs, params], "%.3f")
+    print(f'macs: {macs}, params: {params}')  # macs: 89.006G, params: 57.465M
 
     for module_name, module in model.named_modules():
         if isinstance(module, TransitionDownWithDistFea):

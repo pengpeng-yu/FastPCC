@@ -154,7 +154,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
 
     # Initialize optimizer and scheduler
     if cfg.train.optimizer == 'adam': Optimizer = partial(torch.optim.Adam, betas=(cfg.train.momentum, 0.999))
-    elif cfg.train.optimizer == 'sgd': Optimizer =  partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=True)
+    elif cfg.train.optimizer == 'sgd': Optimizer =  partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=cfg.train.momentum != 0.0)
     else: raise NotImplementedError
     parameters = [p for n, p in model.named_parameters() if not n.endswith(".quantiles")]
     aux_parameters = [p for n, p in model.named_parameters() if n.endswith(".quantiles")]

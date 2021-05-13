@@ -86,24 +86,34 @@ class TransitionDown(nn.Module):
         if raw_neighbors_feature is not None: assert not raw_neighbors_feature.requires_grad
         if neighbors_idx is not None: assert not neighbors_idx.requires_grad
         if self.training: assert feature.requires_grad
-        batch_size, points_num, _ = xyz.shape
-
         del raw_neighbors_feature
 
-        if self.nsample is not None: nsample = self.nsample
+        sample_indexes = self.get_indexes(xyz, neighbors_idx)
+
+        return index_points(xyz, sample_indexes), index_points(feature, sample_indexes), None, None
+
+    def get_indexes(self, xyz, neighbors_idx):
+        batch_size, points_num, _ = xyz.shape
+
+        if self.nsample is not None:
+            nsample = self.nsample
         else:
             nsample = int(self.sample_rate * points_num)
             assert nsample / points_num == self.sample_rate
 
         if self.sample_method == 'uniform':
-            sample_indexes = torch.multinomial(torch.ones((1,1), device=xyz.device).expand(batch_size, points_num),
+            sample_indexes = torch.multinomial(torch.ones((1, 1), device=xyz.device).expand(batch_size, points_num),
                                                nsample, replacement=False)
+
+        elif self.sample_method == 'uniform_batch_unaware':  # for debug purpose
+            sample_indexes = torch.multinomial(torch.ones((1,), device=xyz.device).expand(points_num),
+                                               nsample, replacement=False)[None, :].expand(batch_size, -1)
 
         elif self.sample_method == 'inverse_knn_density':
             freqs = []  # (batch_size, points_num)
-            for ni in neighbors_idx:
+            for ni in neighbors_idx:  # TODO: anchor_points is supposed to be smaller than neighbor_num
                 # (points_num, )
-                freqs.append(ni.reshape(-1).bincount(minlength=points_num))
+                freqs.append(torch.maximum(ni.reshape(-1).bincount(minlength=points_num), torch.tensor([1], device=xyz.device)))
             del neighbors_idx
             # (batch_size, nsample)
             sample_indexes = torch.multinomial(1 / torch.stack(freqs, dim=0), nsample, replacement=False)
@@ -111,7 +121,7 @@ class TransitionDown(nn.Module):
         else:
             raise NotImplementedError
 
-        return index_points(xyz, sample_indexes), index_points(feature, sample_indexes), None, None
+        return sample_indexes
 
     def __repr__(self):
         return f'TransitionDown({self.nsample}, {self.sample_rate}, {self.sample_method})'
@@ -144,7 +154,7 @@ class RandLANeighborFea(NeighborFeatureGenerator):
 
 class RotationInvariantDistFea(NeighborFeatureGenerator):
     def __init__(self, neighbor_num:int, anchor_points:int, retain_xyz_dists=False):
-        if not anchor_points >= 4: raise NotImplementedError
+        if not anchor_points >= 3: raise NotImplementedError
         self.intra_anchor_dists_chnls = (anchor_points * (anchor_points - 1) // 2)
         self.inter_anchor_dists_chnls = anchor_points ** 2
         super(RotationInvariantDistFea, self).__init__(neighbor_num, self.intra_anchor_dists_chnls * 2 + self.inter_anchor_dists_chnls)
@@ -163,7 +173,7 @@ class RotationInvariantDistFea(NeighborFeatureGenerator):
         # (B, N, 15 if self.anchor_points == 6)
         intra_anchor_dists = self.gen_intra_anchor_dists(xyz_dists, neighbors_dists[:, :, :self.anchor_points],
                                                          neighbors_idx[:, :, :self.anchor_points])
-        # (B, N, self.neighbor_num, self.anchor_points)
+        # (B, N, self.neighbor_num, self.anchor_points ** 2)
         inter_anchor_dists = self.gen_inter_anchor_dists(xyz_dists, neighbors_idx)
 
         if self.retain_xyz_dists:
@@ -185,7 +195,7 @@ class RotationInvariantDistFea(NeighborFeatureGenerator):
             return intra_anchor_dists, inter_anchor_dists, neighbors_idx
 
     def gen_intra_anchor_dists(self, xyz_dists, neighbors_dists, neighbors_idx):
-        if self.anchor_points >= 4:
+        if self.anchor_points >= 3:
             sub_anchor_dists = []
             for pi, pj in combinations(range(1, self.anchor_points), 2):
                 sub_anchor_dists.append(index_points_dists(xyz_dists,
@@ -200,7 +210,7 @@ class RotationInvariantDistFea(NeighborFeatureGenerator):
     def gen_inter_anchor_dists(self, xyz_dists, neighbors_idx):
         batch_size, points_num, _ = xyz_dists.shape
         anchor_points_idx = neighbors_idx[:, :, :self.anchor_points]  # (B, N, anchor_points)
-        neighbors_idx = neighbors_idx[:, :, :self.neighbor_num]  # TODO: try self.anchor_points:self.neighbor_num
+        neighbors_idx = neighbors_idx[:, :, :self.neighbor_num]
 
         # (B, N, neighbor_num) -> (batch_size, points_num, neighbor_num, anchor_points)
         neighbors_anchor_points_idx = index_points(anchor_points_idx, neighbors_idx)
@@ -214,7 +224,7 @@ class RotationInvariantDistFea(NeighborFeatureGenerator):
         return relative_dists
 
 
-class DeepRotationInvariantDistFea(RotationInvariantDistFea):
+class DeepRotationInvariantDistFea(RotationInvariantDistFea):  # deprecated
     def __init__(self, neighbor_num:int, anchor_points:int, extra_intra_anchor_dists_chnls:int, extra_relative_fea_chnls:int,
                  retain_xyz_dists=False):
         super(DeepRotationInvariantDistFea, self).__init__(neighbor_num, anchor_points, retain_xyz_dists)
@@ -246,60 +256,36 @@ class DeepRotationInvariantDistFea(RotationInvariantDistFea):
         return relative_feature, neighbors_idx
 
 
-class TransitionDownWithDistFea(nn.Module):
-    def __init__(self, neighbor_fea_generator: RotationInvariantDistFea, in_channels, out_channels,
-                 nsample:int=None, sample_rate:float=None, sample_method:str='uniform'):
-        super(TransitionDownWithDistFea, self).__init__()
-
-        assert (nsample is None) != (sample_rate is None)
-        self.nsample = nsample
-        self.sample_rate = sample_rate
-        self.sample_method = sample_method
+class TransitionDownWithDistFea(TransitionDown):
+    def __init__(self, neighbor_fea_generator: RotationInvariantDistFea, in_channels, transition_fea_chnls, out_channels,
+                 sample_method:str='uniform', sample_rate:float=None, nsample:int=None):
+        super(TransitionDownWithDistFea, self).__init__(nsample, sample_rate, sample_method)
 
         self.neighbor_fea_generator = neighbor_fea_generator
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.transition_fea_chnls = transition_fea_chnls
         
         assert neighbor_fea_generator.retain_xyz_dists is True
-        assert self.in_channels >= self.neighbor_fea_generator.channels
+        # assert self.in_channels >= self.neighbor_fea_generator.channels
 
-        self.mlp_anchor_fea_weight = MLPBlock(self.neighbor_fea_generator.channels, self.in_channels,
-                                              activation=None, batchnorm='nn.bn1d')
-        self.mlp_anchor_fea_bias = MLPBlock(self.neighbor_fea_generator.channels, self.in_channels,
-                                            activation=None, batchnorm='nn.bn1d')
-        self.mlp_out = MLPBlock(self.neighbor_fea_generator.channels + self.in_channels, self.out_channels,
-                                activation='leaky_relu(0.2)', batchnorm='nn.bn1d')
+        self.mlp_anchor_transition_fea = nn.Sequential(MLPBlock(self.neighbor_fea_generator.channels, self.transition_fea_chnls,
+                                                                activation=None, batchnorm='nn.bn1d'),
+                                                       MLPBlock(self.transition_fea_chnls, self.transition_fea_chnls,
+                                                                activation=None, batchnorm='nn.bn1d'))
+
+        self.mlp_out = nn.Sequential(MLPBlock(self.in_channels + self.transition_fea_chnls,
+                                              self.out_channels,
+                                              activation='leaky_relu(0.2)', batchnorm='nn.bn1d'))
 
     def forward(self, x):
         xyz, feature, raw_neighbors_feature, neighbors_idx_before = x
         batch_size, points_num, _ = xyz.shape
+        sample_indexes = self.get_indexes(xyz, neighbors_idx_before)
+        nsample = sample_indexes.shape[1]
 
         intra_anchor_dists_before = raw_neighbors_feature[:, :, 0, :self.neighbor_fea_generator.intra_anchor_dists_chnls]
         del raw_neighbors_feature
-
-        if self.nsample is not None: nsample = self.nsample
-        else:
-            nsample = int(self.sample_rate * points_num)
-            assert nsample / points_num == self.sample_rate
-
-        if self.sample_method == 'uniform':
-            sample_indexes = torch.multinomial(torch.ones((1, 1), device=xyz.device).expand(batch_size, points_num),
-                                               nsample, replacement=False)
-
-        elif self.sample_method == 'uniform_batch_unaware':  # for debug purpose
-            sample_indexes = torch.multinomial(torch.ones((1,), device=xyz.device).expand(points_num),
-                                               nsample, replacement=False)[None, :].expand(batch_size, -1)
-
-        elif self.sample_method == 'inverse_knn_density':
-            freqs = []  # (batch_size, points_num)
-            for ni in neighbors_idx_before:
-                # (points_num, )
-                freqs.append(ni.reshape(-1).bincount(minlength=points_num))
-            # (batch_size, nsample)
-            sample_indexes = torch.multinomial(1 / torch.stack(freqs, dim=0), nsample, replacement=False)
-
-        else:
-            raise NotImplementedError
 
         # After sampling, all the anchors have to be redefined due to loss of points, which introduces ambiguity of the
         # relative position and gesture between new and old anchors.
@@ -332,10 +318,8 @@ class TransitionDownWithDistFea(nn.Module):
         if hasattr(self.neighbor_fea_generator, 'mlp_relative_fea'):
             anchor_dist_feature = self.neighbor_fea_generator.mlp_relative_fea(anchor_dist_feature)
 
-        anchor_dist_feature_weight = self.mlp_anchor_fea_weight(anchor_dist_feature)
-        anchor_dist_feature_bias = self.mlp_anchor_fea_bias(anchor_dist_feature)
-        feature = torch.nn.functional.leaky_relu(feature * anchor_dist_feature_weight + anchor_dist_feature_bias, 0.2, inplace=True)
-        feature = torch.cat([feature, anchor_dist_feature], dim=2)
+        anchor_transition_fea = self.mlp_anchor_transition_fea(anchor_dist_feature)
+        feature = torch.cat([feature, anchor_transition_fea], dim=2)
         feature = self.mlp_out(feature)
 
         return xyz, feature, raw_neighbors_feature_after, neighbors_idx_after
@@ -352,29 +336,30 @@ class TransitionDownWithDistFea(nn.Module):
 
 class LocalFeatureAggregation(nn.Module):
     def __init__(self, in_channels, neighbor_feature_generator: NeighborFeatureGenerator,
-                 neighbor_fea_out_chnls, out_channels, feature_transform=False, return_neighbor_based_fea=True):
+                 raw_neighbor_fea_out_chnls, out_channels, return_neighbor_based_fea=True):
         super(LocalFeatureAggregation, self).__init__()
         # assert neighbor_fea_out_chnls >= neighbor_feature_generator.channels
 
-        self.mlp_neighbor_fea = MLPBlock(neighbor_feature_generator.channels,
-                                         neighbor_fea_out_chnls, activation='leaky_relu(0.2)', batchnorm='nn.bn1d')
-        self.mlp_attn = nn.Linear(in_channels + neighbor_fea_out_chnls, in_channels + neighbor_fea_out_chnls, bias=False)
-        self.mlp_out = MLPBlock(in_channels + neighbor_fea_out_chnls, out_channels, activation=None, batchnorm='nn.bn1d')
+        self.mlp_raw_neighbor_fea = nn.Sequential(MLPBlock(neighbor_feature_generator.channels, raw_neighbor_fea_out_chnls,
+                                                           activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
+                                                  MLPBlock(raw_neighbor_fea_out_chnls, raw_neighbor_fea_out_chnls,
+                                                           activation='leaky_relu(0.2)', batchnorm='nn.bn1d'))
+        if in_channels != 0:
+            self.neighbor_fea_chnls = in_channels * 2 + raw_neighbor_fea_out_chnls
+        else:
+            self.neighbor_fea_chnls = neighbor_feature_generator.channels + raw_neighbor_fea_out_chnls
+        self.mlp_neighbor_fea = nn.Sequential(MLPBlock(self.neighbor_fea_chnls, self.neighbor_fea_chnls,
+                                                       activation='leaky_relu(0.2)', batchnorm='nn.bn1d'))
+
+        self.mlp_attn = nn.Linear(self.neighbor_fea_chnls, self.neighbor_fea_chnls, bias=False)
+        self.mlp_out = MLPBlock(self.neighbor_fea_chnls, out_channels, activation=None, batchnorm='nn.bn1d')
         if in_channels != 0: self.mlp_shortcut = MLPBlock(in_channels, out_channels, None, 'nn.bn1d')
         else: self.mlp_shortcut = None
-
-        if feature_transform:
-            assert in_channels != 0
-            self.mlp_transform_weight = MLPBlock(neighbor_feature_generator.channels, in_channels,
-                                                 activation=None, batchnorm='nn.bn1d')
-            self.mlp_transform_bias = MLPBlock(neighbor_feature_generator.channels, in_channels,
-                                               activation=None, batchnorm='nn.bn1d')
 
         self.neighbor_feature_generator = neighbor_feature_generator
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.neighbor_fea_out_chnls = neighbor_fea_out_chnls
-        self.feature_transform = feature_transform
+        self.raw_neighbor_fea_out_chnls = raw_neighbor_fea_out_chnls
         self.return_neighbor_based_fea = return_neighbor_based_fea
 
     def forward(self, x):
@@ -396,20 +381,17 @@ class LocalFeatureAggregation(nn.Module):
         if raw_neighbors_feature is None or neighbors_idx is None:
             raw_neighbors_feature, neighbors_idx = self.neighbor_feature_generator(xyz)
 
-        neighbors_feature = self.mlp_neighbor_fea(raw_neighbors_feature)
+        raw_neighbors_feature_mlp = self.mlp_raw_neighbor_fea(raw_neighbors_feature)
 
         if self.in_channels != 0:
             # the slice below is necessary in case that RotationInvariantDistFea is used and anchor_points > neighbor_num
-            feature = index_points(feature, neighbors_idx[:, :, :self.neighbor_feature_generator.neighbor_num])
-
-            if self.feature_transform:
-                transform_weight = self.mlp_transform_weight(raw_neighbors_feature)
-                transform_bias = self.mlp_transform_bias(raw_neighbors_feature)
-                feature = torch.nn.functional.leaky_relu(feature * transform_weight + transform_bias, 0.2, inplace=True)
-            feature = torch.cat([feature, neighbors_feature], dim=3)
+            neighbors_feature = index_points(feature, neighbors_idx[:, :, :self.neighbor_feature_generator.neighbor_num])
+            center_feature = feature[:, :, None, :].expand(-1, -1, self.neighbor_feature_generator.neighbor_num, -1)
+            neighbors_feature = torch.cat([center_feature, neighbors_feature, raw_neighbors_feature_mlp], dim=3)
         else:
-            feature = neighbors_feature
+            neighbors_feature = torch.cat([raw_neighbors_feature, raw_neighbors_feature_mlp], dim=3)
 
+        feature = self.mlp_neighbor_fea(neighbors_feature)
         feature = self.attn_pooling(feature)
 
         if self.in_channels != 0:

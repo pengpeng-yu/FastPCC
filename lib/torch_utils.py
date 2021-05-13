@@ -203,6 +203,11 @@ class MLPBlock(nn.Module):
                 x = torch.cat([ori_x, x], dim=1)
             return x
 
+    def __repr__(self):
+        return f'MLPBlock(in_channels={self.in_channels}, out_channels={self.out_channels}, ' \
+               f'activation={self.activation}, batchnorm={self.bn}, version={self.version}, ' \
+               f'skip_connection={self.skip_connection}'
+
 
 class BatchNorm1dChnlLast(nn.Module):
     # very slow
