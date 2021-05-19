@@ -158,12 +158,13 @@ class SimpleConfig:
     def to_yaml(self):
         return yaml.safe_dump(self.to_dict(), default_flow_style=False, sort_keys=False)
 
-    def dict_to_dotdict(self, dict_obj: Dict):
+    @classmethod
+    def dict_to_dotdict(cls, dict_obj: Dict):
         dotdict = {}
         for key, var in dict_obj.items():
             assert isinstance(key, str), f'unexpected type {type(key)} of key {key} of dict'
             if isinstance(var, dict):
-                sub_dotdict = self.dict_to_dotdict(var)
+                sub_dotdict = cls.dict_to_dotdict(var)
                 dotdict.update({key + '.' + k: v for k, v in sub_dotdict.items()})
             else:
                 dotdict[key] = var

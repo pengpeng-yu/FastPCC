@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -59,14 +61,13 @@ def farthest_point_sample(xyz, npoint):
     """
     device = xyz.device
     B, N, C = xyz.shape
-    centroids = torch.zeros(B, npoint, dtype=torch.long).to(device)
-    distance = torch.ones(B, N).to(device) * 1e10
-    farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device)
-    batch_indices = torch.arange(B, dtype=torch.long).to(device)
+    centroids = torch.zeros(B, npoint, dtype=torch.long, device=device)
+    distance = torch.full((B, N), 1e10, device=device)
+    farthest = torch.randint(0, N, (B,), dtype=torch.long, device=device)
     for i in range(npoint):
         centroids[:, i] = farthest
-        centroid = xyz[batch_indices, farthest, :].view(B, 1, 3)
-        dist = torch.sum((xyz - centroid) ** 2, -1)
+        centroid = index_points(xyz, farthest).unsqueeze(1)
+        dist = torch.cdist(xyz, centroid).squeeze(2)
         distance = torch.min(distance, dist)
         farthest = torch.max(distance, -1)[1]
     return centroids
@@ -82,20 +83,39 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
     Return:
         group_idx: grouped points index, [B, S, nsample]
     """
-    device = xyz.device
-    B, N, C = xyz.shape
-    _, S, _ = new_xyz.shape
-    group_idx = torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
-    sqrdists = square_distance(new_xyz, xyz)
-    group_idx[sqrdists > radius ** 2] = N
-    group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample]
-    group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])
-    mask = group_idx == N
-    group_idx[mask] = group_first[mask]
+    # indices could be different with original version if there are more samples than nsample in one ball
+    dists = torch.cdist(new_xyz, xyz)  # B, S, N
+    values, indices = dists.topk(nsample, sorted=False, largest=False)
+    group_idx = torch.where(values < radius, indices, indices[:, :, :1])
+
+    # ori:
+    # new_version_group_idx = group_idx.clone()
+    # def square_distance(src, dst):
+    #     return torch.sum((src[:, :, None] - dst[:, None]) ** 2, dim=-1)
+    #
+    # device = xyz.device
+    # B, N, C = xyz.shape
+    # _, S, _ = new_xyz.shape
+    # group_idx = torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
+    # sqrdists = square_distance(new_xyz, xyz)
+    # group_idx[sqrdists > radius ** 2] = N
+    # group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample]
+    # group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])
+    # mask = group_idx == N
+    # group_idx[mask] = group_first[mask]
+    #
+    # test:
+    # for i in range(B):
+    #     for j in range(S):
+    #         try:
+    #             assert torch.sum(new_version_group_idx[i, j].unique() != group_idx[i, j].unique()) == 0
+    #         except AssertionError:
+    #             assert torch.sum(sqrdists[i, j, new_version_group_idx[i, j]] >= radius ** 2) == 0
+
     return group_idx
 
 
-def sample_and_group(nsample, sample_method, group_radius, ngroup, xyz, points_fea, returnfps=False, knn=False):
+def sample_and_group(nsample, group_radius, ngroup, xyz, points_fea, returnfps=False, knn=False):
     """
     sample points and aggregate nearby points feature
     Input:
@@ -106,55 +126,66 @@ def sample_and_group(nsample, sample_method, group_radius, ngroup, xyz, points_f
         points_fea: input points data, [B, N, D]
     Return:
         sampled_xyz: sampled points position data, [B, npoint, nsample, 3]
-        new_points_fea: sampled points data, [B, npoint, nsample, 3+D]
+        new_points: sampled points data, [B, npoint, nsample, 3+D]
     """
-    if sample_method == 'fps':
-        fps_idx = farthest_point_sample(xyz, nsample) # [B, npoint]
-        sampled_xyz = index_points(xyz, fps_idx)
-    elif sample_method == 'uniform':
-        sampled_xyz = xyz[:, :nsample, :]
-    elif sample_method is None and nsample is None:
-        sampled_xyz = xyz
-    else:
-        raise NotImplementedError
+    fps_idx = farthest_point_sample(xyz, nsample) # [B, npoint]
+    sampled_xyz = index_points(xyz, fps_idx)
 
     if knn:
-        dists = torch.cdist(sampled_xyz, xyz, compute_mode='donot_use_mm_for_euclid_dist')  # B x npoint x N
+        dists = torch.cdist(sampled_xyz, xyz)  # B x npoint x N
         grouped_idx = dists.topk(ngroup, dim=-1, largest=False, sorted=True)[1]  # argsort()[:, :, :ngroup]  # B x npoint x K
     else:
         grouped_idx = query_ball_point(group_radius, ngroup, xyz, sampled_xyz)
 
     grouped_xyz = index_points(xyz, grouped_idx) # [B, npoint, nsample, C]
-    grouped_xyz_relative = grouped_xyz - sampled_xyz[:, :, None, :]
+    grouped_xyz_norm = grouped_xyz - sampled_xyz[:, :, None, :]
 
     if points_fea is not None:
         grouped_points = index_points(points_fea, grouped_idx)
-        new_points_fea = torch.cat([grouped_xyz_relative, grouped_points], dim=-1) # [B, npoint, nsample, C+D]
+        new_points = torch.cat([grouped_xyz_norm, grouped_points], dim=-1) # [B, npoint, nsample, C+D]
     else:
-        new_points_fea = grouped_xyz_relative
-
+        new_points = grouped_xyz_norm
     if returnfps:
-        return sampled_xyz, new_points_fea, grouped_xyz, fps_idx
+        return sampled_xyz, new_points, grouped_xyz, fps_idx
     else:
-        return sampled_xyz, new_points_fea
+        return sampled_xyz, new_points
+
+
+def sample_and_group_all(xyz, points):
+    """
+    Input:
+        xyz: input points position data, [B, N, 3]
+        points: input points data, [B, N, D]
+    Return:
+        new_xyz: sampled points position data, [B, 1, 3]
+        new_points: sampled points data, [B, 1, N, 3+D]
+    """
+    assert xyz.shape[2] == 3
+    B, N, _ = xyz.shape
+    new_xyz = torch.zeros(B, 1, 3, device=xyz.device)
+    grouped_xyz = xyz.view(B, 1, N, 3)
+    if points is not None:
+        new_points = torch.cat([grouped_xyz, points.view(B, 1, N, -1)], dim=-1)
+    else:
+        new_points = grouped_xyz
+    return new_xyz, new_points
 
 
 class PointNetSetAbstraction(nn.Module):
-    def __init__(self, nsample, sample_method, group_radius, ngroup, in_channels, mlp_channels, knn=False, attn_xyz=False):
+    def __init__(self, nsample, group_radius, ngroup, in_channel, mlp, group_all, knn=False):
         super(PointNetSetAbstraction, self).__init__()
         self.nsample = nsample
-        self.sample_method = sample_method
         self.group_radius = group_radius
         self.ngroup = ngroup
         self.knn = knn
-        self.attn_xyz = attn_xyz
-        self.mlps = []
-        last_channel = in_channels
-        for channels in mlp_channels:
-            self.mlps.append(nn.Linear(last_channel, channels))
-            self.mlps.append(nn.ReLU(inplace=True))
-            last_channel = channels
-        self.mlps = nn.Sequential(*self.mlps)
+        self.mlp_convs = nn.ModuleList()
+        self.mlp_bns = nn.ModuleList()
+        last_channel = in_channel
+        for out_channel in mlp:
+            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1))
+            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
+            last_channel = out_channel
+        self.group_all = group_all
 
     def forward(self, xyz, points_fea):
         """
@@ -165,28 +196,17 @@ class PointNetSetAbstraction(nn.Module):
             sampled_xyz: sampled points position data, [B, S, C]
             new_points_concat: sample points feature data, [B, S, D']
         """
-        sampled_xyz, sampled_points = sample_and_group(self.nsample, self.sample_method, self.group_radius, self.ngroup,
-                                                       xyz, points_fea, knn=self.knn)
-        # sampled_xyz: sampled points position data, [B, npoint, C]
-        # sampled_points: sampled points feature, [B, nsample, ngroup, C+D]
-        if self.attn_xyz:
-            group_xyz_norm = sampled_points.detach()[:, :, :, :3]
-
-        sampled_points = self.mlps(sampled_points)
-
-        # TODO: AttentivePooling?
-        if self.attn_xyz:
-            sampled_points, neighbor_index = torch.max(sampled_points, 2)
-
-            neighbor_index = neighbor_index[:, :, :, None].expand(-1, -1, -1, 3)
-            attn_xyz = torch.gather(group_xyz_norm, 2, neighbor_index)
-            attn_xyz = torch.mean(attn_xyz, dim=2)
-            attn_xyz = attn_xyz + sampled_xyz
-
-            return attn_xyz, sampled_points
-
+        if self.group_all:
+            sampled_xyz, sampled_points = sample_and_group_all(xyz, points_fea)
         else:
-            # maxiunm for channels of each points group of each sampled point
-            # [B, nsample, mlps_last_channel]
-            return sampled_xyz, torch.max(sampled_points, 2)[0]
+            sampled_xyz, sampled_points = sample_and_group(self.nsample, self.group_radius, self.ngroup, xyz, points_fea, knn=self.knn)
+        # sampled_xyz: sampled points position data, [B, npoint, C]
+        # sampled_points: sampled points data, [B, nsample, ngroup, C+D]
+        sampled_points = sampled_points.permute(0, 3, 2, 1)  # [B, C+D, ngroup, nsample]
+        for conv, bn in zip(self.mlp_convs, self.mlp_bns):
+            sampled_points = F.relu(bn(conv(sampled_points)))
+
+        sampled_points = torch.max(sampled_points, 2)[0].transpose(1, 2)  # [B, nsample, last_channel]
+        # maxiunm for each channel for each points group of sampled point
+        return sampled_xyz, sampled_points
 
