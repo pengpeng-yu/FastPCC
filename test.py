@@ -69,14 +69,16 @@ def test(cfg: Config, logger, model: torch.nn.Module=None):
     if hasattr(model, 'entropy_bottleneck'):
         model.entropy_bottleneck.update()
     elif torch_utils.is_parallel(model) and hasattr(model.module, 'entropy_bottleneck'):
-        model.entropy_bottleneck.update()
+        model.module.entropy_bottleneck.update()
     else:
         logger.warning('no entropy_bottleneck was found in model')
 
-    if torch_utils.is_parallel(model):
-        model.module.log_pred_res('reset')
-    else:
-        model.log_pred_res('reset')
+    try:
+        if torch_utils.is_parallel(model):
+            model.module.log_pred_res('reset')
+        else:
+            model.log_pred_res('reset')
+    except AttributeError: pass
 
     steps_one_epoch = len(dataloader)
     for step_idx, batch_data in enumerate(dataloader):
@@ -96,10 +98,13 @@ def test(cfg: Config, logger, model: torch.nn.Module=None):
             # break  # TODO
             # TODO: compute loss and compression rate of points compression model
 
-    if torch_utils.is_parallel(model):
-        test_results = model.module.log_pred_res('show')
-    else:
-        test_results = model.log_pred_res('show')
+    try:
+        if torch_utils.is_parallel(model):
+            test_results = model.module.log_pred_res('show')
+        else:
+            test_results = model.log_pred_res('show')
+    except AttributeError: pass
+
     logger.info(f'test end')
     return {item_name: item for item_name, item in test_results.items() if isinstance(item, int) or isinstance(item, float)}
 

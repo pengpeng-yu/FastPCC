@@ -60,7 +60,7 @@ class PointCompressor(nn.Module):
         else:
             compressed_strings = self.entropy_bottleneck_compress(fea)
             decompressed_tensors = self.entropy_bottleneck_decompress(compressed_strings)
-            fea /= self.cfg.bottleneck_scaler
+            decompressed_tensors /= self.cfg.bottleneck_scaler
             decoder_output = self.decoder((xyz, decompressed_tensors, None, None))[1]
             decoder_output = self.mlp_dec_out(decoder_output)
             decoder_output = decoder_output.reshape(batch_size, self.cfg.input_points_num, self.cfg.input_points_dim)

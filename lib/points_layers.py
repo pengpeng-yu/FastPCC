@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from lib.torch_utils import MLPBlock
-from lib.pointnet_utils import index_points, index_points_dists
+from lib.pointnet_utils import index_points, index_points_dists, farthest_point_sample
 
 
 class TransformerBlock(nn.Module):
@@ -118,6 +118,9 @@ class TransitionDown(nn.Module):
             # (batch_size, nsample)
             sample_indexes = torch.multinomial(1 / torch.stack(freqs, dim=0), nsample, replacement=False)
 
+        elif self.sample_method == 'fps':
+            return farthest_point_sample(xyz, nsample)
+
         else:
             raise NotImplementedError
 
@@ -140,8 +143,8 @@ class RandLANeighborFea(NeighborFeatureGenerator):
         super(RandLANeighborFea, self).__init__(neighbor_num, channels=3 + 3 + 3 + 1)
 
     def forward(self, xyz):
-        dists = torch.cdist(xyz, xyz, compute_mode='donot_use_mm_for_euclid_dist')
-        relative_dists, neighbors_idx = dists.topk(self.neighbor_num, dim=-1, largest=False, sorted=True)
+        dists = torch.cdist(xyz, xyz)
+        relative_dists, neighbors_idx = dists.topk(self.neighbor_num, dim=-1, largest=False, sorted=False)
         neighbors_xyz = index_points(xyz, neighbors_idx)
 
         expanded_xyz = xyz[:, :, None].expand(-1, -1, neighbors_xyz.shape[2], -1)
@@ -165,7 +168,7 @@ class RotationInvariantDistFea(NeighborFeatureGenerator):
 
     def forward(self, xyz, concat_raw_relative_fea=True):
         assert len(xyz.shape) == 3 and xyz.shape[2] == 3
-        xyz_dists = torch.cdist(xyz, xyz, compute_mode='donot_use_mm_for_euclid_dist')
+        xyz_dists = torch.cdist(xyz, xyz)
         neighbors_dists, neighbors_idx = xyz_dists.topk(max(self.neighbor_num, self.anchor_points),
                                                         dim=2, largest=False, sorted=True)
         # xyz_dists is still necessary here and can not be replaced by neighbors_dists
@@ -270,9 +273,9 @@ class TransitionDownWithDistFea(TransitionDown):
         # assert self.in_channels >= self.neighbor_fea_generator.channels
 
         self.mlp_anchor_transition_fea = nn.Sequential(MLPBlock(self.neighbor_fea_generator.channels, self.transition_fea_chnls,
-                                                                activation=None, batchnorm='nn.bn1d'),
+                                                                activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
                                                        MLPBlock(self.transition_fea_chnls, self.transition_fea_chnls,
-                                                                activation=None, batchnorm='nn.bn1d'))
+                                                                activation='leaky_relu(0.2)', batchnorm='nn.bn1d'))
 
         self.mlp_out = nn.Sequential(MLPBlock(self.in_channels + self.transition_fea_chnls,
                                               self.out_channels,
@@ -345,7 +348,7 @@ class LocalFeatureAggregation(nn.Module):
                                                   MLPBlock(raw_neighbor_fea_out_chnls, raw_neighbor_fea_out_chnls,
                                                            activation='leaky_relu(0.2)', batchnorm='nn.bn1d'))
         if in_channels != 0:
-            self.neighbor_fea_chnls = in_channels * 2 + raw_neighbor_fea_out_chnls
+            self.neighbor_fea_chnls = in_channels + raw_neighbor_fea_out_chnls
         else:
             self.neighbor_fea_chnls = neighbor_feature_generator.channels + raw_neighbor_fea_out_chnls
         self.mlp_neighbor_fea = nn.Sequential(MLPBlock(self.neighbor_fea_chnls, self.neighbor_fea_chnls,
@@ -386,8 +389,7 @@ class LocalFeatureAggregation(nn.Module):
         if self.in_channels != 0:
             # the slice below is necessary in case that RotationInvariantDistFea is used and anchor_points > neighbor_num
             neighbors_feature = index_points(feature, neighbors_idx[:, :, :self.neighbor_feature_generator.neighbor_num])
-            center_feature = feature[:, :, None, :].expand(-1, -1, self.neighbor_feature_generator.neighbor_num, -1)
-            neighbors_feature = torch.cat([center_feature, neighbors_feature, raw_neighbors_feature_mlp], dim=3)
+            neighbors_feature = torch.cat([neighbors_feature, raw_neighbors_feature_mlp], dim=3)
         else:
             neighbors_feature = torch.cat([raw_neighbors_feature, raw_neighbors_feature_mlp], dim=3)
 
