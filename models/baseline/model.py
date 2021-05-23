@@ -17,15 +17,15 @@ class PointCompressor(nn.Module):
 
         self.encoder = [TransformerBlock(3, 24, cfg.neighbor_num),
                         TransformerBlock(24, 64, cfg.neighbor_num),
-                        TransitionDown(None, 0.5, 'uniform'),
+                        TransitionDown('uniform', 0.5),
                         TransformerBlock(64, 128, cfg.neighbor_num),
-                        TransitionDown(None, 0.5, 'uniform'),
+                        TransitionDown('uniform', 0.5),
                         TransformerBlock(128, 256, cfg.neighbor_num),
-                        TransitionDown(None, 0.5, 'uniform'),
+                        TransitionDown('uniform', 0.5),
                         TransformerBlock(256, 512, cfg.neighbor_num),
-                        TransitionDown(None, 0.5, 'uniform'),
+                        TransitionDown('uniform', 0.5),
                         TransformerBlock(512, 1024, cfg.neighbor_num),
-                        TransitionDown(None, 0.5, 'uniform'),
+                        TransitionDown('uniform', 0.5),
                         TransformerBlock(1024, 1024, cfg.neighbor_num)]
         self.encoder = nn.Sequential(*self.encoder)
         self.mlp_enc_out = MLPBlock(1024, 1024,  activation=None, batchnorm='nn.bn1d')
@@ -46,14 +46,14 @@ class PointCompressor(nn.Module):
         batch_size = fea.shape[0]
         xyz = fea[..., :3]  # B, N, C only coordinate supported
         # encode
-        xyz, fea = self.encoder((xyz, fea, None, None))[:2]
+        xyz, fea = self.encoder((xyz, fea, None, None, None))[:2]
         fea = self.mlp_enc_out(fea)
 
         if self.training:
             fea, likelihoods = self.entropy_bottleneck(fea.permute(0, 2, 1).unsqueeze(3).contiguous())
             fea = fea.squeeze(3).permute(0, 2, 1).contiguous()
             likelihoods = likelihoods.squeeze(3).permute(0, 2, 1).contiguous()
-            fea = self.decoder((xyz, fea, None, None))[1]
+            fea = self.decoder((xyz, fea, None, None, None))[1]
             fea = self.mlp_dec_out(fea)
             fea = fea.reshape(batch_size, self.cfg.input_points_num, self.cfg.input_points_dim)
 
@@ -68,7 +68,7 @@ class PointCompressor(nn.Module):
         else:
             compressed_strings = self.entropy_bottleneck_compress(fea)
             decompressed_tensors = self.entropy_bottleneck_decompress(compressed_strings)
-            decoder_output = self.decoder((xyz, decompressed_tensors, None, None))[1]
+            decoder_output = self.decoder((xyz, decompressed_tensors, None, None, None))[1]
             decoder_output = self.mlp_dec_out(decoder_output)
             decoder_output = decoder_output.reshape(batch_size, self.cfg.input_points_num, self.cfg.input_points_dim)
 

@@ -40,7 +40,7 @@ class PointCompressor(nn.Module):
         batch_size = fea.shape[0]
         xyz = fea[..., :3]  # B, N, C
 
-        xyz, fea = self.encoder_layers((xyz, fea, None, None))[:2]
+        xyz, fea = self.encoder_layers((xyz, fea, None, None, None))[:2]
         fea = self.mlp_enc_out(fea)
         fea.sigmoid_()
 
@@ -53,7 +53,7 @@ class PointCompressor(nn.Module):
             balance_loss = torch.mean(fea) * self.cfg.balance_loss_factor
 
             fea = fea + quantize_diff  # binary
-            fea = self.decoder_layers((xyz, fea, None, None))[1]  # TODO: eliminate xyz here
+            fea = self.decoder_layers((xyz, fea, None, None, None))[1]  # TODO: eliminate xyz here
             fea = self.mlp_dec_out(fea)
             fea = fea.reshape(batch_size, self.cfg.input_points_num, 3)
 
@@ -67,7 +67,7 @@ class PointCompressor(nn.Module):
 
         else:
             round_fea = torch.round(fea)
-            fea = self.decoder_layers((xyz, round_fea, None, None))[1]
+            fea = self.decoder_layers((xyz, round_fea, None, None, None))[1]
             fea = self.mlp_dec_out(fea)
             fea = fea.reshape(batch_size, self.cfg.input_points_num, 3)
 

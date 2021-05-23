@@ -17,19 +17,19 @@ class PointEncoder(nn.Module):
         self.top_down_blocks.extend((
             nn.Sequential(TransformerBlock(3, 64, cfg.neighbor_num),
                           TransformerBlock(64, 128, cfg.neighbor_num),
-                          TransitionDown(None, 0.25, 'uniform')),
+                          TransitionDown('uniform', 0.25)),
 
             nn.Sequential(TransformerBlock(128, 256, cfg.neighbor_num),
-                          TransitionDown(None, 0.5, 'uniform')),
+                          TransitionDown('uniform', 0.25)),
 
             nn.Sequential(TransformerBlock(256, 512, cfg.neighbor_num),
-                          TransitionDown(None, 0.5, 'uniform')),  # inter_fea[0]
+                          TransitionDown('uniform', 0.25)),  # inter_fea[0]
 
             nn.Sequential(TransformerBlock(512, 1024, cfg.neighbor_num),
-                          TransitionDown(None, 0.5, 'uniform')),  # inter_fea[1]
+                          TransitionDown('uniform', 0.25)),  # inter_fea[1]
 
             nn.Sequential(TransformerBlock(1024, 1024, cfg.neighbor_num),
-                          TransitionDown(None, 0.5, 'uniform')),  # inter_fea[2]
+                          TransitionDown('uniform', 0.25)),  # inter_fea[2]
         ))
         self.trainsition_blocks = nn.ModuleList()
         self.trainsition_blocks.extend((nn.Sequential(TransformerBlock(512, 1024, cfg.neighbor_num),

@@ -12,7 +12,8 @@ class Model(nn.Module):
     def __init__(self, cfg: Config):
         super(Model, self).__init__()
         self.cfg = cfg
-        # self.neighbor_fea_generator = DeepRotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, 16, 32, retain_xyz_dists=True)
+        # self.neighbor_fea_generator = \
+        #     DeepRotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, 16, 32, retain_xyz_dists=True)
         self.neighbor_fea_generator = RotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, retain_xyz_dists=True)
 
         # the first layer has no features, thus its in_channels == 0 and mlp_shortcut == False
@@ -67,7 +68,7 @@ class Model(nn.Module):
 
     def forward(self, x, requires_fea_in_test=False):
         xyz, target = x
-        feature = self.layers((xyz, None, None, None))[1]
+        feature = self.layers((xyz, None, None, None, None))[1]
         feature = torch.max(feature, dim=1).values
         feature = self.head(feature)
 
@@ -103,7 +104,7 @@ def main_t():
 
     macs, params = profile(model, inputs=((xyz, target),))
     macs, params = clever_format([macs, params], "%.3f")
-    print(f'macs: {macs}, params: {params}')  # macs: 89.006G, params: 57.465M
+    print(f'macs: {macs}, params: {params}')
 
     for module_name, module in model.named_modules():
         if isinstance(module, TransitionDownWithDistFea):

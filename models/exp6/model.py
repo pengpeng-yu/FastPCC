@@ -78,7 +78,7 @@ class PointCompressor(nn.Module):
         batch_size = fea.shape[0]
         xyz = fea[..., :3]  # B, N, C
         # encode
-        fea = self.encoder_layers((xyz, fea, None, None))[1]
+        fea = self.encoder_layers((xyz, fea, None, None, None))[1]
         fea = torch.max(fea, dim=1, keepdim=True).values
         fea = self.conv_enc_out(fea)
         fea = fea.sigmoid_()
