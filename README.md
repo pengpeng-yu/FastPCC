@@ -3,6 +3,7 @@ Requirements:
 - loguru
 - pytorch≈1.7
 - compressai (https://github.com/InterDigitalInc/CompressAI.git)
+- MinkowskiEngine≈0.5.4 (https://github.com/NVIDIA/MinkowskiEngine)
 
 Dataset: https://shapenet.cs.stanford.edu/media/modelnet40_normal_resampled.zip
 

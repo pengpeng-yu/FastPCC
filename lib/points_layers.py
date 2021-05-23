@@ -237,7 +237,7 @@ class DeepRotationInvariantDistFea(RotationInvariantDistFea):  # deprecated
 
 class TransitionDown(nn.Module):
     def __init__(self, sample_method: str = 'uniform', sample_rate: float = None, nsample: int = None,
-                 cache_sample_indexes=None):  # TODO: upsample indexes
+                 cache_sample_indexes=None):
         super(TransitionDown, self).__init__()
         assert (nsample is None) != (sample_rate is None)
         self.sample_method = sample_method

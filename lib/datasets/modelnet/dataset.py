@@ -2,7 +2,11 @@ import os
 import numpy as np
 import torch
 import torch.utils.data
+from torch.utils.data._utils.collate import default_collate
 from scipy.spatial.transform import Rotation as R
+try:
+    import MinkowskiEngine as ME
+except ImportError: pass
 
 # from lib.points_layers import RandLANeighborFea, RotationInvariantDistFea
 from lib.datasets.modelnet.dataset_config import DatasetConfig
@@ -24,15 +28,6 @@ class ModelNetDataset(torch.utils.data.Dataset):
                     classes_names = f.readlines()
                 self.classes_idx = {l.strip(): cls_idx for cls_idx, l in enumerate(classes_names)}
 
-            # if cfg.precompute is None:
-            #     self.neighbor_fea_generator = None
-            # elif cfg.precompute == 'RotationInvariantDistFea':
-            #     self.neighbor_fea_generator = RotationInvariantDistFea(cfg.neighbor_num, cfg.anchors_points)
-            # elif cfg.precompute == 'RandLANeighborFea':
-            #     self.neighbor_fea_generator = RandLANeighborFea(cfg.anchors_points)
-            # else:
-            #     raise NotImplementedError
-
             self.cfg = cfg
 
         def __len__(self):
@@ -43,69 +38,93 @@ class ModelNetDataset(torch.utils.data.Dataset):
             point_cloud = np.loadtxt(self.file_list[index], dtype=np.float32, delimiter=',')
 
             # sampling
-            if self.cfg.sample_method == 'uniform':
-                assert point_cloud.shape[0] >= self.cfg.input_points_num
-                uniform_choice = np.random.choice(point_cloud.shape[0], self.cfg.input_points_num, replace=False)
-                point_cloud = point_cloud[uniform_choice]
-            else:
-                raise NotImplementedError
+            assert point_cloud.shape[0] >= self.cfg.input_points_num
+            if point_cloud.shape[0] > self.cfg.input_points_num:
+                if self.cfg.sample_method == 'uniform':
+                    uniform_choice = np.random.choice(point_cloud.shape[0], self.cfg.input_points_num, replace=False)
+                    point_cloud = point_cloud[uniform_choice]
+                else:
+                    raise NotImplementedError
+
+            # xyz
+            xyz = point_cloud[:, :3]
 
             # normals
-            if not self.cfg.with_normal_channel:
-                point_cloud = point_cloud[:, :3]
+            if self.cfg.with_normal_channel:
+                normals = point_cloud[:, 3:]
 
             # random rotation
             if self.cfg.random_rotation:
                 if self.cfg.with_normal_channel: raise NotImplementedError
-                point_cloud = R.random().apply(point_cloud).astype(np.float32)
+                xyz = R.random().apply(xyz).astype(np.float32)
+
+            # quantize: ndarray -> torch.Tensor
+            if self.cfg.resolution != 0:
+                assert self.cfg.resolution > 1
+                xyz *= self.cfg.resolution
+                if self.cfg.with_normal_channel:
+                    xyz, normals = ME.utils.sparse_quantize(xyz, normals)
+                else:
+                    xyz = ME.utils.sparse_quantize(xyz)
 
             # classes
             if self.cfg.with_classes:
                 cls_idx = self.classes_idx[os.path.split(self.file_list[index])[1].rsplit('_', 1)[0]]
-                return point_cloud, cls_idx
-            else:
-                return point_cloud
 
-        # def collate_fn(self, list_data):
-        #     if isinstance(list_data[0], tuple):
-        #         list_data = zip(*list_data)
-        #         data = [torch.tensor(np.stack(d, axis=0)) for d in list_data]
-        #     else:
-        #         data = [np.stack(list_data, axis=0)]
-        #
-        #     if self.cfg.with_normal_channel:
-        #         xyz = data[0][:, :, :3]
-        #     else:
-        #         xyz = data[0]
-        #
-        #     if self.cfg.precompute is None:
-        #         pass
-        #
-        #     elif self.cfg.precompute == 'RotationInvariantDistFea' and self.cfg.model_sample_method == 'uniform':
-        #         points_num = xyz.shape[1]
-        #         raw_neighbor_feature_list = []
-        #         neighbors_idx_list = []
-        #         for rate in self.cfg.model_sample_rates:
-        #             sampled_xyz = xyz[:, :int(points_num * rate)]
-        #             raw_neighbor_feature, neighbors_idx = self.neighbor_fea_generator(sampled_xyz)
-        #             raw_neighbor_feature_list.append(raw_neighbor_feature)
-        #             neighbors_idx_list.append(neighbors_idx)
-        #         data.append(raw_neighbor_feature_list)
-        #         data.append(neighbors_idx_list)
-        #
-        #     else:
-        #         raise NotImplementedError
-        #
-        #     return data
+            # return
+            if self.cfg.with_normal_channel:
+                if self.cfg.with_classes:
+                    return xyz, normals, cls_idx
+                else:
+                    return xyz, normals
+
+            elif not self.cfg.with_normal_channel:
+                if self.cfg.with_classes:
+                    return xyz, cls_idx
+                else:
+                    return xyz
+
+        def collate_fn(self, batch):
+            if self.cfg.resolution == 0:
+                return default_collate(batch)
+
+            elif self.cfg.resolution != 0:
+                if isinstance(batch[0], tuple):
+                    batch = list(zip(*batch))
+                else:
+                    batch = (batch, )
+
+                if self.cfg.with_classes:
+                    batch_cls = torch.tensor(batch[-1])
+
+                if self.cfg.with_normal_channel:
+                    batch_coords, batch_feats = ME.utils.sparse_collate(batch[0], batch[1])
+                    if self.cfg.with_classes:
+                        return batch_coords, batch_feats, batch_cls
+                    else:
+                        return batch_coords, batch_feats
+
+                elif not self.cfg.with_normal_channel:
+                    batch_coords = [torch.cat((torch.tensor([[batch_idx]], dtype=coord_smaple.dtype)
+                                               .expand(coord_smaple.shape[0], -1),
+                                               coord_smaple), dim=1)
+                                    for batch_idx, coord_smaple in enumerate(batch[0])]
+                    batch_coords = torch.cat(batch_coords, dim=0)
+                    if self.cfg.with_classes:
+                        return batch_coords, batch_cls
+                    else:
+                        return batch_coords
 
 
 if __name__ == '__main__':
     config = DatasetConfig()
-    config.with_classes = True
-    config.random_rotation = True
+    config.input_points_num = 10000
+    config.with_classes = False
+    config.with_normal_channel = False
+    config.resolution = 128
 
     dataset = ModelNetDataset(config, True)
-    dataloader = torch.utils.data.DataLoader(dataset, 16, shuffle=False)
+    dataloader = torch.utils.data.DataLoader(dataset, 16, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
     sample = next(dataloader)
     print('Done')
