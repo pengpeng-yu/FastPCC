@@ -33,7 +33,7 @@ def main():
 
     # Initialize config, run dir, logger
     cfg = Config()
-    if len(sys.argv) > 1 and (not '=' in sys.argv[1]) and sys.argv[1].endswith('.yaml'):
+    if len(sys.argv) > 1 and ('=' not in sys.argv[1]) and sys.argv[1].endswith('.yaml'):
         cfg.merge_with_yaml(sys.argv[1])
         cfg.merge_with_dotlist(sys.argv[2:])
     else:
@@ -43,7 +43,10 @@ def main():
     logger.remove()
 
     if local_rank in (-1, 0):
-        loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan>  <level>{message}</level>'
+        loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> |' \
+                        ' <level>{level: <8}</level> |' \
+                        ' <cyan>{name}</cyan>:<cyan>{line}</cyan>  ' \
+                        '<level>{message}</level>'
         logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
 
         os.makedirs('runs', exist_ok=True)
@@ -150,11 +153,11 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
     dataloader = torch.utils.data.DataLoader(dataset, process_batch_size,
                                              cfg.train.shuffle if dataset_sampler is None else None,
                                              sampler=dataset_sampler, num_workers=cfg.train.num_workers, drop_last=True,
-                                             pin_memory=True)
+                                             pin_memory=True, collate_fn=dataset.collate_fn)
 
     # Initialize optimizer and scheduler
     if cfg.train.optimizer == 'adam': Optimizer = partial(torch.optim.Adam, betas=(cfg.train.momentum, 0.999))
-    elif cfg.train.optimizer == 'sgd': Optimizer =  partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=cfg.train.momentum != 0.0)
+    elif cfg.train.optimizer == 'sgd': Optimizer = partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=cfg.train.momentum != 0.0)
     else: raise NotImplementedError
     parameters = [p for n, p in model.named_parameters() if not n.endswith(".quantiles")]
     aux_parameters = [p for n, p in model.named_parameters() if n.endswith(".quantiles")]
@@ -174,7 +177,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
             except Exception as e:
                 logger.error('error when loading model_state_dict')
                 raise e
-            logger.info('resuming model_state_dict from checkpoint "{}"'.format(cfg.train.resume_from_ckpt) )
+            logger.info('resuming model_state_dict from checkpoint "{}"'.format(cfg.train.resume_from_ckpt))
 
         if 'start_epoch' in cfg.train.resume_items:
             start_epoch = ckpt['scheduler_state_dict']['last_epoch']
@@ -198,7 +201,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
     total_steps = (cfg.train.epochs - start_epoch) * steps_one_epoch
     global_step = steps_one_epoch * start_epoch
     ave_time_onestep = None
-    scaler = amp.GradScaler()
+    if cfg.train.amp:
+        scaler = amp.GradScaler()
     for epoch in range(start_epoch, cfg.train.epochs):
         model.train()
         if global_rank != -1:
@@ -208,23 +212,30 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
             start_time = time.time()
             if isinstance(batch_data, torch.Tensor):
                 batch_data = batch_data.to(device, non_blocking=True)
-            elif isinstance(batch_data, list):
+            elif isinstance(batch_data, list) or isinstance(batch_data, tuple):
                 batch_data = [d.to(device, non_blocking=True) for d in batch_data if isinstance(d, torch.Tensor)]
             else: raise NotImplementedError
 
-            with amp.autocast():
+            if cfg.train.amp:
+                with amp.autocast():
+                    loss_dict = model(batch_data)
+                    loss = loss_dict['loss']
+
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
                 loss_dict = model(batch_data)
                 loss = loss_dict['loss']
+                loss.backward()
+                optimizer.step()
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
             optimizer.zero_grad()
 
             # logging
             time_this_step = time.time() - start_time
-            ave_time_onestep = time_this_step if ave_time_onestep is None \
-                               else ave_time_onestep * 0.9 + time_this_step * 0.1
+            ave_time_onestep = time_this_step if ave_time_onestep is None else \
+                ave_time_onestep * 0.9 + time_this_step * 0.1
 
             if cfg.train.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.train.log_frequency == 0):
                 expected_total_time, eta = utils.eta_by_seconds((total_steps - global_step - 1) * ave_time_onestep)
@@ -269,6 +280,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
             }
             torch.save(ckpt, os.path.join(ckpts_dir, ckpt_name))
             del ckpt
+
+        torch.cuda.empty_cache()
 
     dist.destroy_process_group()
     logger.info('train end')

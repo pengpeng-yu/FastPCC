@@ -10,10 +10,11 @@ from lib import torch_utils
 from lib.config import Config
 from lib import utils
 
+
 def main():
     # Initialize config
     cfg = Config()
-    if len(sys.argv) > 1 and (not '=' in sys.argv[1]) and sys.argv[1].endswith('.yaml'):
+    if len(sys.argv) > 1 and ('=' not in sys.argv[1]) and sys.argv[1].endswith('.yaml'):
         cfg.merge_with_yaml(sys.argv[1])
         cfg.merge_with_dotlist(sys.argv[2:])
     else:
@@ -28,29 +29,32 @@ def main():
 
     from loguru import logger
     logger.remove()
-    loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan>  <level>{message}</level>'
+    loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> | ' \
+                    '<level>{level: <8}</level> | ' \
+                    '<cyan>{name}</cyan>:<cyan>{line}</cyan>  ' \
+                    '<level>{message}</level>'
     logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
     logger.add(os.path.join(run_dir, 'log.txt'), format=loguru_format, level=0, mode='w')
 
     print(test(cfg, logger))
 
 
-def test(cfg: Config, logger, model: torch.nn.Module=None):
+def test(cfg: Config, logger, model: torch.nn.Module = None):
     try:
         Dataset = importlib.import_module(cfg.dataset_path).Dataset
     except Exception as e:
         raise ImportError(*e.args)
     dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, False)
     dataloader = torch.utils.data.DataLoader(dataset, cfg.test.batch_size, shuffle=False,
-                                             num_workers=cfg.test.num_workers, drop_last=False, pin_memory=True)
+                                             num_workers=cfg.test.num_workers, drop_last=False, pin_memory=True,
+                                             collate_fn=dataset.collate_fn)
     if model is not None:
         model.eval()
         current_device = next(model.parameters()).device
         logger.info(f'start testing using device {current_device}')
         # cfg_device = cfg.test.device
         # if current_device.type != cfg_device:
-        #     logger.warning(f'you require using {cfg_device} during testing while using {current_device} during training, '
-        #                    f'which means validation during training will ignore the setting of test.device')
+        #     logger.warning(f'validation during training will ignore the setting of test.device')
         device = current_device
     else:
         try:
@@ -84,7 +88,7 @@ def test(cfg: Config, logger, model: torch.nn.Module=None):
     for step_idx, batch_data in enumerate(dataloader):
         if isinstance(batch_data, torch.Tensor):
             batch_data = batch_data.to(device, non_blocking=True)
-        elif isinstance(batch_data, list):
+        elif isinstance(batch_data, list) or isinstance(batch_data, tuple):
             batch_data = [d.to(device, non_blocking=True) for d in batch_data]
         else:
             raise NotImplementedError
@@ -107,6 +111,7 @@ def test(cfg: Config, logger, model: torch.nn.Module=None):
 
     logger.info(f'test end')
     return {item_name: item for item_name, item in test_results.items() if isinstance(item, int) or isinstance(item, float)}
+
 
 if __name__ == '__main__':
     main()

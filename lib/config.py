@@ -1,13 +1,17 @@
+import os.path
+
 from lib.simple_config import SimpleConfig
 from dataclasses import dataclass
 from typing import Tuple
 import importlib
+import yaml
 
 @dataclass
 class TrainConfig(SimpleConfig):
     rundir_name: str = 'train_<autoindex>'
     device: str = '0'  # 0 or 0,1,2 or cpu
     more_reproducible: bool = False
+    amp: bool = True
     batch_size: int = 2
     shuffle: bool = True
     num_workers: int = 4
@@ -72,3 +76,10 @@ class Config(SimpleConfig):
     def check_local_value(self):
         if hasattr(self.model, 'input_points_num') and hasattr(self.dataset, 'input_points_num'):
             assert self.model.input_points_num == self.dataset.input_points_num
+
+    def merge_with_yaml(self, yaml_path):
+        yaml_dict = yaml.safe_load(open(yaml_path))
+        if not yaml_dict['model_path'].rsplit('.', 1)[-1] in os.path.splitext(os.path.basename(yaml_path))[0]:
+            print(f'Warning: loading configuration from {os.path.basename(yaml_path)} '
+                  f'with model_path == {yaml_dict["model_path"]}. Is this correct?')
+        return self.merge_with_dict(yaml_dict)
