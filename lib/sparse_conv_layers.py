@@ -9,9 +9,10 @@ MConvTranspose = ME.MinkowskiConvolutionTranspose  # TODO: difference when there
 
 
 class AbstractGenerativeUpsample(nn.Module):
-    def __init__(self, mapping_target_kernel_size=1):
+    def __init__(self, mapping_target_kernel_size=1, return_fea=True):
         super(AbstractGenerativeUpsample, self).__init__()
         self.mapping_target_kernel_size = mapping_target_kernel_size
+        self.return_fea = return_fea
         self.upsample_block = None
         self.classify_block = None
         self.pruning = ME.MinkowskiPruning()
@@ -66,7 +67,13 @@ class AbstractGenerativeUpsample(nn.Module):
             else:
                 cached_exist.append(exist)
 
-        fea = self.pruning(fea, keep)
+        elif not self.training:
+            # only return the last existence prediction during training.
+            cached_exist = [exist]
+
+        if self.return_fea:
+            fea = self.pruning(fea, keep)
+        else: fea = None
 
         return fea, cached_exist, cached_target, target_key
 

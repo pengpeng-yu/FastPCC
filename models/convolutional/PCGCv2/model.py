@@ -18,7 +18,7 @@ class PCC(nn.Module):
         self.decoder = self.layers = nn.Sequential(GenerativeUpsample(cfg.compressed_channels,
                                                                       64, 3, cfg.res_block_type),
                                                    GenerativeUpsample(64, 32, 3, cfg.res_block_type),
-                                                   GenerativeUpsample(32, 16, 3, cfg.res_block_type))
+                                                   GenerativeUpsample(32, 16, 3, cfg.res_block_type, return_fea=False))
         self.entropy_bottleneck = EntropyBottleneck(cfg.compressed_channels)
         self.cfg = cfg
 
@@ -35,15 +35,22 @@ class PCC(nn.Module):
                                         coordinate_map_key=fea.coordinate_map_key,
                                         coordinate_manager=fea.coordinate_manager)
 
-            fea, cached_exist, cached_target, target_key = \
+            _, cached_exist, cached_target, _ = \
                 self.decoder((fea_tilde, None, None, xyz.coordinate_map_key))
 
-            loss = sum([nn.functional.binary_cross_entropy_with_logits(exist.F.squeeze(), target.type(exist.F.dtype))
-                        for exist, target in zip(cached_exist, cached_target)])
-            loss /= len(cached_exist)
+            bpp_loss = torch.log2(likelihood).sum() * (
+                        -self.cfg.bpp_loss_factor / xyz.shape[0])
+            bce_loss = sum([nn.functional.binary_cross_entropy_with_logits(exist.F.squeeze(),
+                                                                           target.type(exist.F.dtype))
+                            for exist, target in zip(cached_exist, cached_target)])
+            bce_loss /= len(cached_exist)
+            aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
+            loss = bpp_loss + bce_loss + aux_loss
 
             return {'loss': loss,
-                    'bce_loss': loss.detach().cpu().item()}
+                    'bpp_loss': bpp_loss.detach().cpu().item(),
+                    'bce_loss': bce_loss.detach().cpu().item(),
+                    'aux_loss': aux_loss.detach().cpu().item()}
 
         else:
             # TODO: decomposed_coordinates_and_features before compressing?
@@ -52,12 +59,12 @@ class PCC(nn.Module):
             fea = ME.SparseTensor(decompressed_tensors / self.cfg.bottleneck_scaler,
                                   coordinate_map_key=fea.coordinate_map_key,
                                   coordinate_manager=fea.coordinate_manager)
-            fea, cached_exist, cached_target, target_key = \
+            _, cached_exist, _, _ = \
                 self.decoder((fea, None, None, None))
 
             return {'compressed_strings': compressed_strings,
                     'decompressed_tensors': decompressed_tensors,
-                    'decoder_output': fea.decomposed_coordinates}
+                    'decoder_output': cached_exist[-1].decomposed_coordinates}
 
     def load_state_dict(self, state_dict, strict: bool = True):
         # Dynamically update the entropy bottleneck buffers related to the CDFs
@@ -241,10 +248,9 @@ if __name__ == '__main__':
     xyz_c = [ME.utils.sparse_quantize(torch.randint(-128, 128, (100, 3))) for _ in range(16)]
     xyz_f = [torch.ones((_.shape[0], 1), dtype=torch.float32) for _ in xyz_c]
     xyz = ME.utils.sparse_collate(coords=xyz_c, feats=xyz_f)
-    xyz = ME.SparseTensor(coordinates=xyz[0], features=xyz[1])
-    out = model(xyz)
+    out = model(xyz[0])
     out['loss'].backward()
     model.eval()
     model.entropy_bottleneck.update()
-    test_out = model(xyz)
+    test_out = model(xyz[0])
     print('Done')

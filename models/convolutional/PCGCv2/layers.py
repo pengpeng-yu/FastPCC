@@ -78,8 +78,9 @@ class Encoder(nn.Module):
 
 
 class GenerativeUpsample(AbstractGenerativeUpsample):
-    def __init__(self, in_channels, out_channels, res_blocks_num, res_block_type, mapping_target_kernel_size=1):
-        super(GenerativeUpsample, self).__init__(mapping_target_kernel_size)
+    def __init__(self, in_channels, out_channels, res_blocks_num, res_block_type,
+                 mapping_target_kernel_size=1, return_fea=True):
+        super(GenerativeUpsample, self).__init__(mapping_target_kernel_size, return_fea)
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.res_blocks_num = res_blocks_num

@@ -133,7 +133,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
             logger.error('These are bugs with DP mode when device_count() > 1 due to the output format of model. '
                          'Please use DDP')
             logger.error('terminated')
-            return
+            raise NotImplementedError
         model = torch.nn.DataParallel(model.to(device))
         logger.info('using DataParallel')
     elif device.type != 'cpu' and global_rank != -1:
