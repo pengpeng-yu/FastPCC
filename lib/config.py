@@ -1,10 +1,10 @@
-import os.path
+import os
+import yaml
 
 from lib.simple_config import SimpleConfig
 from dataclasses import dataclass
 from typing import Tuple
-import importlib
-import yaml
+
 
 @dataclass
 class TrainConfig(SimpleConfig):

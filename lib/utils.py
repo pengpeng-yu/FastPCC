@@ -20,7 +20,7 @@ def make_new_dirs(dir_path, logger) -> None:
         logger.info('make dirs "{}"'.format(dir_path))
 
 
-def autoindex_obj(obj_path:str) -> str:
+def autoindex_obj(obj_path: str) -> str:
     dir_path, obj_name = os.path.split(obj_path)
     notations = {
         '<maxindex>': lambda x: max(x),

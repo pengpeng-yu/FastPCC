@@ -32,6 +32,8 @@ def index_points(points, idx):
     res = torch.gather(points, 1, idx[..., None].expand(-1, -1, points.size(-1)))
     return res.reshape(*raw_size, -1)
 
+# TODO: sqaure_dists, knn
+
 
 def index_points_dists(dists, idx1, idx2):
     """

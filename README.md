@@ -1,6 +1,9 @@
 Requirements: 
 
+- python>=3.7
 - loguru
+- pyvista
+- open3d
 - pytorch≈1.7
 - compressai (https://github.com/InterDigitalInc/CompressAI.git)
 - MinkowskiEngine≈0.5.4 (https://github.com/NVIDIA/MinkowskiEngine)
