@@ -1,6 +1,8 @@
 import os
 import sys
+import pathlib
 import importlib
+from tqdm import tqdm
 
 import numpy as np
 import torch
@@ -21,10 +23,10 @@ def main():
         cfg.merge_with_dotlist(sys.argv[1:])
 
     os.makedirs('runs', exist_ok=True)
-    run_dir = utils.autoindex_obj(os.path.join('runs', cfg.test.rundir_name))
+    run_dir = pathlib.Path(utils.autoindex_obj(os.path.join('runs', cfg.test.rundir_name)))
     os.makedirs(run_dir, exist_ok=False)
 
-    with open(os.path.join(run_dir, 'config.yaml'), 'w') as f:
+    with open(run_dir / 'config.yaml', 'w') as f:
         f.write(cfg.to_yaml())
 
     from loguru import logger
@@ -34,7 +36,7 @@ def main():
                     '<cyan>{name}</cyan>:<cyan>{line}</cyan>  ' \
                     '<level>{message}</level>'
     logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
-    logger.add(os.path.join(run_dir, 'log.txt'), format=loguru_format, level=0, mode='w')
+    logger.add(run_dir / 'log.txt', format=loguru_format, level=0, mode='w')
 
     print(test(cfg, logger))
 
@@ -44,7 +46,21 @@ def test(cfg: Config, logger, model: torch.nn.Module = None):
         Dataset = importlib.import_module(cfg.dataset_path).Dataset
     except Exception as e:
         raise ImportError(*e.args)
-    dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, False)
+
+    # cache
+    dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, False, logger)
+    if hasattr(dataset, 'gen_cache') and dataset.gen_cache is True:
+        datacache_loader = torch.utils.data.DataLoader(dataset, cfg.test.batch_size,
+                                                       num_workers=cfg.test.num_workers * 2, drop_last=False,
+                                                       collate_fn=lambda batch: None)
+        for _ in tqdm(datacache_loader):
+            pass
+        with open(os.path.join(dataset.cache_root, 'test_all_cached'), 'w') as f:
+            pass
+        logger.info('finish caching')
+        # rebuild dataset to use cache
+        dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, False, logger)
+
     dataloader = torch.utils.data.DataLoader(dataset, cfg.test.batch_size, shuffle=False,
                                              num_workers=cfg.test.num_workers, drop_last=False, pin_memory=True,
                                              collate_fn=dataset.collate_fn)
@@ -67,7 +83,9 @@ def test(cfg: Config, logger, model: torch.nn.Module = None):
         model.load_state_dict(torch.load(ckpt_path, map_location=torch.device('cpu'))['state_dict'])
         device = torch.device(cfg.test.device if cfg.test.device == 'cpu' or cfg.test.device.startswith('cuda')
                               else f'cuda:{cfg.test.device}')
+
         model.to(device)
+        torch.cuda.set_device(device)
         model.eval()
 
     if hasattr(model, 'entropy_bottleneck'):
@@ -99,7 +117,7 @@ def test(cfg: Config, logger, model: torch.nn.Module = None):
             # torch.save(model_output['decoder_output'], 'runs/decoder_output.pt')
             if cfg.test.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.test.log_frequency == 0):
                 logger.info(f'test step {step_idx}/{steps_one_epoch - 1}')
-            # break  # TODO
+            break  # TODO
             # TODO: compute loss and compression rate of points compression model
 
     try:

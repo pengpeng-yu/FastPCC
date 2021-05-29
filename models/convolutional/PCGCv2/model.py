@@ -5,6 +5,7 @@ import MinkowskiEngine as ME
 from compressai.entropy_models import EntropyBottleneck
 from compressai.models.utils import update_registered_buffers
 
+from lib.loss_function import chamfer_loss
 from models.convolutional.PCGCv2.layers import Encoder, GenerativeUpsample
 from models.convolutional.PCGCv2.model_config import ModelConfig
 
@@ -21,6 +22,34 @@ class PCC(nn.Module):
                                                    GenerativeUpsample(32, 16, 3, cfg.res_block_type, return_fea=False))
         self.entropy_bottleneck = EntropyBottleneck(cfg.compressed_channels)
         self.cfg = cfg
+        self.log_pred_res('init')
+
+    def log_pred_res(self, mode, preds=None, targets=None):
+        if mode == 'init':
+            total_reconstruct_loss = torch.zeros((1, ), dtype=torch.float64)
+            samples_num = torch.zeros((1, ), dtype=torch.int64)
+            self.register_buffer('total_reconstruct_loss', total_reconstruct_loss)
+            self.register_buffer('samples_num', samples_num)
+
+        elif mode == 'reset':
+            self.total_reconstruct_loss[...] = 0
+            self.samples_num[...] = 0
+
+        elif mode == 'log':
+            assert not self.training
+            assert isinstance(preds, list) and isinstance(targets, list)
+            # TODO reconstruct loss
+            # for pred, target in zip(preds, targets):
+            #     self.total_reconstruct_loss += chamfer_loss(
+            #         pred.unsqueeze(0).type(torch.float) / self.cfg.resolution,
+            #         target.unsqueeze(0).type(torch.float) / self.cfg.resolution)
+            self.samples_num += len(targets)
+
+        elif mode == 'show':
+            return {'samples_num': self.samples_num,
+                    'mean_recontruct_loss': self.total_reconstruct_loss / self.samples_num}
+        else:
+            raise NotImplementedError
 
     def forward(self, xyz):
         xyz = ME.SparseTensor(torch.ones(xyz.shape[0], 1, dtype=torch.float, device=xyz.device),
@@ -62,9 +91,12 @@ class PCC(nn.Module):
             _, cached_exist, _, _ = \
                 self.decoder((fea, None, None, None))
 
+            decoder_output = cached_exist[-1].decomposed_coordinates
+            self.log_pred_res('log', decoder_output, xyz.decomposed_coordinates)
+
             return {'compressed_strings': compressed_strings,
                     'decompressed_tensors': decompressed_tensors,
-                    'decoder_output': cached_exist[-1].decomposed_coordinates}
+                    'decoder_output': decoder_output}
 
     def load_state_dict(self, state_dict, strict: bool = True):
         # Dynamically update the entropy bottleneck buffers related to the CDFs
@@ -243,8 +275,9 @@ def main_debug():
 
 if __name__ == '__main__':
     # main_debug()
-
-    model = PCC(ModelConfig())
+    cfg = ModelConfig()
+    cfg.resolution = 128
+    model = PCC(cfg)
     xyz_c = [ME.utils.sparse_quantize(torch.randint(-128, 128, (100, 3))) for _ in range(16)]
     xyz_f = [torch.ones((_.shape[0], 1), dtype=torch.float32) for _ in xyz_c]
     xyz = ME.utils.sparse_collate(coords=xyz_c, feats=xyz_f)

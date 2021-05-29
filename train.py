@@ -3,6 +3,8 @@ import shutil
 import sys
 import importlib
 import time
+import pathlib
+from tqdm import tqdm
 from functools import partial
 
 import numpy as np
@@ -50,24 +52,24 @@ def main():
         logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
 
         os.makedirs('runs', exist_ok=True)
-        run_dir = utils.autoindex_obj(os.path.join('runs', cfg.train.rundir_name))
-        ckpts_dir = os.path.join(run_dir, 'ckpts')
+        run_dir = pathlib.Path(utils.autoindex_obj(os.path.join('runs', cfg.train.rundir_name)))
+        ckpts_dir = run_dir / 'ckpts'
         utils.make_new_dirs(run_dir, logger)
         utils.make_new_dirs(ckpts_dir, logger)
 
-        logger.add(os.path.join(run_dir, 'log.txt'), format=loguru_format, level=0, mode='w')
+        logger.add(run_dir / 'log.txt', format=loguru_format, level=0, mode='w')
         logger.info('preparing for training...')
-        with open(os.path.join(run_dir, 'config.yaml'), 'w') as f:
+        with open(run_dir / 'config.yaml', 'w') as f:
             f.write(cfg.to_yaml())
 
         # Tensorboard
-        tb_logdir = os.path.join(run_dir, 'tb_logdir')
+        tb_logdir = run_dir / 'tb_logdir'
         utils.make_new_dirs(tb_logdir, logger)
         if cfg.train.resume_tensorboard:
             try:
-                last_tb_dir = os.path.join(os.path.dirname(os.path.dirname(cfg.train.resume_from_ckpt)), 'tb_logdir')
+                last_tb_dir = pathlib.Path(cfg.train.resume_from_ckpt).parent.parent / 'tb_logdir'
                 for log_file in os.listdir(last_tb_dir):
-                    shutil.copy(os.path.join(last_tb_dir, log_file), tb_logdir)
+                    shutil.copy(last_tb_dir / log_file, tb_logdir)
             except Exception as e:
                 e.args = (*e.args, 'Error when copying tensorboard log')
                 raise e
@@ -79,7 +81,7 @@ def main():
         tb_ports = ['6006', '6007', '6008']
         for tb_port in tb_ports:
             try:
-                tb_program.configure(argv=[None, '--logdir', tb_logdir, '--port', tb_port])
+                tb_program.configure(argv=[None, '--logdir', str(tb_logdir), '--port', tb_port])
                 tb_url = tb_program.launch()
             except Exception as e:
                 logger.warning(f'fail to launch Tensorboard at http://localhost:{int(tb_port)}')
@@ -148,8 +150,26 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
         Dataset = importlib.import_module(cfg.dataset_path).Dataset
     except Exception as e:
         raise ImportError(*e.args)
-    dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, True)
-    dataset_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if global_rank != -1 else None
+
+    # cache
+    dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, True, logger)
+    if hasattr(dataset, 'gen_cache') and dataset.gen_cache is True:
+        datacahe_sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=False) \
+            if global_rank != -1 else None
+        datacache_loader = torch.utils.data.DataLoader(dataset, process_batch_size,
+                                                       sampler=datacahe_sampler,
+                                                       num_workers=cfg.train.num_workers * 2, drop_last=False,
+                                                       collate_fn=lambda batch: None)
+        for _ in tqdm(datacache_loader):
+            pass
+        with open(os.path.join(dataset.cache_root, 'train_all_cached'), 'w') as f:
+            pass
+        logger.info('finish caching')
+        # rebuild dataset to use cache
+        dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, True, logger)
+
+    dataset_sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=cfg.train.shuffle) \
+        if global_rank != -1 else None
     dataloader = torch.utils.data.DataLoader(dataset, process_batch_size,
                                              cfg.train.shuffle if dataset_sampler is None else None,
                                              sampler=dataset_sampler, num_workers=cfg.train.num_workers, drop_last=True,
@@ -278,7 +298,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict()
             }
-            torch.save(ckpt, os.path.join(ckpts_dir, ckpt_name))
+            torch.save(ckpt, ckpts_dir / ckpt_name)
             del ckpt
 
         torch.cuda.empty_cache()

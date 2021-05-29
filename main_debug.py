@@ -3,8 +3,59 @@ import torch.nn as nn
 import math
 from torchvision import transforms
 import numpy as np
-import cv2
 from compressai.zoo import bmshj2018_factorized
+
+
+def plt_draw(pc, voxel=False):
+    import matplotlib.pyplot as plt
+    import MinkowskiEngine as ME
+    fig = plt.figure(figsize=(8, 8))
+
+    assert isinstance(pc, np.ndarray) or isinstance(pc, torch.Tensor)
+    if voxel:
+        if isinstance(pc, np.ndarray):
+            pc = torch.from_numpy(pc)
+        pc = ME.utils.sparse_collate([pc], [torch.full((pc.shape[0], 1), True, dtype=torch.bool)])
+        pc = ME.SparseTensor(pc[1], pc[0])
+        pc = pc.dense(min_coordinate=pc.C.min().expand(3))[0].squeeze(1).squeeze(0).numpy()
+
+    else:
+        if isinstance(pc, torch.Tensor):
+            pc = pc.cpu().numpy()
+
+    def sub_plot(fig, num, degree):
+        ax = fig.add_subplot(num, projection='3d')
+        if not voxel:
+            ax.scatter(pc[:, 0], pc[:, 1], pc[:, 2])
+            pos_lim = np.max(pc)
+            neg_lim = np.min(pc)
+            ax.set_xlim(neg_lim, pos_lim)
+            ax.set_ylim(neg_lim, pos_lim)
+            ax.set_zlim(neg_lim, pos_lim)
+        else:
+            ax.voxels(pc)
+            pos_lim = max(pc.shape)
+            neg_lim = 0
+            ax.set_xlim(neg_lim, pos_lim)
+            ax.set_ylim(neg_lim, pos_lim)
+            ax.set_zlim(neg_lim, pos_lim)
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.view_init(degree[0], degree[1])
+
+    sub_plot(fig, 221, (None, None))
+    sub_plot(fig, 222, (0, 0))
+    sub_plot(fig, 223, (0, 90))
+    sub_plot(fig, 224, (90, 0))
+
+    plt.show()
+
+
+def plt_batch_sparse_coord(tensor, batch_idx, voxel=False):
+    assert tensor.shape[1] == 4
+    coord = tensor[tensor[:, 0] == batch_idx, 1:]
+    plt_draw(coord, voxel)
 
 
 def open3d_draw(obj):
@@ -52,6 +103,7 @@ class RateDistortionLoss(nn.Module):
 
 
 def compressai_inference_t():
+    import cv2
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     net = bmshj2018_factorized(quality=2, pretrained=True).eval().to(device)
     print(f'Parameters: {sum(p.numel() for p in net.parameters())}')
