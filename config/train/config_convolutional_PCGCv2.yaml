@@ -3,7 +3,7 @@ train:
   rundir_name: 'train_convolutional_<autoindex>'
   device: '3'
   amp: False
-  batch_size: 32
+  batch_size: 4
   weight_decay: 0.0001
   epochs: 100
   ckpt_frequency: 10
@@ -14,4 +14,6 @@ train:
   learning_rate: 0.01
 dataset:
   root: 'datasets/modelnet40_manually_aligned'
-  resolution: 64
+  resolution: 128
+test:
+  batch_size: 4

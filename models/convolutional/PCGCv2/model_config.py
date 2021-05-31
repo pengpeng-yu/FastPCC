@@ -10,4 +10,4 @@ class ModelConfig(SimpleConfig):
     bpp_loss_factor: float = 0.001
     aux_loss_factor: float = 10.0
 
-    resolution: int = 64
+    resolution: int = 128  # only used for computing chamfer distances

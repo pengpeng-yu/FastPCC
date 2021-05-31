@@ -77,6 +77,9 @@ class Config(SimpleConfig):
         if hasattr(self.model, 'input_points_num') and hasattr(self.dataset, 'input_points_num'):
             assert self.model.input_points_num == self.dataset.input_points_num
 
+        if hasattr(self.model, 'resolution') and hasattr(self.dataset, 'resolution'):
+            assert self.model.resolution == self.dataset.resolution
+
     def merge_with_yaml(self, yaml_path):
         yaml_dict = yaml.safe_load(open(yaml_path))
         if not yaml_dict['model_path'].rsplit('.', 1)[-1] in os.path.splitext(os.path.basename(yaml_path))[0]:

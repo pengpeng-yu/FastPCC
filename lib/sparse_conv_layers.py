@@ -68,8 +68,8 @@ class AbstractGenerativeUpsample(nn.Module):
                 cached_exist.append(exist)
 
         elif not self.training:
-            # only return the last existence prediction during training.
-            cached_exist = [exist]
+            # only return the last pruned existence prediction during training.
+            cached_exist = [self.pruning(exist, keep)]
 
         if self.return_fea:
             fea = self.pruning(fea, keep)

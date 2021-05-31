@@ -117,18 +117,18 @@ def test(cfg: Config, logger, model: torch.nn.Module = None):
             # torch.save(model_output['decoder_output'], 'runs/decoder_output.pt')
             if cfg.test.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.test.log_frequency == 0):
                 logger.info(f'test step {step_idx}/{steps_one_epoch - 1}')
-            break  # TODO
-            # TODO: compute loss and compression rate of points compression model
 
     try:
         if torch_utils.is_parallel(model):
             test_results = model.module.log_pred_res('show')
         else:
             test_results = model.log_pred_res('show')
-    except AttributeError: pass
+    except AttributeError:
+        test_results = {}
 
     logger.info(f'test end')
-    return {item_name: item for item_name, item in test_results.items() if isinstance(item, int) or isinstance(item, float)}
+    return {item_name: item for item_name, item in test_results.items()
+            if isinstance(item, int) or isinstance(item, float)}
 
 
 if __name__ == '__main__':
