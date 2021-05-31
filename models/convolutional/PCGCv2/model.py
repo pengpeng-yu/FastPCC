@@ -38,16 +38,15 @@ class PCC(nn.Module):
         elif mode == 'log':
             assert not self.training
             assert isinstance(preds, list) and isinstance(targets, list)
-            # TODO reconstruct loss
-            # for pred, target in zip(preds, targets):
-            #     self.total_reconstruct_loss += chamfer_loss(
-            #         pred.unsqueeze(0).type(torch.float) / self.cfg.resolution,
-            #         target.unsqueeze(0).type(torch.float) / self.cfg.resolution)
+            for pred, target in zip(preds, targets):
+                self.total_reconstruct_loss += chamfer_loss(
+                    pred.unsqueeze(0).type(torch.float) / self.cfg.resolution,
+                    target.unsqueeze(0).type(torch.float) / self.cfg.resolution)
             self.samples_num += len(targets)
 
         elif mode == 'show':
-            return {'samples_num': self.samples_num,
-                    'mean_recontruct_loss': self.total_reconstruct_loss / self.samples_num}
+            return {'samples_num': self.samples_num.item(),
+                    'mean_recontruct_loss': (self.total_reconstruct_loss / self.samples_num).item()}
         else:
             raise NotImplementedError
 

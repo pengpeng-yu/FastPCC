@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from lib.torch_utils import MLPBlock
-from lib.pointnet_utils import index_points, index_points_dists, farthest_point_sample
+from lib.pointnet_utils import index_points, index_points_dists, farthest_point_sample, knn_points
 
 """
 Classes for neighborhoods-based point cloud networks.
@@ -73,8 +73,7 @@ class TransformerBlock(nn.Module):
         feature = cached_feature[-1]
 
         if relative_knn_xyz is None or knn_idx is None:
-            knn_idx = torch.cdist(xyz, xyz, compute_mode='donot_use_mm_for_euclid_dist')\
-                .topk(self.nneighbor, dim=2, largest=False, sorted=True).indices
+            knn_idx = knn_points(xyz, xyz, k=self.nneighbor,  return_sorted=False).idx
             relative_knn_xyz = xyz[:, :, None, :] - index_points(xyz, knn_idx)  # knn_xyz: b, n, k, 3
         else:
             assert feature.shape[1] == relative_knn_xyz.shape[1] == knn_idx.shape[1]
@@ -114,8 +113,7 @@ class RandLANeighborFea(NeighborFeatureGenerator):
         super(RandLANeighborFea, self).__init__(neighbor_num, channels=3 + 3 + 3 + 1)
 
     def forward(self, xyz):
-        dists = torch.cdist(xyz, xyz)
-        relative_dists, neighbors_idx = dists.topk(self.neighbor_num, dim=2, largest=False, sorted=False)
+        relative_dists, neighbors_idx, _ = knn_points(xyz, xyz, k=self.neighbor_num, return_sorted=False)
         neighbors_xyz = index_points(xyz, neighbors_idx)
 
         expanded_xyz = xyz[:, :, None].expand(-1, -1, neighbors_xyz.shape[2], -1)
@@ -263,7 +261,7 @@ class TransitionDown(nn.Module):
             cached_sample_indexes.append(sample_indexes)
         elif self.cache_sample_indexes == 'upsample':
             cached_sample_indexes.append(
-                torch.cdist(xyz, sampled_xyz).topk(1, dim=2, largest=False, sorted=False).indices)
+                knn_points(xyz, sampled_xyz, k=1, return_sorted=False).idx)
         else:
             assert self.cache_sample_indexes is None
 
@@ -352,7 +350,7 @@ class TransitionDownWithDistFea(TransitionDown):
             cached_sample_indexes.append(sample_indexes)
         elif self.cache_sample_indexes == 'upsample':
             cached_sample_indexes.append(
-                torch.cdist(xyz, sampled_xyz).topk(1, dim=2, largest=False, sorted=False).indices)
+                knn_points(xyz, sampled_xyz, k=1, return_sorted=False).idx)
         else:
             assert self.cache_sample_indexes is None
 

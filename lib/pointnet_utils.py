@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from pytorch3d.ops import knn_points as pytorch3d_knn_points
 from time import time
 import numpy as np
 
@@ -32,7 +33,19 @@ def index_points(points, idx):
     res = torch.gather(points, 1, idx[..., None].expand(-1, -1, points.size(-1)))
     return res.reshape(*raw_size, -1)
 
-# TODO: sqaure_dists, knn
+
+def knn_points(p1, p2, k, return_sorted=False, version='pytorch3d', pytorch3d_version=-1, **kwargs):
+    if version == 'pytorch3d':  # square distance
+        return pytorch3d_knn_points(p1, p2, K=k,
+                                    return_sorted=return_sorted,
+                                    version=pytorch3d_version, **kwargs)
+
+    elif version == 'pytorch':  # distance
+        torch.cdist(p1, p2, compute_mode='donot_use_mm_for_euclid_dist').\
+            topk(k, dim=2, largest=False, sorted=return_sorted)
+
+    else:
+        raise NotImplementedError
 
 
 def index_points_dists(dists, idx1, idx2):
@@ -86,11 +99,10 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
         group_idx: grouped points index, [B, S, nsample]
     """
     # indices could be different with original version if there are more samples than nsample in one ball
-    dists = torch.cdist(new_xyz, xyz)  # B, S, N
-    values, indices = dists.topk(nsample, sorted=False, largest=False)
-    group_idx = torch.where(values < radius, indices, indices[:, :, :1])
+    values, indices, _ = knn_points(new_xyz, xyz, nsample, return_sorted=False)
+    group_idx = torch.where(values < radius ** 2, indices, indices[:, :, :1])
 
-    # ori:
+    # # ori:
     # new_version_group_idx = group_idx.clone()
     # def square_distance(src, dst):
     #     return torch.sum((src[:, :, None] - dst[:, None]) ** 2, dim=-1)
@@ -106,7 +118,7 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
     # mask = group_idx == N
     # group_idx[mask] = group_first[mask]
     #
-    # test:
+    # # test:
     # for i in range(B):
     #     for j in range(S):
     #         try:
@@ -134,12 +146,11 @@ def sample_and_group(nsample, group_radius, ngroup, xyz, points_fea, returnfps=F
     sampled_xyz = index_points(xyz, fps_idx)
 
     if knn:
-        dists = torch.cdist(sampled_xyz, xyz)  # B x npoint x N
-        grouped_idx = dists.topk(ngroup, dim=-1, largest=False, sorted=True)[1]  # argsort()[:, :, :ngroup]  # B x npoint x K
+        dists, grouped_idx, _ = knn_points(sampled_xyz, xyz, return_sorted=False)
     else:
         grouped_idx = query_ball_point(group_radius, ngroup, xyz, sampled_xyz)
 
-    grouped_xyz = index_points(xyz, grouped_idx) # [B, npoint, nsample, C]
+    grouped_xyz = index_points(xyz, grouped_idx)  # [B, npoint, nsample, C]
     grouped_xyz_norm = grouped_xyz - sampled_xyz[:, :, None, :]
 
     if points_fea is not None:
