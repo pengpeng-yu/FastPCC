@@ -233,7 +233,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
             if isinstance(batch_data, torch.Tensor):
                 batch_data = batch_data.to(device, non_blocking=True)
             elif isinstance(batch_data, list) or isinstance(batch_data, tuple):
-                batch_data = [d.to(device, non_blocking=True) for d in batch_data if isinstance(d, torch.Tensor)]
+                batch_data = [d.to(device, non_blocking=True) if isinstance(d, torch.Tensor) else d for d in batch_data]
             else: raise NotImplementedError
 
             if cfg.train.amp:
@@ -279,7 +279,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
                     tb_writer.add_scalar('Train/Loss/total_wo_aux', total_wo_aux, global_step)
 
             global_step += 1
-            # break  # TODO
+
         scheduler.step()
         if local_rank in (-1, 0):
             tb_writer.add_scalar('Train/Epochs', epoch, global_step - 1)

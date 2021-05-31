@@ -6,14 +6,15 @@ train:
   batch_size: 4
   weight_decay: 0.0001
   epochs: 100
-  ckpt_frequency: 10
+  ckpt_frequency: 5
   lr_step_size: 20
   lr_step_gamma: 0.1
   resume_from_ckpt: ''
   resume_items: ['state_dict']
   learning_rate: 0.01
+test:
+  batch_size: 4
 dataset:
   root: 'datasets/modelnet40_manually_aligned'
   resolution: 128
-test:
-  batch_size: 4
+

@@ -11,7 +11,7 @@ from lib.pointnet_utils import index_points, index_points_dists, farthest_point_
 Classes for neighborhoods-based point cloud networks.
 
 Conventions:
-Module accepts and returns a tuple (xyz, feature, raw_neighbors_feature, neighbors_idx, sample_indexes)
+Module accepts and returns a tuple (xyz, cached_feature, raw_neighbors_feature, neighbors_idx, cached_sample_indexes)
 
 Args:
     B: batch size, N: current points number, C: current channels number, M: max neighbors number, S: samples number
@@ -460,7 +460,6 @@ class LocalFeatureAggregation(nn.Module):
         else:
             assert all([isinstance(_, torch.Tensor) for _ in cached_feature])
 
-        # calculate these value in dataloader using cpu?
         if raw_neighbors_feature is None or neighbors_idx is None:
             raw_neighbors_feature, neighbors_idx = self.neighbor_feature_generator(xyz)
 

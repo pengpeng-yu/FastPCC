@@ -107,14 +107,13 @@ def test(cfg: Config, logger, model: torch.nn.Module = None):
         if isinstance(batch_data, torch.Tensor):
             batch_data = batch_data.to(device, non_blocking=True)
         elif isinstance(batch_data, list) or isinstance(batch_data, tuple):
-            batch_data = [d.to(device, non_blocking=True) for d in batch_data]
+            batch_data = [d.to(device, non_blocking=True) if isinstance(d, torch.Tensor) else d for d in batch_data]
         else:
             raise NotImplementedError
 
         with torch.no_grad():
             test_output = model(batch_data)
-            # torch.save(data, 'runs/data.pt')
-            # torch.save(model_output['decoder_output'], 'runs/decoder_output.pt')
+
             if cfg.test.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.test.log_frequency == 0):
                 logger.info(f'test step {step_idx}/{steps_one_epoch - 1}')
 

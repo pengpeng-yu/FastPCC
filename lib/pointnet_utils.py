@@ -41,6 +41,7 @@ def knn_points(p1, p2, k, return_sorted=False, version='pytorch3d', pytorch3d_ve
                                     version=pytorch3d_version, **kwargs)
 
     elif version == 'pytorch':  # distance
+        if not pytorch3d_version == -1 and kwargs == {}: raise NotImplementedError
         torch.cdist(p1, p2, compute_mode='donot_use_mm_for_euclid_dist').\
             topk(k, dim=2, largest=False, sorted=return_sorted)
 
