@@ -91,7 +91,9 @@ class ModelNetDataset(torch.utils.data.Dataset):
         voxelized_flag = False
 
         # use cache
-        if self.use_cache is True: return torch.load(file_path)
+        if self.use_cache is True:
+            if self.cfg.random_rotation: raise NotImplementedError
+            return torch.load(file_path)
 
         # TODO: normals & augmentation
 
