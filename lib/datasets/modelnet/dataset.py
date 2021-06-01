@@ -3,11 +3,9 @@ import pathlib
 import hashlib
 from tqdm import tqdm
 import open3d as o3d
-import pyvista
 import numpy as np
 import torch
 import torch.utils.data
-from torch.utils.data._utils.collate import default_collate
 from scipy.spatial.transform import Rotation as R
 try:
     import MinkowskiEngine as ME
@@ -18,7 +16,7 @@ from lib.data_utils import OFFIO, resample_mesh_by_faces
 
 
 class ModelNetDataset(torch.utils.data.Dataset):
-    def __init__(self, cfg: DatasetConfig, is_training, logger):
+    def __init__(self, cfg: DatasetConfig, is_training, logger, allow_cache=True):
         super(ModelNetDataset, self).__init__()
         # define files list path and cache path
         filelist_abs_path = os.path.join(cfg.root,
@@ -67,9 +65,10 @@ class ModelNetDataset(torch.utils.data.Dataset):
             # log configuration
             with open(os.path.join(self.cache_root, 'dataset_config.yaml'), 'w') as f:
                 f.write(cfg.to_yaml())
-            logger.info(f'start caching in {self.cache_root}')
             self.use_cache = False
-            self.gen_cache = True
+            self.gen_cache = True if allow_cache else False
+            if self.gen_cache is True:
+                logger.info(f'start caching in {self.cache_root}')
         else:
             self.use_cache = False
             self.gen_cache = False
@@ -88,7 +87,6 @@ class ModelNetDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         # load
         file_path = self.file_list[index]
-        voxelized_flag = False
 
         # use cache
         if self.use_cache is True:
@@ -114,40 +112,39 @@ class ModelNetDataset(torch.utils.data.Dataset):
             if self.cfg.with_normal_channel: raise NotImplementedError
 
             # mesh -> points
-            if self.cfg.resolution == 0:
-                mesh_object = o3d.io.read_triangle_mesh(file_path)
-                vertices = np.asarray(mesh_object.vertices)
+            mesh_object = o3d.io.read_triangle_mesh(file_path)
+            vertices = np.asarray(mesh_object.vertices)
 
-                vmax = vertices.max(0, keepdims=True)
-                vmin = vertices.min(0, keepdims=True)
-                vertices = (vertices - vmin) / (vmax - vmin).max()
-                mesh_object.vertices = o3d.utility.Vector3dVector(vertices)
+            vmax = vertices.max(0, keepdims=True)
+            vmin = vertices.min(0, keepdims=True)
+            vertices = (vertices - vmin) / (vmax - vmin).max()
+            mesh_object.vertices = o3d.utility.Vector3dVector(vertices)
 
-                # sample points from mesh
-                if self.cfg.mesh_sample_point_method == 'barycentric':
-                    point_cloud = resample_mesh_by_faces(
-                        mesh_object,
-                        density=self.cfg.input_points_num / len(mesh_object.triangles))
-                elif self.cfg.mesh_sample_point_method == 'poisson_disk':
-                    point_cloud = np.asarray(mesh_object.sample_points_poisson_disk(self.cfg.input_points_num).points)
-                elif self.cfg.mesh_sample_point_method == 'uniform':
-                    point_cloud = np.asarray(mesh_object.sample_points_uniformly(self.cfg.input_points_num).points)
-                else:
-                    raise NotImplementedError
-                point_cloud = point_cloud.astype(np.float32)
-
-            # mesh -> voxel points
+            # sample points from mesh
+            if self.cfg.mesh_sample_point_method == 'barycentric':
+                point_cloud = resample_mesh_by_faces(
+                    mesh_object,
+                    density=self.cfg.input_points_num / len(mesh_object.triangles))
+            elif self.cfg.mesh_sample_point_method == 'poisson_disk':
+                point_cloud = np.asarray(mesh_object.sample_points_poisson_disk(self.cfg.input_points_num).points)
+            elif self.cfg.mesh_sample_point_method == 'uniform':
+                point_cloud = np.asarray(mesh_object.sample_points_uniformly(self.cfg.input_points_num).points)
             else:
-                vertices, faces = OFFIO.load_by_np(file_path)
+                raise NotImplementedError
+            point_cloud = point_cloud.astype(np.float32)
 
-                vmax = vertices.max(0, keepdims=True)
-                vmin = vertices.min(0, keepdims=True)
-                vertices = (vertices - vmin) * (self.cfg.resolution / (vmax - vmin).max())
-                mesh_object = pyvista.PolyData(vertices, faces)
-
-                point_cloud = pyvista.voxelize(mesh_object, density=1, check_surface=False)
-                point_cloud = np.asarray(point_cloud.points.astype(np.int32))
-                voxelized_flag = True
+            # # mesh -> voxel points
+            # # could produce strange result if surface is not closed
+            # vertices, faces = OFFIO.load_by_np(file_path)
+            #
+            # vmax = vertices.max(0, keepdims=True)
+            # vmin = vertices.min(0, keepdims=True)
+            # vertices = (vertices - vmin) * (self.cfg.resolution / (vmax - vmin).max())
+            # mesh_object = pyvista.PolyData(vertices, faces)
+            #
+            # point_cloud = pyvista.voxelize(mesh_object, density=1, check_surface=False)
+            # point_cloud = np.asarray(point_cloud.points.astype(np.int32))
+            # voxelized_flag = True
 
         else:
             raise NotImplementedError
@@ -158,6 +155,8 @@ class ModelNetDataset(torch.utils.data.Dataset):
         # normals
         if self.cfg.with_normal_channel:
             normals = point_cloud[:, 3:]
+        else:
+            normals = None
 
         # random rotation
         if not self.gen_cache and self.cfg.random_rotation:
@@ -166,38 +165,28 @@ class ModelNetDataset(torch.utils.data.Dataset):
 
         # quantize  points: ndarray -> voxel points: torch.Tensor
         if self.cfg.resolution != 0:
-            if not voxelized_flag:
-                assert self.cfg.resolution > 1
-                if self.data_file_format == '.txt':
-                    # coordinates of modelnet40_normal_resampled are in [-1, 1]
-                    xyz *= (self.cfg.resolution // 2)
-                else:
-                    xyz *= self.cfg.resolution
-                if self.cfg.with_normal_channel:
-                    xyz, normals = ME.utils.sparse_quantize(xyz, normals)
-                else:
-                    xyz = ME.utils.sparse_quantize(xyz)
+            assert self.cfg.resolution > 1
+            if self.data_file_format == '.txt':
+                # coordinates of modelnet40_normal_resampled are in [-1, 1]
+                xyz *= (self.cfg.resolution // 2)
             else:
-                xyz = torch.from_numpy(xyz)
-                if self.cfg.with_normal_channel:
-                    normals = torch.from_numpy(normals)
+                xyz *= self.cfg.resolution
+            if self.cfg.with_normal_channel:
+                xyz, normals = ME.utils.sparse_quantize(xyz, normals)
+            else:
+                xyz = ME.utils.sparse_quantize(xyz)
 
         # classes
         if self.cfg.with_classes:
             cls_idx = self.classes_idx[os.path.split(self.file_list[index])[1].rsplit('_', 1)[0]]
+        else:
+            cls_idx = None
 
         # cache and return
-        if self.cfg.with_normal_channel:
-            if self.cfg.with_classes:
-                return_obj = xyz, normals, cls_idx
-            else:
-                return_obj = xyz, normals
-
-        else:
-            if self.cfg.with_classes:
-                return_obj = xyz, cls_idx
-            else:
-                return_obj = xyz
+        return_obj = {'xyz': xyz,
+                      'normals': normals,
+                      'class_index': cls_idx,
+                      'file_path': file_path if self.cfg.with_file_path else None}
 
         if self.gen_cache is True:
             cache_file_path = file_path.replace(self.cfg.root, self.cache_root, 1).replace('.off', '.pt')
@@ -209,45 +198,75 @@ class ModelNetDataset(torch.utils.data.Dataset):
         return return_obj
 
     def collate_fn(self, batch):
-        if self.cfg.resolution == 0:
-            return default_collate(batch)
+        assert isinstance(batch, list)
 
-        elif self.cfg.resolution != 0:
-            if isinstance(batch[0], tuple):
-                batch = list(zip(*batch))
+        has_normals = self.cfg.with_normal_channel
+        has_class_index = self.cfg.with_classes
+        has_file_path = self.cfg.with_file_path
+
+        xyz_list = []
+        normals_list = [] if has_normals else None
+        class_index_list = [] if has_class_index else None
+        file_path_list = [] if has_file_path else None
+
+        for sample in batch:
+            if isinstance(sample['xyz'], torch.Tensor):
+                xyz_list.append(sample['xyz'])
             else:
-                batch = (batch, )
-
-            if self.cfg.with_classes:
-                batch_cls = torch.tensor(batch[-1])
-
-            if self.cfg.with_normal_channel:
-                batch_coords, batch_feats = ME.utils.sparse_collate(batch[0], batch[1])
-                if self.cfg.with_classes:
-                    return batch_coords, batch_feats, batch_cls
+                xyz_list.append(torch.from_numpy(sample['xyz']))
+            if has_normals:
+                if isinstance(sample['normals'], torch.Tensor):
+                    normals_list.append(sample['normals'])
                 else:
-                    return batch_coords, batch_feats
+                    normals_list.append(torch.from_numpy(sample['normals']))
+            if has_class_index:
+                class_index_list.append(sample['class_index'])
+            if has_file_path:
+                file_path_list.append(sample['file_path'])
 
-            elif not self.cfg.with_normal_channel:
-                batch_coords = ME.utils.batched_coordinates(batch[0])
-                if self.cfg.with_classes:
-                    return batch_coords, batch_cls
-                else:
-                    return batch_coords
+        return_obj = []
+
+        if self.cfg.resolution == 0:
+            batch_xyz = torch.stack(xyz_list, dim=0)
+            return_obj.append(batch_xyz)
+            if has_normals:
+                batch_normals = torch.stack(normals_list, dim=0)
+                return_obj.append(batch_normals)
+
+        else:
+            if has_normals:
+                batch_xyz, batch_normals = ME.utils.sparse_collate(xyz_list, normals_list)
+                return_obj.extend((batch_xyz, batch_normals))
+            else:
+                batch_xyz = ME.utils.batched_coordinates(xyz_list)
+                return_obj.append(batch_xyz)
+
+        if has_class_index:
+            return_obj.append(torch.tensor(class_index_list))
+
+        if has_file_path:
+            return_obj.append(file_path_list)
+
+        if len(return_obj) == 1:
+            return_obj = return_obj[0]
+        else:
+            return_obj = tuple(return_obj)
+        return return_obj
 
 
 if __name__ == '__main__':
     config = DatasetConfig()
-    config.input_points_num = 8192
+    config.input_points_num = 200000
     config.with_classes = False
     config.with_normal_channel = False
+    config.with_file_path = True
     config.resolution = 128
     config.root = 'datasets/modelnet40_manually_aligned'
 
     from loguru import logger
-    dataset = ModelNetDataset(config, True, logger)
+    dataset = ModelNetDataset(config, True, logger, allow_cache=False)
 
-    dataloader = torch.utils.data.DataLoader(dataset, 4, shuffle=False, collate_fn=dataset.collate_fn)
+    dataloader = torch.utils.data.DataLoader(dataset, 16, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
     sample = next(dataloader)
 

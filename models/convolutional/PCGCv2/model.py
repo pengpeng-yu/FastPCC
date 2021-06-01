@@ -1,3 +1,5 @@
+import os
+import open3d as o3d
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,7 +26,9 @@ class PCC(nn.Module):
         self.cfg = cfg
         self.log_pred_res('init')
 
-    def log_pred_res(self, mode, preds=None, targets=None):
+    def log_pred_res(self, mode, preds=None, targets=None,
+                     file_path_list: str = None, compressed_strings: bytes = None,
+                     voxels_num: int = None, decoder_output: torch.Tensor = None):
         if mode == 'init':
             total_reconstruct_loss = torch.zeros((1, ), dtype=torch.float64)
             samples_num = torch.zeros((1, ), dtype=torch.int64)
@@ -38,10 +42,30 @@ class PCC(nn.Module):
         elif mode == 'log':
             assert not self.training
             assert isinstance(preds, list) and isinstance(targets, list)
-            for pred, target in zip(preds, targets):
+
+            for pred, target, file_path in zip(preds, targets, file_path_list):
                 self.total_reconstruct_loss += chamfer_loss(
                     pred.unsqueeze(0).type(torch.float) / self.cfg.resolution,
                     target.unsqueeze(0).type(torch.float) / self.cfg.resolution)
+
+                if self.cfg.save_path_test_phase != '':
+                    file_path = os.path.join(self.cfg.save_path_test_phase, file_path)
+                    file_path = os.path.splitext(file_path)[0]
+                    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                    compressed_path = file_path + '.txt'
+                    headinfo_path = file_path + '_head.txt'
+                    reconstructed_path = file_path + '.ply'
+
+                    with open(compressed_path, 'wb') as f:
+                        f.write(compressed_strings)
+                    with open(headinfo_path, 'w') as f:
+                        f.write(f'voxels_num: {voxels_num}\nscaler: {self.cfg.bottleneck_scaler}\n')
+
+                    o3d.io.write_point_cloud(reconstructed_path,
+                                             o3d.geometry.PointCloud(
+                                                 o3d.utility.Vector3dVector(
+                                                     pred.detach().clone().cpu())), write_ascii=True)
+
             self.samples_num += len(targets)
 
         elif mode == 'show':
@@ -50,7 +74,8 @@ class PCC(nn.Module):
         else:
             raise NotImplementedError
 
-    def forward(self, xyz):
+    def forward(self, x):
+        xyz, file_path_list = x
         xyz = ME.SparseTensor(torch.ones(xyz.shape[0], 1, dtype=torch.float, device=xyz.device),
                               xyz)
         fea = self.encoder(xyz)
@@ -91,11 +116,10 @@ class PCC(nn.Module):
                 self.decoder((fea, None, None, None))
 
             decoder_output = cached_exist[-1].decomposed_coordinates
-            self.log_pred_res('log', decoder_output, xyz.decomposed_coordinates)
+            self.log_pred_res('log', decoder_output, xyz.decomposed_coordinates,
+                              file_path_list, compressed_strings[0], fea.shape[0], decoder_output)
 
-            return {'compressed_strings': compressed_strings,
-                    'decompressed_tensors': decompressed_tensors,
-                    'decoder_output': decoder_output}
+            return True
 
     def load_state_dict(self, state_dict, strict: bool = True):
         # Dynamically update the entropy bottleneck buffers related to the CDFs

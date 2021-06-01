@@ -2,7 +2,6 @@ Requirements:
 
 - python>=3.7
 - loguru
-- pyvista
 - open3d
 - pytorch≈1.7
 - pytorch3d

@@ -11,3 +11,5 @@ class ModelConfig(SimpleConfig):
     aux_loss_factor: float = 10.0
 
     resolution: int = 128  # only used for computing chamfer distances
+
+    save_path_test_phase: str = ''
