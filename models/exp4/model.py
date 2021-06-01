@@ -19,10 +19,11 @@ class GenerativeTransitionUp(nn.Module):
         super(GenerativeTransitionUp, self).__init__()
         self.lfa = LFA(in_channels, neighbor_feature_generator,
                        raw_neighbor_fea_out_chnls, out_channels, cache_out_feature)
+        self.mlp_offset = nn.Linear()
 
     def forward(self, x):
-        xyz, cached_feature, raw_neighbors_feature, neighbors_idx, cached_sample_indexes = x
         x = self.lfa(x)
+        xyz, cached_feature, raw_neighbors_feature, neighbors_idx, cached_sample_indexes = x
         pass
         return None
 

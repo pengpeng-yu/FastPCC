@@ -12,7 +12,6 @@ except ImportError: pass
 from lib.datasets.MVUB.dataset_config import DatasetConfig
 
 
-# TODO: shapenet
 class MVUB(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(MVUB, self).__init__()
