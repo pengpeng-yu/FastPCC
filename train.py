@@ -91,13 +91,13 @@ def main():
             return
         logger.info(f'TensorBoard {tensorboard.__version__} at {tb_url}')
 
-        train(cfg, local_rank, logger, tb_writer, ckpts_dir)
+        train(cfg, local_rank, logger, tb_writer, run_dir, ckpts_dir)
         
     else:
         train(cfg, local_rank, logger)
 
 
-def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
+def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_dir=None):
     # Parallel training
     world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
@@ -286,7 +286,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, ckpts_dir=None):
 
         # Model test
         if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and (epoch + 1) % cfg.train.test_frequency == 0:
-            test_items = test(cfg, logger, model)
+            test_items = test(cfg, logger, model, run_dir)
             for item_name, item in test_items.items():
                 tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
 

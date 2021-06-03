@@ -58,6 +58,7 @@ class TestConfig(SimpleConfig):
     num_workers: int = 4
     weights_from_ckpt: str = ''
     log_frequency: int = 50  # (steps) used for logging
+    save_results: bool = False  # save outputs of model in runs/rundir_name/results
 
 
 @dataclass
@@ -66,7 +67,7 @@ class Config(SimpleConfig):
     model: SimpleConfig = None
     train: TrainConfig = TrainConfig()
     test: TestConfig = TestConfig()
-    dataset_path: str = 'lib.datasets.modelnet'  # dataset_path.Dataset and dataset_path.Config are required
+    dataset_path: str = 'lib.datasets.ModelNet'  # dataset_path.Dataset and dataset_path.Config are required
     dataset: SimpleConfig = None
 
     def __post_init__(self):
@@ -78,7 +79,9 @@ class Config(SimpleConfig):
             assert self.model.input_points_num == self.dataset.input_points_num
 
         if hasattr(self.model, 'resolution') and hasattr(self.dataset, 'resolution'):
-            assert self.model.resolution == self.dataset.resolution
+            if self.model.resolution != self.dataset.resolution:
+                print(f'Warning: model.resolution({self.model.resolution}) != '
+                      f'dataset.resolution({self.dataset.resolution}) !')
 
     def merge_with_yaml(self, yaml_path):
         yaml_dict = yaml.safe_load(open(yaml_path))

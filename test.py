@@ -3,6 +3,7 @@ import sys
 import pathlib
 import importlib
 from tqdm import tqdm
+import open3d as o3d
 
 import numpy as np
 import torch
@@ -38,14 +39,16 @@ def main():
     logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
     logger.add(run_dir / 'log.txt', format=loguru_format, level=0, mode='w')
 
-    print(test(cfg, logger))
+    print(test(cfg, logger, run_dir))
 
 
-def test(cfg: Config, logger, model: torch.nn.Module = None):
+def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
     try:
         Dataset = importlib.import_module(cfg.dataset_path).Dataset
     except Exception as e:
         raise ImportError(*e.args)
+
+    results_dir = os.path.join(run_dir, 'results')
 
     # cache
     dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, False, logger)
@@ -112,22 +115,43 @@ def test(cfg: Config, logger, model: torch.nn.Module = None):
             raise NotImplementedError
 
         with torch.no_grad():
-            test_output = model(batch_data)
+            items_to_save = model(batch_data)
+
+            if cfg.test.save_results:
+                for item_path, item in items_to_save.items():
+                    item_path = os.path.join(results_dir, item_path)
+                    os.makedirs(os.path.dirname(item_path), exist_ok=True)
+
+                    if isinstance(item, bytes):
+                        with open(item_path, 'wb') as f:
+                            f.write(item)
+                    elif isinstance(item, str):
+                        with open(item_path, 'w') as f:
+                            f.write(item)
+                    elif isinstance(item, o3d.geometry.PointCloud):
+                        o3d.io.write_point_cloud(item_path, item)
+                    else:
+                        raise NotImplementedError
 
             if cfg.test.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.test.log_frequency == 0):
                 logger.info(f'test step {step_idx}/{steps_one_epoch - 1}')
 
     try:
         if torch_utils.is_parallel(model):
-            test_results = model.module.log_pred_res('show')
+            metric_results = model.module.log_pred_res('show')
         else:
-            test_results = model.log_pred_res('show')
+            metric_results = model.log_pred_res('show')
     except AttributeError:
-        test_results = {}
+        metric_results = {}
+
+    return_obj = {item_name: item for item_name, item in metric_results.items()
+                  if isinstance(item, int) or isinstance(item, float)}
+
+    with open(os.path.join(run_dir, 'metric.txt'), 'w') as f:
+        f.write(str(return_obj))
 
     logger.info(f'test end')
-    return {item_name: item for item_name, item in test_results.items()
-            if isinstance(item, int) or isinstance(item, float)}
+    return return_obj
 
 
 if __name__ == '__main__':

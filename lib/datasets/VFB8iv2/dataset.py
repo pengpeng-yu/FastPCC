@@ -10,17 +10,16 @@ try:
     import MinkowskiEngine as ME
 except ImportError: pass
 
-from lib.datasets.MVUB.dataset_config import DatasetConfig
+from lib.datasets.VFB8iv2.dataset_config import DatasetConfig
 
 
-class MVUB(torch.utils.data.Dataset):
+class VFB8iv2(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
-        super(MVUB, self).__init__()
+        super(VFB8iv2, self).__init__()
         # only for test purpose
         assert is_training is False
 
-        assert cfg.ori_resolution in [512, 1024]
-        if not cfg.ori_resolution == cfg.resolution:
+        if not cfg.resolution == 1024:
             raise NotImplementedError
 
         # define files list path and cache path
@@ -29,17 +28,19 @@ class MVUB(torch.utils.data.Dataset):
         # generate files list
         if not os.path.exists(filelist_abs_path):
             logger.info('no filelist is given. Trying to generate...')
-            path_pattern = '*9/ply/*.ply' if cfg.ori_resolution == 512 else '*10/ply/*.ply'
-            file_list = pathlib.Path(cfg.root).glob(path_pattern)
+            root_path = pathlib.Path(cfg.root)
+            file_list = []
+            for class_name in ['longdress', 'loot', 'redandblack', 'soldier']:
+                file_list.extend(root_path.glob(class_name + '/Ply/*.ply'))
             with open(filelist_abs_path, 'w') as f:
-                f.write('\n'.join([str(_.relative_to(cfg.root)) for _ in file_list]))
+                f.write('\n'.join([str(_.relative_to(root_path)) for _ in file_list]))
 
         # load files list
         logger.info(f'using filelist: "{filelist_abs_path}"')
         with open(filelist_abs_path) as f:
             self.file_list = [os.path.join(cfg.root, _.strip()) for _ in f]
 
-        if len(self.file_list) != 1202 and cfg.ori_resolution == 512:
+        if len(self.file_list) != 1200:
             logger.warning(f'wrong number of files. 1202 expected, got {len(self.file_list)}')
 
         self.cfg = cfg
@@ -100,7 +101,7 @@ if __name__ == '__main__':
     config.with_color = False
 
     from loguru import logger
-    dataset = MVUB(config, False, logger)
+    dataset = VFB8iv2(config, False, logger)
 
     dataloader = torch.utils.data.DataLoader(dataset, 4, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)

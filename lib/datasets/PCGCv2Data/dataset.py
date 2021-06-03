@@ -1,7 +1,7 @@
 import os
 import pathlib
 
-import open3d as o3d
+import h5py
 import numpy as np
 import torch
 import torch.utils.data
@@ -10,37 +10,41 @@ try:
     import MinkowskiEngine as ME
 except ImportError: pass
 
-from lib.datasets.MVUB.dataset_config import DatasetConfig
+from lib.datasets.PCGCv2Data.dataset_config import DatasetConfig
 
 
-class MVUB(torch.utils.data.Dataset):
+class PCGCv2Data(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
-        super(MVUB, self).__init__()
-        # only for test purpose
-        assert is_training is False
+        super(PCGCv2Data, self).__init__()
 
-        assert cfg.ori_resolution in [512, 1024]
-        if not cfg.ori_resolution == cfg.resolution:
+        if cfg.resolution != 256:
             raise NotImplementedError
 
         # define files list path and cache path
-        filelist_abs_path = os.path.join(cfg.root, cfg.filelist_path)
+        if is_training:
+            filelist_abs_path = os.path.join(cfg.root, cfg.train_filelist_path)
+        else:
+            filelist_abs_path = os.path.join(cfg.root, cfg.test_filelist_path)
 
         # generate files list
         if not os.path.exists(filelist_abs_path):
             logger.info('no filelist is given. Trying to generate...')
-            path_pattern = '*9/ply/*.ply' if cfg.ori_resolution == 512 else '*10/ply/*.ply'
-            file_list = pathlib.Path(cfg.root).glob(path_pattern)
+            file_list = tuple(pathlib.Path(cfg.root).glob('*.h5'))
+
+            assert 0 < cfg.train_split_ratio <= 1.0
+            if is_training:
+                file_list = file_list[: int(cfg.train_split_ratio * len(file_list))]
+            else:
+                if cfg.train_split_ratio == 1.0: pass
+                else: file_list = file_list[int(cfg.train_split_ratio * len(file_list)):]
+
             with open(filelist_abs_path, 'w') as f:
-                f.write('\n'.join([str(_.relative_to(cfg.root)) for _ in file_list]))
+                f.writelines([str(_.relative_to(cfg.root)) + '\n' for _ in file_list])
 
         # load files list
         logger.info(f'using filelist: "{filelist_abs_path}"')
         with open(filelist_abs_path) as f:
             self.file_list = [os.path.join(cfg.root, _.strip()) for _ in f]
-
-        if len(self.file_list) != 1202 and cfg.ori_resolution == 512:
-            logger.warning(f'wrong number of files. 1202 expected, got {len(self.file_list)}')
 
         self.cfg = cfg
 
@@ -50,19 +54,11 @@ class MVUB(torch.utils.data.Dataset):
     def __getitem__(self, index):
         # load
         file_path = self.file_list[index]
-        point_cloud = o3d.io.read_point_cloud(file_path)
+        xyz = h5py.File(file_path)['data'][:, :3]
 
-        # xyz
-        xyz = np.asarray(point_cloud.points, dtype=np.int32)
-
-        if self.cfg.with_color:
-            color = np.asarray(point_cloud.colors, dtype=np.int32)
-        else:
-            color = None
-
-        return {'xyz': xyz,
-                'color': color,
-                'file_path': os.path.relpath(file_path, self.cfg.root) if self.cfg.with_file_path else None}
+        return_obj = {'xyz': xyz,
+                      'file_path': os.path.relpath(file_path, self.cfg.root) if self.cfg.with_file_path else None}
+        return return_obj
 
     def collate_fn(self, batch):
         assert isinstance(batch, list)
@@ -73,10 +69,7 @@ class MVUB(torch.utils.data.Dataset):
         file_path_list = [] if has_file_path else None
 
         for sample in batch:
-            if isinstance(sample['xyz'], torch.Tensor):
-                xyz_list.append(sample['xyz'])
-            else:
-                xyz_list.append(torch.from_numpy(sample['xyz']))
+            xyz_list.append(torch.from_numpy(sample['xyz'].astype(np.int32)))
             if has_file_path:
                 file_path_list.append(sample['file_path'])
 
@@ -97,17 +90,16 @@ class MVUB(torch.utils.data.Dataset):
 
 if __name__ == '__main__':
     config = DatasetConfig()
-    config.with_color = False
 
     from loguru import logger
-    dataset = MVUB(config, False, logger)
+    dataset = PCGCv2Data(config, True, logger)
 
     dataloader = torch.utils.data.DataLoader(dataset, 4, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
     sample = next(dataloader)
 
     from main_debug import plt_batch_sparse_coord
-    if config.with_color or config.with_file_path:
+    if config.with_file_path:
         sample_coords = sample[0]
     else:
         sample_coords = sample

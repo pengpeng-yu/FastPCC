@@ -11,7 +11,7 @@ try:
     import MinkowskiEngine as ME
 except ImportError: pass
 
-from lib.datasets.modelnet.dataset_config import DatasetConfig
+from lib.datasets.ModelNet.dataset_config import DatasetConfig
 from lib.data_utils import OFFIO, resample_mesh_by_faces
 
 
@@ -186,7 +186,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
         return_obj = {'xyz': xyz,
                       'normals': normals,
                       'class_index': cls_idx,
-                      'file_path': file_path if self.cfg.with_file_path else None}
+                      'file_path': os.path.relpath(file_path, self.cfg.root) if self.cfg.with_file_path else None}
 
         if self.gen_cache is True:
             cache_file_path = file_path.replace(self.cfg.root, self.cache_root, 1).replace('.off', '.pt')
