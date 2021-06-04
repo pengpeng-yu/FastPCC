@@ -79,7 +79,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             xyz = binvox_rw.read_as_coord_array(f).data.astype(np.int32).T
 
         return_obj = {'xyz': xyz,
-                      'file_path': os.path.relpath(file_path, self.cfg.root) if self.cfg.with_file_path else None}
+                      'file_path': file_path if self.cfg.with_file_path else None}
         return return_obj
 
     def collate_fn(self, batch):
@@ -106,6 +106,9 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         if has_file_path:
             return_obj.append(file_path_list)
 
+        if self.cfg.with_resolution:
+            return_obj.append(self.cfg.resolution)
+
         if len(return_obj) == 1:
             return_obj = return_obj[0]
         else:
@@ -124,7 +127,7 @@ if __name__ == '__main__':
     sample = next(dataloader)
 
     from main_debug import plt_batch_sparse_coord
-    if config.with_file_path:
+    if config.with_file_path or config.with_resolution:
         sample_coords = sample[0]
     else:
         sample_coords = sample

@@ -13,3 +13,4 @@ class DatasetConfig(SimpleConfig):
 
     resolution: int = 256
     with_file_path: bool = True
+    with_resolution: bool = True

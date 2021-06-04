@@ -1,0 +1,13 @@
+dataset_path:
+  'lib.datasets.PlyVoxel'
+dataset:
+  root: 'datasets/MVUB'
+  filelist_path: 'list.txt'
+  file_path_pattern: '*9/ply/*.ply'
+
+  with_color: False
+  with_normal: False
+  with_file_path: True
+
+  ori_resolution: 512
+  resolution: 512

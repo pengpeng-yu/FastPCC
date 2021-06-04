@@ -186,7 +186,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
         return_obj = {'xyz': xyz,
                       'normals': normals,
                       'class_index': cls_idx,
-                      'file_path': os.path.relpath(file_path, self.cfg.root) if self.cfg.with_file_path else None}
+                      'file_path': file_path if self.cfg.with_file_path else None}
 
         if self.gen_cache is True:
             cache_file_path = file_path.replace(self.cfg.root, self.cache_root, 1).replace('.off', '.pt')
@@ -246,6 +246,9 @@ class ModelNetDataset(torch.utils.data.Dataset):
 
         if has_file_path:
             return_obj.append(file_path_list)
+
+        if self.cfg.with_resolution:
+            return_obj.append(self.cfg.resolution)
 
         if len(return_obj) == 1:
             return_obj = return_obj[0]
