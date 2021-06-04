@@ -85,7 +85,8 @@ class Config(SimpleConfig):
 
     def merge_with_yaml(self, yaml_path):
         yaml_dict = yaml.safe_load(open(yaml_path))
-        if not yaml_dict['model_path'].rsplit('.', 1)[-1] in os.path.splitext(os.path.basename(yaml_path))[0]:
-            print(f'Warning: loading configuration from {os.path.basename(yaml_path)} '
-                  f'with model_path == {yaml_dict["model_path"]}. Is this correct?')
+        if 'model_path' in yaml_dict:
+            if not yaml_dict['model_path'].rsplit('.', 1)[-1] in os.path.splitext(os.path.basename(yaml_path))[0]:
+                print(f'Warning: loading configuration from {os.path.basename(yaml_path)} '
+                      f'with model_path == {yaml_dict["model_path"]}. Is this correct?')
         return self.merge_with_dict(yaml_dict)

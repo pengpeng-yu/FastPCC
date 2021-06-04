@@ -35,11 +35,15 @@ def main():
 
     # Initialize config, run dir, logger
     cfg = Config()
-    if len(sys.argv) > 1 and ('=' not in sys.argv[1]) and sys.argv[1].endswith('.yaml'):
-        cfg.merge_with_yaml(sys.argv[1])
-        cfg.merge_with_dotlist(sys.argv[2:])
+    arg_idx = 0
+    for arg_idx, arg in enumerate(sys.argv[1:]):
+        if arg.endswith('.yaml') or arg.endswith('.yaml"') or arg.endswith(".yaml'"):
+            cfg.merge_with_yaml(arg)
+        else:
+            break
     else:
-        cfg.merge_with_dotlist(sys.argv[1:])
+        arg_idx += 1
+    cfg.merge_with_dotlist(sys.argv[arg_idx + 1:])
 
     from loguru import logger
     logger.remove()

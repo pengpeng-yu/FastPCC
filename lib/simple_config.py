@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Union
 from dataclasses import dataclass
 import importlib
 import yaml
@@ -35,25 +35,50 @@ class SimpleConfig:
     def check_type(self):
         """
         Recursively check existence and value type of attributes. Only called by check().
+        Only
+        basic_types(bool, int, float, str)
+        List[basic_type], Tuple[basic_type]
+        Union[basic_type, List[basic_type]], Union[basic_type, Tuple[basic_type]]
+        are supported.
         """
         basic_types = [bool, int, float, str]
-        assert issubclass(type(self), SimpleConfig), f'this method checks types of {type(self)} obj instead of {type(self)} object'
+
+        assert issubclass(type(self), SimpleConfig), \
+            f'this method checks types of {type(self)} obj instead of {type(self)} object'
         assert hasattr(self, '__dict__'), f'object does not have any local attribute'
         assert hasattr(self, '__annotations__'), f'object of class {type(self)} has no type annotation'
+
         for key, value in self.__dict__.items():
             value_anno_type = self.__annotations__[key]
-            if type(value) in basic_types:
-                assert type(value) is value_anno_type, \
-                    f'actual type {type(value)} of attribute {key} is inconsisent with its annotation type {value_anno_type}'
-            elif type(value) in [list, tuple]:
-                assert type(value[0]) in basic_types, f'unecpected type {type(value[0])} of items in list/tuple {key}'
-                assert all([type(i) == type(value[0]) for i in value]), f'items in list/tuple {key} are not exactly the same'
-                assert List[type(value[0])] == value_anno_type or Tuple[type(value[0])] == value_anno_type, \
-                    f'actual type {type(value)} of attribute {key} is inconsisent with its annotation type {value_anno_type}'
-            elif issubclass(type(value), SimpleConfig):
+            value_type = type(value)
+
+            if value_type in basic_types:
+                assert value_anno_type in (value_type,
+                                           Union[value_type, List[value_type]],
+                                           Union[value_type, Tuple[value_type]]),\
+                    f'actual type {value_type} of attribute {key} is ' \
+                    f'inconsisent with its annotation type {value_anno_type}'
+
+            elif value_type in [list, tuple]:
+                element_type = type(value[0])
+                assert element_type in basic_types, \
+                    f'unecpected type {element_type} of items in list/tuple {key}'
+
+                assert all([type(i) == element_type for i in value]), \
+                    f'items in list/tuple {key} are not exactly the same'
+
+                assert value_anno_type in (List[element_type],
+                                           Tuple[element_type],
+                                           Union[element_type, List[element_type]],
+                                           Union[element_type, Tuple[element_type]]),\
+                    f'actual type {value_type} of attribute {key} ' \
+                    f'is inconsisent with its annotation type {value_anno_type}'
+
+            elif issubclass(value_type, SimpleConfig):
                 value.check_type()
+
             else:
-                raise AssertionError(f'unexpected type {type(value)} of attirbute {key}')
+                raise AssertionError(f'unexpected type {value_type} of attirbute {key}')
 
     def auto_import(self, keys=None):
         if keys is None: keys = self.__dict__
