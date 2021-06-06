@@ -26,7 +26,7 @@ class TrainConfig(SimpleConfig):
     lr_step_gamma: float = 0.3
 
     resume_from_ckpt: str = ''
-    resume_items: Tuple[str] = ('start_epoch', 'state_dict')
+    resume_items: Tuple[str] = ('state_dict',)
     resume_tensorboard: bool = False
 
     log_frequency: int = 10  # (steps) used for both logging and tensorboard
@@ -77,11 +77,6 @@ class Config(SimpleConfig):
     def check_local_value(self):
         if hasattr(self.model, 'input_points_num') and hasattr(self.dataset, 'input_points_num'):
             assert self.model.input_points_num == self.dataset.input_points_num
-
-        if hasattr(self.model, 'resolution') and hasattr(self.dataset, 'resolution'):
-            if self.model.resolution != self.dataset.resolution:
-                print(f'Warning: model.resolution({self.model.resolution}) != '
-                      f'dataset.resolution({self.dataset.resolution}) !')
 
     def merge_with_yaml(self, yaml_path):
         yaml_dict = yaml.safe_load(open(yaml_path))

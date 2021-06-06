@@ -52,7 +52,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
     except Exception as e:
         raise ImportError(*e.args)
 
-    results_dir = os.path.join(run_dir, 'results')
+    results_dir = os.path.join(run_dir, 'results') if cfg.test.save_results else None
 
     # cache
     dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, False, logger)
@@ -112,33 +112,18 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
     steps_one_epoch = len(dataloader)
     for step_idx, batch_data in enumerate(dataloader):
         if isinstance(batch_data, torch.Tensor):
-            batch_data = batch_data.to(device, non_blocking=True)
+            batch_data = [batch_data.to(device, non_blocking=True), results_dir]
         elif isinstance(batch_data, list) or isinstance(batch_data, tuple):
-            batch_data = [d.to(device, non_blocking=True) if isinstance(d, torch.Tensor) else d for d in batch_data]
+            batch_data = [d.to(device, non_blocking=True) if isinstance(d, torch.Tensor) else d for d in batch_data] \
+                         + [results_dir]
         else:
             raise NotImplementedError
 
         with torch.no_grad():
-            items_to_save = model(batch_data)
+            batch_out = model(batch_data)
 
-            if cfg.test.save_results:
-                for item_path, item in items_to_save.items():
-                    item_path = os.path.join(results_dir, item_path)
-                    os.makedirs(os.path.dirname(item_path), exist_ok=True)
-
-                    if isinstance(item, bytes):
-                        with open(item_path, 'wb') as f:
-                            f.write(item)
-                    elif isinstance(item, str):
-                        with open(item_path, 'w') as f:
-                            f.write(item)
-                    elif isinstance(item, o3d.geometry.PointCloud):
-                        o3d.io.write_point_cloud(item_path, item)
-                    else:
-                        raise NotImplementedError
-
-            if cfg.test.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.test.log_frequency == 0):
-                logger.info(f'test step {step_idx}/{steps_one_epoch - 1}')
+        if cfg.test.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.test.log_frequency == 0):
+            logger.info(f'test step {step_idx}/{steps_one_epoch - 1}')
 
     try:
         if torch_utils.is_parallel(model):

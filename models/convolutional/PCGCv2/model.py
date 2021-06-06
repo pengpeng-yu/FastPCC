@@ -1,4 +1,6 @@
 import os
+from collections import defaultdict
+from typing import Union
 import open3d as o3d
 import torch
 import torch.nn as nn
@@ -7,6 +9,7 @@ import MinkowskiEngine as ME
 from compressai.entropy_models import EntropyBottleneck
 from compressai.models.utils import update_registered_buffers
 
+from lib.metric import mpeg_pc_error
 from lib.loss_function import chamfer_loss
 from models.convolutional.PCGCv2.layers import Encoder, GenerativeUpsample
 from models.convolutional.PCGCv2.model_config import ModelConfig
@@ -28,52 +31,97 @@ class PCC(nn.Module):
 
     def log_pred_res(self, mode, preds=None, targets=None,
                      file_path_list: str = None, compressed_strings: bytes = None,
-                     voxels_num: int = None):
+                     fea_points_num: int = None, resolutions: Union[int, torch.Tensor] = None, results_dir: str = None):
         if mode == 'init':
-            total_reconstruct_loss = torch.zeros((1, ), dtype=torch.float64)
-            samples_num = torch.zeros((1, ), dtype=torch.int64)
-            self.register_buffer('total_reconstruct_loss', total_reconstruct_loss)
-            self.register_buffer('samples_num', samples_num)
+            self.total_reconstruct_loss = 0.0
+            self.total_bpp = 0.0
+            self.samples_num = 0
+            self.totall_metric_values = defaultdict(float)
 
         elif mode == 'reset':
-            self.total_reconstruct_loss[...] = 0
-            self.samples_num[...] = 0
+            self.total_reconstruct_loss = 0.0
+            self.total_bpp = 0.0
+            self.samples_num = 0
+            self.totall_metric_values = defaultdict(float)
 
         elif mode == 'log':
             assert not self.training
             assert isinstance(preds, list) and isinstance(targets, list)
 
-            return_obj = {}
+            resolutions = resolutions if isinstance(resolutions, torch.Tensor) \
+                else torch.tensor([resolutions], dtype=torch.int32).expand(len(preds))
 
-            for pred, target, file_path in zip(preds, targets, file_path_list):
-                self.total_reconstruct_loss += chamfer_loss(
-                    pred.unsqueeze(0).type(torch.float) / self.cfg.resolution,
-                    target.unsqueeze(0).type(torch.float) / self.cfg.resolution)
+            for pred, target, file_path, resolution in zip(preds, targets, file_path_list, resolutions):
+                resolution = resolution.item()
 
-                file_path = os.path.splitext(file_path)[0]
-                compressed_path = file_path + '.txt'
-                headinfo_path = file_path + '_head.txt'
-                reconstructed_path = file_path + '.ply'
+                if self.cfg.chamfer_dist_test_phase is True:
+                    self.total_reconstruct_loss += chamfer_loss(
+                        pred.unsqueeze(0).type(torch.float) / resolution,
+                        target.unsqueeze(0).type(torch.float) / resolution).item()
 
-                return_obj[compressed_path] = compressed_strings
-                return_obj[headinfo_path] = f'voxels_num: {voxels_num}\nscaler: {self.cfg.bottleneck_scaler}\n'
-                return_obj[reconstructed_path] = \
-                    o3d.geometry.PointCloud(
-                        o3d.utility.Vector3dVector(
-                            pred.detach().clone().cpu()))
+                bpp = len(compressed_strings) * 8 / target.shape[0]
+                self.total_bpp += bpp
+
+                if results_dir is not None:
+                    out_file_path = os.path.join(results_dir, os.path.splitext(file_path)[0])
+                    os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
+                    compressed_path = out_file_path + '.txt'
+                    fileinfo_path = out_file_path + '_info.txt'
+                    reconstructed_path = out_file_path + '.recon.ply'
+
+                    with open(compressed_path, 'wb') as f:
+                        f.write(compressed_strings)
+
+                    fileinfo = f'fea_points_num: {fea_points_num}\n' \
+                               f'scaler: {self.cfg.bottleneck_scaler}\n' \
+                               f'\n' \
+                               f'input_points_num: {target.shape[0]}\n' \
+                               f'output_points_num: {pred.shape[0]}\n' \
+                               f'compressed_bytes: {len(compressed_strings)}\n' \
+                               f'bpp: {bpp}\n' \
+                               f'\n'
+
+                    o3d.io.write_point_cloud(reconstructed_path,
+                                             o3d.geometry.PointCloud(
+                                                 o3d.utility.Vector3dVector(
+                                                     pred.detach().clone().cpu())), write_ascii=True)
+
+                    mpeg_pc_error_dict = mpeg_pc_error(os.path.abspath(file_path), os.path.abspath(reconstructed_path),
+                                                       resolution=resolution, normal=False,
+                                                       command=self.cfg.mpeg_pcc_error_command,
+                                                       threads=self.cfg.mpeg_pcc_error_threads)
+
+                    for key, value in mpeg_pc_error_dict.items():
+                        self.totall_metric_values[key] += value
+                        fileinfo += f'{key}: {value} \n'
+
+                    with open(fileinfo_path, 'w') as f:
+                        f.write(fileinfo)
 
             self.samples_num += len(targets)
 
-            return return_obj
+            return True
 
         elif mode == 'show':
-            return {'samples_num': self.samples_num.item(),
-                    'mean_recontruct_loss': (self.total_reconstruct_loss / self.samples_num).item()}
+            metric_dict = {'samples_num': self.samples_num,
+                           'mean_bpp': (self.total_bpp / self.samples_num)}
+
+            for key, value in self.totall_metric_values.items():
+                metric_dict[key] = value / self.samples_num
+
+            if self.cfg.chamfer_dist_test_phase > 0:
+                metric_dict['mean_recontruct_loss'] = self.total_reconstruct_loss / self.samples_num
+
+            return metric_dict
+
         else:
             raise NotImplementedError
 
     def forward(self, x):
-        xyz, file_path_list = x
+        if self.training:
+            xyz, _, _ = x
+        else:
+            xyz, file_path_list, resolutions, results_dir = x
         xyz = ME.SparseTensor(torch.ones(xyz.shape[0], 1, dtype=torch.float, device=xyz.device),
                               xyz)
         fea = self.encoder(xyz)
@@ -115,7 +163,8 @@ class PCC(nn.Module):
 
             decoder_output = cached_exist[-1].decomposed_coordinates
             items_to_save = self.log_pred_res('log', decoder_output, xyz.decomposed_coordinates,
-                                              file_path_list, compressed_strings[0], fea.shape[0])
+                                              file_path_list, compressed_strings[0], fea.shape[0],
+                                              resolutions, results_dir)
 
             return items_to_save
 
