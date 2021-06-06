@@ -8,7 +8,7 @@ import yaml
 class SimpleConfig:
     def __init__(self):
         super(SimpleConfig, self).__init__()
-        self.auto_import()
+        self.local_auto_import()
 
     def check(self):
         """
@@ -45,8 +45,9 @@ class SimpleConfig:
 
         assert issubclass(type(self), SimpleConfig), \
             f'this method checks types of {type(self)} obj instead of {type(self)} object'
-        assert hasattr(self, '__dict__'), f'object does not have any local attribute'
-        assert hasattr(self, '__annotations__'), f'object of class {type(self)} has no type annotation'
+        assert hasattr(self, '__dict__'), f'object does not have attribute __dict__'
+        if self.__dict__ != {}:
+            assert hasattr(self, '__annotations__'), f'object of class {type(self)} has no type annotation'
 
         for key, value in self.__dict__.items():
             value_anno_type = self.__annotations__[key]
@@ -75,12 +76,13 @@ class SimpleConfig:
                     f'is inconsisent with its annotation type {value_anno_type}'
 
             elif issubclass(value_type, SimpleConfig):
+                assert issubclass(value_anno_type, SimpleConfig)
                 value.check_type()
 
             else:
                 raise AssertionError(f'unexpected type {value_type} of attirbute {key}')
 
-    def auto_import(self, keys=None):
+    def local_auto_import(self, keys=None):
         if keys is None: keys = self.__dict__
         elif isinstance(keys, str):
             keys = [keys]
@@ -98,7 +100,7 @@ class SimpleConfig:
 
     def merge_setattr(self, key, value):
         self.__dict__[key] = value
-        self.auto_import(key)
+        self.local_auto_import(key)
 
     def merge_with_dotdict(self, dotdict: Dict):
         """
@@ -129,6 +131,7 @@ class SimpleConfig:
 
     def merge_with_dotlist(self, dotlist: List[str]):
         """
+        yaml file path supported.
         dotlist: ['a==2', 'b.a=string', '-b.b.a_a=[1,2,3]', '--b.b.b-b==["1","2"]']
         Value will be formatted.
         """
@@ -137,15 +140,22 @@ class SimpleConfig:
             arg = arg.replace('==', '=')
             try:
                 keys_seq, var = arg.split('=')
-            except Exception as e:
-                raise ValueError(f'unexpected arg format: "{arg}"')
 
-            if var[0] == '[' and var[-1] == ']':
-                dotdict[keys_seq] = [self.format_str(i) for i in var[1:-1].split(',')]
-            elif var[0] == '(' and var[-1] == ')':
-                dotdict[keys_seq] = (self.format_str(i) for i in var[1:-1].split(','))
+            except ValueError:
+                try:
+                    yaml_dict = yaml.safe_load(open(arg))
+                    dotdict.update(self.dict_to_dotdict(yaml_dict))
+                    print('y')
+                except Exception as e:
+                    raise ValueError(f'unexpected arg format: "{arg}"')
+
             else:
-                dotdict[keys_seq] = self.format_str(var)
+                if var[0] == '[' and var[-1] == ']':
+                    dotdict[keys_seq] = [self.format_str(i) for i in var[1:-1].split(',')]
+                elif var[0] == '(' and var[-1] == ')':
+                    dotdict[keys_seq] = (self.format_str(i) for i in var[1:-1].split(','))
+                else:
+                    dotdict[keys_seq] = self.format_str(var)
 
         return self.merge_with_dotdict(dotdict)
 

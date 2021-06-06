@@ -1,13 +1,14 @@
-dataset_path:
-  'lib.datasets.PlyVoxel'
-dataset:
-  root: 'datasets/Owlii'
-  filelist_path: 'list.txt'
-  file_path_pattern: '**/*.ply'
+train:
+  dataset_path:
+    'lib.datasets.PlyVoxel'
+  dataset:
+    root: 'datasets/Owlii'
+    filelist_path: 'list.txt'
+    file_path_pattern: '**/*.ply'
 
-  with_color: False
-  with_normal: False
-  with_file_path: True
+    with_color: False
+    with_normal: False
+    with_file_path: True
 
-  ori_resolution: 2048
-  resolution: 2048
+    ori_resolution: 2048
+    resolution: 2048

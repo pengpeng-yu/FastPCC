@@ -35,15 +35,7 @@ def main():
 
     # Initialize config, run dir, logger
     cfg = Config()
-    arg_idx = 0
-    for arg_idx, arg in enumerate(sys.argv[1:]):
-        if arg.endswith('.yaml') or arg.endswith('.yaml"') or arg.endswith(".yaml'"):
-            cfg.merge_with_yaml(arg)
-        else:
-            break
-    else:
-        arg_idx += 1
-    cfg.merge_with_dotlist(sys.argv[arg_idx + 1:])
+    cfg.merge_with_dotlist(sys.argv[1:])
 
     from loguru import logger
     logger.remove()
@@ -151,12 +143,12 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
     # Initialize dataset
     try:
-        Dataset = importlib.import_module(cfg.dataset_path).Dataset
+        Dataset = importlib.import_module(cfg.train.dataset_path).Dataset
     except Exception as e:
         raise ImportError(*e.args)
 
     # cache
-    dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, True, logger)
+    dataset: torch.utils.data.Dataset = Dataset(cfg.train.dataset, True, logger)
     if hasattr(dataset, 'gen_cache') and dataset.gen_cache is True:
         datacahe_sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=False) \
             if global_rank != -1 else None
@@ -170,7 +162,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             pass
         logger.info('finish caching')
         # rebuild dataset to use cache
-        dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, True, logger)
+        dataset: torch.utils.data.Dataset = Dataset(cfg.train.dataset, True, logger)
 
     dataset_sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=cfg.train.shuffle) \
         if global_rank != -1 else None

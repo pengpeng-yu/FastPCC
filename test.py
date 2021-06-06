@@ -3,6 +3,7 @@ import sys
 import pathlib
 import importlib
 from tqdm import tqdm
+from copy import deepcopy
 import open3d as o3d
 
 import numpy as np
@@ -17,15 +18,7 @@ from lib import utils
 def main():
     # Initialize config
     cfg = Config()
-    arg_idx = 0
-    for arg_idx, arg in enumerate(sys.argv[1:]):
-        if arg.endswith('.yaml') or arg.endswith('.yaml"') or arg.endswith(".yaml'"):
-            cfg.merge_with_yaml(arg)
-        else:
-            break
-    else:
-        arg_idx += 1
-    cfg.merge_with_dotlist(sys.argv[arg_idx + 1:])
+    cfg.merge_with_dotlist(sys.argv[1:])
 
     os.makedirs('runs', exist_ok=True)
     run_dir = pathlib.Path(utils.autoindex_obj(os.path.join('runs', cfg.test.rundir_name)))
@@ -47,15 +40,19 @@ def main():
 
 
 def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
+    if cfg.test.dataset_path == '':
+        cfg.test.dataset_path = cfg.train.dataset_path
+        cfg.test.dataset = deepcopy(cfg.train.dataset)
+
     try:
-        Dataset = importlib.import_module(cfg.dataset_path).Dataset
+        Dataset = importlib.import_module(cfg.test.dataset_path).Dataset
     except Exception as e:
         raise ImportError(*e.args)
 
     results_dir = os.path.join(run_dir, 'results') if cfg.test.save_results else None
 
     # cache
-    dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, False, logger)
+    dataset: torch.utils.data.Dataset = Dataset(cfg.test.dataset, False, logger)
     if hasattr(dataset, 'gen_cache') and dataset.gen_cache is True:
         datacache_loader = torch.utils.data.DataLoader(dataset, cfg.test.batch_size,
                                                        num_workers=cfg.test.num_workers * 2, drop_last=False,
@@ -66,7 +63,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
             pass
         logger.info('finish caching')
         # rebuild dataset to use cache
-        dataset: torch.utils.data.Dataset = Dataset(cfg.dataset, False, logger)
+        dataset: torch.utils.data.Dataset = Dataset(cfg.test.dataset, False, logger)
 
     dataloader = torch.utils.data.DataLoader(dataset, cfg.test.batch_size, shuffle=False,
                                              num_workers=cfg.test.num_workers, drop_last=False, pin_memory=True,
@@ -137,7 +134,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
                   if isinstance(item, int) or isinstance(item, float)}
 
     with open(os.path.join(run_dir, 'metric.txt'), 'w') as f:
-        f.write(str(return_obj))
+        f.write('\n'.join([f'{key}: {value}' for key, value in return_obj.items()]))
 
     logger.info(f'test end')
     return return_obj

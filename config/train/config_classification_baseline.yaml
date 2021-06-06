@@ -14,10 +14,10 @@ train:
   resume_items: ['state_dict']
   learning_rate: 0.05
   test_frequency: 5
+  dataset:
+    input_points_num: 4096
+    with_classes: True
 test:
   batch_size: 4
 model:
   input_points_num: 4096
-dataset:
-  input_points_num: 4096
-  with_classes: True

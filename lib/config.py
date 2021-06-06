@@ -33,6 +33,12 @@ class TrainConfig(SimpleConfig):
     ckpt_frequency: int = 2  # (epochs)
     test_frequency: int = 0  # (epochs) 0 means no test in training phase
 
+    dataset_path: str = 'lib.datasets.ModelNet'  # dataset_path.Dataset and dataset_path.Config are required
+    dataset: SimpleConfig = None
+
+    def __post_init__(self):
+        self.local_auto_import()
+
     def merge_setattr(self, key, value):
         if key == 'resume_items':
             if 'all' in value:
@@ -60,6 +66,15 @@ class TestConfig(SimpleConfig):
     log_frequency: int = 50  # (steps) used for logging
     save_results: bool = False  # save outputs of model in runs/rundir_name/results
 
+    # you can keep this empty to use the same dataloader class with the one in training during testing
+    # this feature is defined in test.py
+    dataset_path: str = ''
+    dataset: SimpleConfig = SimpleConfig()
+
+    def __post_init__(self):
+        if self.dataset_path != '':
+            self.local_auto_import()
+
 
 @dataclass
 class Config(SimpleConfig):
@@ -67,16 +82,16 @@ class Config(SimpleConfig):
     model: SimpleConfig = None
     train: TrainConfig = TrainConfig()
     test: TestConfig = TestConfig()
-    dataset_path: str = 'lib.datasets.ModelNet'  # dataset_path.Dataset and dataset_path.Config are required
-    dataset: SimpleConfig = None
 
     def __post_init__(self):
-        self.auto_import()
+        self.local_auto_import()
         self.check()
 
     def check_local_value(self):
-        if hasattr(self.model, 'input_points_num') and hasattr(self.dataset, 'input_points_num'):
-            assert self.model.input_points_num == self.dataset.input_points_num
+        if hasattr(self.model, 'input_points_num'):
+            assert self.model.input_points_num == self.train.dataset.input_points_num
+            if hasattr(self.test.dataset, 'input_points_num'):
+                assert self.model.input_points_num == self.test.dataset.input_points_num
 
     def merge_with_yaml(self, yaml_path):
         yaml_dict = yaml.safe_load(open(yaml_path))

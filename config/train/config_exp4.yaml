@@ -12,10 +12,10 @@ train:
   resume_items: ['state_dict']
   learning_rate: 0.001
   test_frequency: 0
+  dataset:
+    root: 'datasets/modelnet40_manually_aligned'
+    input_points_num: 32768
 test:
   batch_size: 8
 model:
-  input_points_num: 32768
-dataset:
-  root: 'datasets/modelnet40_manually_aligned'
   input_points_num: 32768

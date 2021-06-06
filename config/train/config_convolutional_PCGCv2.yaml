@@ -3,19 +3,21 @@ train:
   rundir_name: 'train_convolutional_<autoindex>'
   device: '3'
   amp: False
-  batch_size: 16
+  batch_size: 8
   weight_decay: 0.0001
   epochs: 40
   ckpt_frequency: 5
-  lr_step_size: 10
+  lr_step_size: 20
   lr_step_gamma: 0.1
-  resume_from_ckpt: ''
+  resume_from_ckpt: 'runs/train_convolutional_4/ckpts/epoch_<maxindex>.pt'
   resume_items: ['state_dict']
-  learning_rate: 0.01
+  learning_rate: 0.005
+  dataset_path: 'lib.datasets.ShapeNetCorev2'
 test:
-  batch_size: 16
-dataset:
-  root: 'datasets/modelnet40_manually_aligned'
-  input_points_num: 200000
-  resolution: 128
+  batch_size: 8
+#dataset_path: 'lib.datasets.pcgcv2_data'
+#dataset:
+#  root: 'datasets/modelnet40_manually_aligned'
+#  input_points_num: 200000
+#  resolution: 128
 
