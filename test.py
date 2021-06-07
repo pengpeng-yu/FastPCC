@@ -71,11 +71,8 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
     if model is not None:
         model.eval()
         current_device = next(model.parameters()).device
-        logger.info(f'start testing using device {current_device}')
-        # cfg_device = cfg.test.device
-        # if current_device.type != cfg_device:
-        #     logger.warning(f'validation during training will ignore the setting of test.device')
         device = current_device
+
     else:
         try:
             Model = importlib.import_module(cfg.model_path).Model
@@ -91,6 +88,8 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         model.to(device)
         torch.cuda.set_device(device)
         model.eval()
+
+    logger.info(f'start testing using device {device}')
 
     if hasattr(model, 'entropy_bottleneck'):
         model.entropy_bottleneck.update()
@@ -133,7 +132,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
     return_obj = {item_name: item for item_name, item in metric_results.items()
                   if isinstance(item, int) or isinstance(item, float)}
 
-    with open(os.path.join(run_dir, 'metric.txt'), 'w') as f:
+    with open(os.path.join(run_dir, 'test_metric.txt'), 'w') as f:
         f.write('\n'.join([f'{key}: {value}' for key, value in return_obj.items()]))
 
     logger.info(f'test end')

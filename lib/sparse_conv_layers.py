@@ -5,16 +5,17 @@ import MinkowskiEngine as ME
 MConv = ME.MinkowskiConvolution
 MReLU = ME.MinkowskiReLU
 MGenConvTranspose = ME.MinkowskiGenerativeConvolutionTranspose
-MConvTranspose = ME.MinkowskiConvolutionTranspose  # TODO: difference when there is no higher strides coordinates?
+MConvTranspose = ME.MinkowskiConvolutionTranspose
 
 
 class AbstractGenerativeUpsample(nn.Module):
-    def __init__(self, mapping_target_kernel_size=1, return_fea=True):
+    def __init__(self, mapping_target_kernel_size=1, is_last_layer=False):
         super(AbstractGenerativeUpsample, self).__init__()
         self.mapping_target_kernel_size = mapping_target_kernel_size
-        self.return_fea = return_fea
+        self.is_last_layer = is_last_layer
         self.upsample_block = None
         self.classify_block = None
+        # It will consume huge memory if too many unnecessary points are retained after pruning
         self.pruning = ME.MinkowskiPruning()
 
     def forward(self, input_tuple):
@@ -39,12 +40,7 @@ class AbstractGenerativeUpsample(nn.Module):
             keep = (exist.F.squeeze() > 0)
 
         if self.training:
-            if ME.sparse_tensor_operation_mode() == \
-                    ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER:
-                assert target_key is None
-                cm = ME.global_coordinate_manager
-            else:
-                cm = fea.coordinate_manager
+            cm = fea.coordinate_manager
 
             strided_target_key = cm.stride(target_key, fea.tensor_stride)
             kernel_map = cm.kernel_map(fea.coordinate_map_key,
@@ -67,13 +63,16 @@ class AbstractGenerativeUpsample(nn.Module):
             else:
                 cached_exist.append(exist)
 
-        elif not self.training:
-            # only return the last pruned existence prediction during training.
-            cached_exist = [self.pruning(exist, keep)]
+            if not self.is_last_layer:
+                fea = self.pruning(fea, keep)
+            else:
+                fea = None
 
-        if self.return_fea:
-            fea = self.pruning(fea, keep)
-        else: fea = None
+        elif not self.training:
+            if not self.is_last_layer:
+                fea = self.pruning(fea, keep)
+            else:
+                cached_exist = [self.pruning(exist, keep)]
 
         return fea, cached_exist, cached_target, target_key
 

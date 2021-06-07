@@ -172,14 +172,28 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                                              pin_memory=True, collate_fn=dataset.collate_fn)
 
     # Initialize optimizer and scheduler
-    if cfg.train.optimizer == 'adam': Optimizer = partial(torch.optim.Adam, betas=(cfg.train.momentum, 0.999))
-    elif cfg.train.optimizer == 'sgd': Optimizer = partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=cfg.train.momentum != 0.0)
+    if cfg.train.optimizer == 'adam':
+        Optimizer = partial(torch.optim.Adam, betas=(cfg.train.momentum, 0.999))
+    elif cfg.train.optimizer == 'sgd':
+        Optimizer = partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=cfg.train.momentum != 0.0)
     else: raise NotImplementedError
+    if cfg.train.aux_optimizer == 'adam':
+        AuxOptimizer = partial(torch.optim.Adam, betas=(cfg.train.momentum, 0.999))
+    elif cfg.train.aux_optimizer == 'sgd':
+        AuxOptimizer = partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=cfg.train.momentum != 0.0)
+    else: raise NotImplementedError
+
     parameters = [p for n, p in model.named_parameters() if not n.endswith(".quantiles")]
     aux_parameters = [p for n, p in model.named_parameters() if n.endswith(".quantiles")]
-    optimizer = Optimizer([{'params': parameters, 'lr': cfg.train.learning_rate, 'weight_decay': cfg.train.weight_decay},
-                           {'params': aux_parameters, 'lr': cfg.train.learning_rate, 'weight_decay': cfg.train.aux_weight_decay}])
+    optimizer = Optimizer([{'params': parameters, 'lr': cfg.train.learning_rate,
+                            'weight_decay': cfg.train.weight_decay}])
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
+    if aux_parameters:
+        aux_optimizer = AuxOptimizer([{'params': aux_parameters, 'lr': cfg.train.learning_rate,
+                                       'weight_decay': cfg.train.aux_weight_decay}])
+        aux_scheduler = torch.optim.lr_scheduler.StepLR(aux_optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
+    else:
+        aux_optimizer = aux_scheduler = None
 
     # Resume checkpoint
     start_epoch = 0
@@ -239,14 +253,19 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
+                if aux_optimizer is not None:
+                    scaler.step(aux_optimizer)
                 scaler.update()
             else:
                 loss_dict = model(batch_data)
                 loss = loss_dict['loss']
                 loss.backward()
                 optimizer.step()
+                if aux_optimizer is not None:
+                    aux_optimizer.step()
 
             optimizer.zero_grad()
+            if aux_optimizer is not None: aux_optimizer.zero_grad()
 
             # logging
             time_this_step = time.time() - start_time
@@ -277,12 +296,15 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             global_step += 1
 
         scheduler.step()
+        if aux_scheduler is not None: aux_scheduler.step()
+
         if local_rank in (-1, 0):
             tb_writer.add_scalar('Train/Epochs', epoch, global_step - 1)
 
         # Model test
+        torch.cuda.empty_cache()
         if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and (epoch + 1) % cfg.train.test_frequency == 0:
-            test_items = test(cfg, logger, model, run_dir)
+            test_items = test(cfg, logger, run_dir, model)
             for item_name, item in test_items.items():
                 tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
 

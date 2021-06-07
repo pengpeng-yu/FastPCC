@@ -18,6 +18,7 @@ class TrainConfig(SimpleConfig):
     epochs: int = 100
 
     optimizer: str = 'sgd'
+    aux_optimizer: str = 'sgd'
     learning_rate: float = 0.05
     momentum: float = 0.9
     weight_decay: float = 0.0

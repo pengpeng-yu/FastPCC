@@ -1,6 +1,6 @@
 import os
 from collections import defaultdict
-from typing import Union
+from typing import Union, List
 import open3d as o3d
 import torch
 import torch.nn as nn
@@ -18,19 +18,21 @@ from models.convolutional.PCGCv2.model_config import ModelConfig
 class PCC(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super(PCC, self).__init__()
+        ME.set_sparse_tensor_operation_mode(ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
         self.encoder = Encoder(cfg.compressed_channels,
                                res_blocks_num=3,
                                res_block_type=cfg.res_block_type)
         self.decoder = self.layers = nn.Sequential(GenerativeUpsample(cfg.compressed_channels,
                                                                       64, 3, cfg.res_block_type),
                                                    GenerativeUpsample(64, 32, 3, cfg.res_block_type),
-                                                   GenerativeUpsample(32, 16, 3, cfg.res_block_type, return_fea=False))
+                                                   GenerativeUpsample(32, 16, 3, cfg.res_block_type,
+                                                                      is_last_layer=True))
         self.entropy_bottleneck = EntropyBottleneck(cfg.compressed_channels)
         self.cfg = cfg
         self.log_pred_res('init')
 
     def log_pred_res(self, mode, preds=None, targets=None,
-                     file_path_list: str = None, compressed_strings: bytes = None,
+                     file_path_list: str = None, compressed_strings: List[bytes] = None,
                      fea_points_num: int = None, resolutions: Union[int, torch.Tensor] = None, results_dir: str = None):
         if mode == 'init':
             self.total_reconstruct_loss = 0.0
@@ -51,15 +53,17 @@ class PCC(nn.Module):
             resolutions = resolutions if isinstance(resolutions, torch.Tensor) \
                 else torch.tensor([resolutions], dtype=torch.int32).expand(len(preds))
 
-            for pred, target, file_path, resolution in zip(preds, targets, file_path_list, resolutions):
+            for pred, target, file_path, resolution \
+                    in zip(preds, targets, file_path_list, resolutions):
                 resolution = resolution.item()
+                com_string = compressed_strings[0]
 
                 if self.cfg.chamfer_dist_test_phase is True:
                     self.total_reconstruct_loss += chamfer_loss(
                         pred.unsqueeze(0).type(torch.float) / resolution,
                         target.unsqueeze(0).type(torch.float) / resolution).item()
 
-                bpp = len(compressed_strings) * 8 / target.shape[0]
+                bpp = len(com_string) * 8 / target.shape[0]
                 self.total_bpp += bpp
 
                 if results_dir is not None:
@@ -67,17 +71,17 @@ class PCC(nn.Module):
                     os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
                     compressed_path = out_file_path + '.txt'
                     fileinfo_path = out_file_path + '_info.txt'
-                    reconstructed_path = out_file_path + '.recon.ply'
+                    reconstructed_path = out_file_path + '_recon.ply'
 
                     with open(compressed_path, 'wb') as f:
-                        f.write(compressed_strings)
+                        f.write(com_string)
 
                     fileinfo = f'fea_points_num: {fea_points_num}\n' \
                                f'scaler: {self.cfg.bottleneck_scaler}\n' \
                                f'\n' \
                                f'input_points_num: {target.shape[0]}\n' \
                                f'output_points_num: {pred.shape[0]}\n' \
-                               f'compressed_bytes: {len(compressed_strings)}\n' \
+                               f'compressed_bytes: {len(com_string)}\n' \
                                f'bpp: {bpp}\n' \
                                f'\n'
 
@@ -90,6 +94,9 @@ class PCC(nn.Module):
                                                        resolution=resolution, normal=False,
                                                        command=self.cfg.mpeg_pcc_error_command,
                                                        threads=self.cfg.mpeg_pcc_error_threads)
+                    assert mpeg_pc_error_dict != {}, f'Error when call mpeg pc error software with' \
+                                                     f'infile1={os.path.abspath(file_path)}' \
+                                                     f'infile2={os.path.abspath(reconstructed_path)}'
 
                     for key, value in mpeg_pc_error_dict.items():
                         self.totall_metric_values[key] += value
@@ -118,6 +125,7 @@ class PCC(nn.Module):
             raise NotImplementedError
 
     def forward(self, x):
+        ME.clear_global_coordinate_manager()
         if self.training:
             xyz, _, _ = x
         else:
@@ -132,7 +140,7 @@ class PCC(nn.Module):
             fea_tilde = fea_tilde / self.cfg.bottleneck_scaler
             fea_tilde = ME.SparseTensor(fea_tilde.squeeze(0).T,
                                         coordinate_map_key=fea.coordinate_map_key,
-                                        coordinate_manager=fea.coordinate_manager)
+                                        coordinate_manager=ME.global_coordinate_manager())
 
             _, cached_exist, cached_target, _ = \
                 self.decoder((fea_tilde, None, None, xyz.coordinate_map_key))
@@ -153,17 +161,18 @@ class PCC(nn.Module):
 
         else:
             # TODO: decomposed_coordinates_and_features before compressing?
+            cached_map_key = fea.coordinate_map_key
             compressed_strings = self.entropy_bottleneck_compress(fea.F * self.cfg.bottleneck_scaler)
-            decompressed_tensors = self.entropy_bottleneck_decompress(compressed_strings, fea.shape[0])
-            fea = ME.SparseTensor(decompressed_tensors / self.cfg.bottleneck_scaler,
-                                  coordinate_map_key=fea.coordinate_map_key,
-                                  coordinate_manager=fea.coordinate_manager)
+            fea = self.entropy_bottleneck_decompress(compressed_strings, fea.shape[0])
+            fea = ME.SparseTensor(fea / self.cfg.bottleneck_scaler,
+                                  coordinate_map_key=cached_map_key,
+                                  coordinate_manager=ME.global_coordinate_manager())
             _, cached_exist, _, _ = \
                 self.decoder((fea, None, None, None))
 
             decoder_output = cached_exist[-1].decomposed_coordinates
             items_to_save = self.log_pred_res('log', decoder_output, xyz.decomposed_coordinates,
-                                              file_path_list, compressed_strings[0], fea.shape[0],
+                                              file_path_list, compressed_strings, fea.shape[0],
                                               resolutions, results_dir)
 
             return items_to_save
@@ -351,9 +360,9 @@ if __name__ == '__main__':
     xyz_c = [ME.utils.sparse_quantize(torch.randint(-128, 128, (100, 3))) for _ in range(16)]
     xyz_f = [torch.ones((_.shape[0], 1), dtype=torch.float32) for _ in xyz_c]
     xyz = ME.utils.sparse_collate(coords=xyz_c, feats=xyz_f)
-    out = model(xyz[0])
+    out = model((xyz[0], [''], 0))
     out['loss'].backward()
     model.eval()
     model.entropy_bottleneck.update()
-    test_out = model(xyz[0])
+    test_out = model((xyz[0], [''], 0, ''))
     print('Done')
