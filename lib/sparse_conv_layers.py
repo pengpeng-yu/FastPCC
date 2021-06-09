@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
+from pytorch3d.ops import knn_points
 import MinkowskiEngine as ME
+
+from lib.torch_utils import unbatched_coordinates
 
 MConv = ME.MinkowskiConvolution
 MReLU = ME.MinkowskiReLU
@@ -9,19 +12,21 @@ MConvTranspose = ME.MinkowskiConvolutionTranspose
 
 
 class AbstractGenerativeUpsample(nn.Module):
-    def __init__(self, mapping_target_kernel_size=1, is_last_layer=False):
+    def __init__(self, mapping_target_kernel_size=1, loss_type='BCE', is_last_layer=False):
         super(AbstractGenerativeUpsample, self).__init__()
         self.mapping_target_kernel_size = mapping_target_kernel_size
+        assert loss_type in ['BCE', 'Dist']
+        self.loss_type = loss_type
         self.is_last_layer = is_last_layer
         self.upsample_block = None
-        self.classify_block = None
+        self.classify_block = None  # classify_block should not change coordinates of upsample_block's output
         # It will consume huge memory if too many unnecessary points are retained after pruning
         self.pruning = ME.MinkowskiPruning()
 
     def forward(self, input_tuple):
         """
         fea: SparseTensor,
-        cached_exist: List[SparseTensor], prediction of existence,
+        cached_pred: List[SparseTensor], prediction of existence or distance,
         cached_target: List[SparseTensor] or None,
         target_key: MinkowskiEngine.CoordinateMapKey or None.
 
@@ -31,13 +36,20 @@ class AbstractGenerativeUpsample(nn.Module):
 
         During testing, cached_target and target_key are no longer needed.
         """
-        fea, cached_exist, cached_target, target_key = input_tuple
+        fea, cached_pred, cached_target, target_key = input_tuple
 
         fea = self.upsample_block(fea)
-        exist = self.classify_block(fea)
+        pred = self.classify_block(fea)
 
-        with torch.no_grad():
-            keep = (exist.F.squeeze() > 0)
+        with torch.no_grad():  # TODO: adaptive
+            if self.loss_type == 'BCE':
+                keep = (pred.F.squeeze() > 0)
+
+            elif self.loss_type == 'Dist':
+                keep = (pred.F.squeeze() < 0.5)
+
+            else:
+                raise NotImplementedError
 
         if self.training:
             cm = fea.coordinate_manager
@@ -47,21 +59,42 @@ class AbstractGenerativeUpsample(nn.Module):
                                        strided_target_key,
                                        kernel_size=self.mapping_target_kernel_size,
                                        region_type=1)
-            target = torch.zeros(fea.shape[0], dtype=torch.bool, device=fea.device)
-            for k, curr_in in kernel_map.items():
-                target[curr_in[0].type(torch.int64)] = 1
+            keep_target = torch.zeros(fea.shape[0], dtype=torch.bool, device=fea.device)
+            for _, curr_in in kernel_map.items():
+                keep_target[curr_in[0].type(torch.int64)] = 1
 
-            keep |= target
+            if self.loss_type == 'BCE':
+                loss_target = keep_target
+
+            elif self.loss_type == 'Dist':
+                loss_target = torch.zeros(fea.shape[0], dtype=torch.float, device=fea.device)
+                strided_target = cm.get_coordinates(strided_target_key)
+
+                for sample_idx in range(strided_target[:, 0].max().item() + 1):
+                    strided_target_one_sample = strided_target[strided_target[:, 0] == sample_idx][:, 1:]
+
+                    sample_mapping = fea.C[:, 0] == sample_idx
+                    pred_coord_one_sample = pred.C[sample_mapping][:, 1:]
+
+                    dists = knn_points(pred_coord_one_sample[None].type(torch.float),
+                                       strided_target_one_sample[None].type(torch.float),
+                                       K=1, return_sorted=False).dists[0, :, 0]
+                    loss_target[sample_mapping] = dists
+
+            else:
+                raise NotImplementedError
+
+            keep |= keep_target
 
             if cached_target is None or cached_target == []:
-                cached_target = [target]
+                cached_target = [loss_target]
             else:
-                cached_target.append(target)
+                cached_target.append(loss_target)
 
-            if cached_exist is None or cached_exist == []:
-                cached_exist = [exist]
+            if cached_pred is None or cached_pred == []:
+                cached_pred = [pred]
             else:
-                cached_exist.append(exist)
+                cached_pred.append(pred)
 
             if not self.is_last_layer:
                 fea = self.pruning(fea, keep)
@@ -72,9 +105,9 @@ class AbstractGenerativeUpsample(nn.Module):
             if not self.is_last_layer:
                 fea = self.pruning(fea, keep)
             else:
-                cached_exist = [self.pruning(exist, keep)]
+                cached_pred = [self.pruning(pred, keep)]
 
-        return fea, cached_exist, cached_target, target_key
+        return fea, cached_pred, cached_target, target_key
 
 
 def generative_upsample_t():

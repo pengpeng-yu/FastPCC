@@ -263,6 +263,11 @@ class BatchNorm1dChnlLast(nn.Module):
         return x
 
 
+def unbatched_coordinates(coords: torch.Tensor):
+    assert len(coords.shape) == 2 and coords.shape[1] == 4
+    return [coords[coords[:, 0] == batch_idx, 1:] for batch_idx in range(coords[:, 0].max() + 1)]
+
+
 if __name__ == '__main__':
     pass
 

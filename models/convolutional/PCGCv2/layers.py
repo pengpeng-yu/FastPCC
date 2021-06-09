@@ -79,8 +79,10 @@ class Encoder(nn.Module):
 
 class GenerativeUpsample(AbstractGenerativeUpsample):
     def __init__(self, in_channels, out_channels, res_blocks_num, res_block_type,
-                 mapping_target_kernel_size=1, is_last_layer=False):
-        super(GenerativeUpsample, self).__init__(mapping_target_kernel_size, is_last_layer)
+                 mapping_target_kernel_size=1, loss_type='BCE', is_last_layer=False):
+        super(GenerativeUpsample, self).__init__(mapping_target_kernel_size=mapping_target_kernel_size,
+                                                 loss_type=loss_type,
+                                                 is_last_layer=is_last_layer)
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.res_blocks_num = res_blocks_num
@@ -94,7 +96,6 @@ class GenerativeUpsample(AbstractGenerativeUpsample):
                                             MConv(self.out_channels, self.out_channels, 3, 1, bias=True, dimension=3),
                                             MReLU(inplace=True),
                                             *[self.basic_block(self.out_channels) for _ in range(self.res_blocks_num)])
-        self.classify_block = MConv(self.out_channels, 1, 3, 1, bias=True, dimension=3)
-
-
-
+        classify_block = [MConv(self.out_channels, 1, 3, 1, bias=True, dimension=3)]
+        if loss_type == 'Dist': classify_block.append(MReLU(inplace=True))
+        self.classify_block = nn.Sequential(*classify_block)

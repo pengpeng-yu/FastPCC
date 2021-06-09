@@ -23,9 +23,12 @@ class PCC(nn.Module):
                                res_blocks_num=3,
                                res_block_type=cfg.res_block_type)
         self.decoder = self.layers = nn.Sequential(GenerativeUpsample(cfg.compressed_channels,
-                                                                      64, 3, cfg.res_block_type),
-                                                   GenerativeUpsample(64, 32, 3, cfg.res_block_type),
+                                                                      64, 3, cfg.res_block_type,
+                                                                      loss_type=cfg.reconstruct_loss_type),
+                                                   GenerativeUpsample(64, 32, 3, cfg.res_block_type,
+                                                                      loss_type=cfg.reconstruct_loss_type),
                                                    GenerativeUpsample(32, 16, 3, cfg.res_block_type,
+                                                                      loss_type=cfg.reconstruct_loss_type,
                                                                       is_last_layer=True))
         self.entropy_bottleneck = EntropyBottleneck(cfg.compressed_channels)
         self.cfg = cfg
@@ -142,21 +145,32 @@ class PCC(nn.Module):
                                         coordinate_map_key=fea.coordinate_map_key,
                                         coordinate_manager=ME.global_coordinate_manager())
 
-            _, cached_exist, cached_target, _ = \
+            _, cached_pred, cached_target, _ = \
                 self.decoder((fea_tilde, None, None, xyz.coordinate_map_key))
 
             bpp_loss = torch.log2(likelihood).sum() * (
-                        -self.cfg.bpp_loss_factor / xyz.shape[0])
-            bce_loss = sum([nn.functional.binary_cross_entropy_with_logits(exist.F.squeeze(),
-                                                                           target.type(exist.F.dtype))
-                            for exist, target in zip(cached_exist, cached_target)])
-            bce_loss /= len(cached_exist)
+                    -self.cfg.bpp_loss_factor / xyz.shape[0])
+
+            if self.cfg.reconstruct_loss_type == 'BCE':
+                reconstruct_loss = sum([nn.functional.binary_cross_entropy_with_logits(pred.F.squeeze(),
+                                                                                       target.type(pred.F.dtype))
+                                        for pred, target in zip(cached_pred, cached_target)])
+                reconstruct_loss /= len(cached_pred)
+            elif self.cfg.reconstruct_loss_type == 'Dist':
+                reconstruct_loss = sum([nn.functional.smooth_l1_loss(pred.F.squeeze(),
+                                                                     target.type(pred.F.dtype))
+                                        for pred, target in zip(cached_pred, cached_target)])
+                reconstruct_loss /= len(cached_pred)
+            else: raise NotImplementedError
+            if self.cfg.reconstruct_loss_factor != 1:
+                reconstruct_loss *= self.cfg.reconstruct_loss_factor
+
             aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
-            loss = bpp_loss + bce_loss + aux_loss
+            loss = bpp_loss + reconstruct_loss + aux_loss
 
             return {'loss': loss,
                     'bpp_loss': bpp_loss.detach().cpu().item(),
-                    'bce_loss': bce_loss.detach().cpu().item(),
+                    'reconstruct_loss': reconstruct_loss.detach().cpu().item(),
                     'aux_loss': aux_loss.detach().cpu().item()}
 
         else:
@@ -167,10 +181,10 @@ class PCC(nn.Module):
             fea = ME.SparseTensor(fea / self.cfg.bottleneck_scaler,
                                   coordinate_map_key=cached_map_key,
                                   coordinate_manager=ME.global_coordinate_manager())
-            _, cached_exist, _, _ = \
+            _, cached_pred, _, _ = \
                 self.decoder((fea, None, None, None))
 
-            decoder_output = cached_exist[-1].decomposed_coordinates
+            decoder_output = cached_pred[-1].decomposed_coordinates
             items_to_save = self.log_pred_res('log', decoder_output, xyz.decomposed_coordinates,
                                               file_path_list, compressed_strings, fea.shape[0],
                                               resolutions, results_dir)
@@ -200,160 +214,32 @@ class PCC(nn.Module):
 
 
 def main_debug():
-    data_batch_0 = [
-        [0, 0, 2.1, 0, 0],  #
-        [0, 1, 1.4, 3, 0],  #
-        [0, 0, 4.0, 0, 0]
-    ]
+    ME.clear_global_coordinate_manager()
+    ME.set_sparse_tensor_operation_mode(
+        ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
 
-    data_batch_1 = [
-        [1, 0, 0],  #
-        [0, 2, 0],  #
-        [0, 0, 3]
-    ]
+    coords, feats = ME.utils.sparse_collate(coords=[torch.tensor([[3, 5, 7], [8, 9, 1], [-2, 3, 3], [-2, 3, 4]],
+                                                                 dtype=torch.int32)],
+                                            feats=[torch.tensor([[0.5, 0.4], [0.1, 0.6], [-0.9, 10], [-0.9, 8]])])
+    batch_coords = torch.tensor([[0, 3, 5, 7], [0, 8, 9, 1], [0, -2, 3, 2], [0, -2, 3, 4]], dtype=torch.int32)
 
-    def to_sparse_coo(data):
-        # An intuitive way to extract coordinates and features
-        coords, feats = [], []
-        for i, row in enumerate(data):
-            for j, val in enumerate(row):
-                if val != 0:
-                    coords.append([i, j])
-                    feats.append([val])
-        return torch.IntTensor(coords), torch.FloatTensor(feats)
+    pc = ME.SparseTensor(features=feats, coordinates=coords, tensor_stride=1)
+    cm = ME.global_coordinate_manager()
+    coord_map_key = cm.insert_and_map(batch_coords, tensor_stride=1)[0]
 
-    def sparse_tensor_initialization():
-        coords, feats = to_sparse_coo(data_batch_0)
-        # collate sparse tensor data to augment batch indices
-        # Note that it is wrapped inside a list!!
-        coords, feats = ME.utils.sparse_collate(coords=[coords], feats=[feats])
-        sparse_tensor = ME.SparseTensor(coordinates=coords, features=feats)
+    print(cm.kernel_map(pc.coordinate_map_key, coord_map_key, kernel_size=1))
 
-    # noinspection PyPep8Naming
-    def sparse_tensor_arithmetics():
-        coords0, feats0 = to_sparse_coo(data_batch_0)
-        coords0, feats0 = ME.utils.sparse_collate(coords=[coords0], feats=[feats0])
+    conv11 = ME.MinkowskiConvolution(2, 2, 1, 1, dimension=3)
+    conv_trans22 = ME.MinkowskiConvolutionTranspose(2, 6, 2, 2, dimension=3)
 
-        coords1, feats1 = to_sparse_coo(data_batch_1)
-        coords1, feats1 = ME.utils.sparse_collate(coords=[coords1], feats=[feats1])
+    pc = conv11(pc)
+    m_out_trans = conv_trans22(pc)
+    pc = pc.dense(shape=torch.Size([1, 3, 10, 10, 10]), min_coordinate=torch.IntTensor([0, 0, 0]))
 
-        # sparse tensors
-        A = ME.SparseTensor(coordinates=coords0, features=feats0)
-        B = ME.SparseTensor(coordinates=coords1, features=feats1)
-
-        # The following fails
-        try:
-            C = A + B
-        except AssertionError:
-            pass
-
-        B = ME.SparseTensor(
-            coordinates=coords1,
-            features=feats1,
-            coordinate_manager=A.coordinate_manager,  # must share the same coordinate manager
-            # force_creation=True  # must force creation since tensor stride [1] exists
-        )
-
-        C = A + B
-        C = A - B
-        C = A * B
-        C = A / B
-
-        # in place operations
-        # Note that it requires the same coords_key (no need to feed coords)
-        D = ME.SparseTensor(
-            # coords=coords,  not required
-            features=feats0,
-            coordinate_manager=A.coordinate_manager,  # must share the same coordinate manager
-            coordinate_map_key=A.coordinate_map_key  # For inplace, must share the same coords key
-        )
-
-        A += D
-        A -= D
-        A *= D
-        A /= D
-
-        # If you have two or more sparse tensors with the same coords_key, you can concatenate features
-        E = ME.cat(A, D)
-
-    def operation_mode():
-        # Set to share the coords_man by default
-        ME.set_sparse_tensor_operation_mode(
-            ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
-        print(ME.sparse_tensor_operation_mode())
-
-        coords0, feats0 = to_sparse_coo(data_batch_0)
-        coords0, feats0 = ME.utils.sparse_collate(coords=[coords0], feats=[feats0])
-
-        coords1, feats1 = to_sparse_coo(data_batch_1)
-        coords1, feats1 = ME.utils.sparse_collate(coords=[coords1], feats=[feats1])
-
-        for _ in range(2):
-            # sparse tensors
-            A = ME.SparseTensor(coordinates=coords0, features=feats0)
-            B = ME.SparseTensor(
-                coordinates=coords1,
-                features=feats1,
-                # coords_manager=A.coords_man,  No need to feed the coords_man
-                # force_creation=True
-            )
-
-            C = A + B
-
-            # When done using it for forward and backward, you must cleanup the coords man
-            ME.clear_global_coordinate_manager()
-
-    # noinspection PyPep8Naming
-    def decomposition():
-        coords0, feats0 = to_sparse_coo(data_batch_0)
-        coords1, feats1 = to_sparse_coo(data_batch_1)
-        coords, feats = ME.utils.sparse_collate(
-            coords=[coords0, coords1], feats=[feats0, feats1])
-
-        # sparse tensors
-        A = ME.SparseTensor(coordinates=coords, features=feats)
-        conv = ME.MinkowskiConvolution(
-            in_channels=1, out_channels=2, kernel_size=3, stride=2, dimension=2)
-        B = conv(A)
-
-        # Extract features and coordinates per batch index
-        list_of_coords = B.decomposed_coordinates
-        list_of_feats = B.decomposed_features
-        list_of_coords, list_of_feats = B.decomposed_coordinates_and_features
-
-        # To specify a batch index
-        batch_index = 1
-        coords = B.coordinates_at(batch_index)
-        feats = B.features_at(batch_index)
-
-        # Empty list if given an invalid batch index
-        # batch_index = 3
-        # 9= print(B.coordinates_at(batch_index))
-
-    def test_m_conv():
-        ME.clear_global_coordinate_manager()
-        ME.set_sparse_tensor_operation_mode(
-            ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
-        coords, feats = ME.utils.sparse_collate(coords=[torch.tensor([[3, 5, 7], [8, 9, 1], [2, 3, 3], [2, 3, 4]], dtype=torch.int32)],
-                                                feats=[torch.tensor([[0.5, 0.4], [0.1, 0.6], [-0.9, 10], [-0.9, 8]])])
-        batch_points = ME.SparseTensor(features=feats, coordinates=coords, tensor_stride=1)
-        m_conv = ME.MinkowskiConvolution(2, 2, 2, 2, dimension=3)
-        m_conv_trans = ME.MinkowskiConvolutionTranspose(2, 6, 2, 2, dimension=3)
-        m_out = m_conv(batch_points)
-        m_out_trans = m_conv_trans(m_out)
-        dense_m_out = m_out.dense(shape=torch.Size([1, 3, 10, 10, 10]), min_coordinate=torch.IntTensor([0, 0, 0]))
-        batch_dense_points = batch_points.dense(shape=torch.Size([1, 2, 10, 10, 10]))
-        print('Done')
-
-    # sparse_tensor_initialization()
-    # sparse_tensor_arithmetics()
-    # operation_mode()
-    # decomposition()
-    test_m_conv()
+    print('Done')
 
 
-if __name__ == '__main__':
-    # main_debug()
+def model_debug():
     cfg = ModelConfig()
     cfg.resolution = 128
     model = PCC(cfg)
@@ -364,5 +250,11 @@ if __name__ == '__main__':
     out['loss'].backward()
     model.eval()
     model.entropy_bottleneck.update()
-    test_out = model((xyz[0], [''], 0, ''))
+    test_out = model((xyz[0], [''], 0, None))
     print('Done')
+
+
+if __name__ == '__main__':
+    # main_debug()
+    model_debug()
+
