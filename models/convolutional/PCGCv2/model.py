@@ -24,11 +24,14 @@ class PCC(nn.Module):
                                res_block_type=cfg.res_block_type)
         self.decoder = self.layers = nn.Sequential(GenerativeUpsample(cfg.compressed_channels,
                                                                       64, 3, cfg.res_block_type,
-                                                                      loss_type=cfg.reconstruct_loss_type),
+                                                                      loss_type=cfg.reconstruct_loss_type,
+                                                                      dist_upper_bound=cfg.dist_upper_bound),
                                                    GenerativeUpsample(64, 32, 3, cfg.res_block_type,
-                                                                      loss_type=cfg.reconstruct_loss_type),
+                                                                      loss_type=cfg.reconstruct_loss_type,
+                                                                      dist_upper_bound=cfg.dist_upper_bound),
                                                    GenerativeUpsample(32, 16, 3, cfg.res_block_type,
                                                                       loss_type=cfg.reconstruct_loss_type,
+                                                                      dist_upper_bound=cfg.dist_upper_bound,
                                                                       is_last_layer=True))
         self.entropy_bottleneck = EntropyBottleneck(cfg.compressed_channels)
         self.cfg = cfg

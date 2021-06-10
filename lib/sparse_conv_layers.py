@@ -12,11 +12,12 @@ MConvTranspose = ME.MinkowskiConvolutionTranspose
 
 
 class AbstractGenerativeUpsample(nn.Module):
-    def __init__(self, mapping_target_kernel_size=1, loss_type='BCE', is_last_layer=False):
+    def __init__(self, mapping_target_kernel_size=1, loss_type='BCE', dist_upper_bound=2.0, is_last_layer=False):
         super(AbstractGenerativeUpsample, self).__init__()
         self.mapping_target_kernel_size = mapping_target_kernel_size
         assert loss_type in ['BCE', 'Dist']
         self.loss_type = loss_type
+        self.square_dist_upper_bound = dist_upper_bound ** 2
         self.is_last_layer = is_last_layer
         self.upsample_block = None
         self.classify_block = None  # classify_block should not change coordinates of upsample_block's output
@@ -80,6 +81,14 @@ class AbstractGenerativeUpsample(nn.Module):
                                        strided_target_one_sample[None].type(torch.float),
                                        K=1, return_sorted=False).dists[0, :, 0]
                     loss_target[sample_mapping] = dists
+
+                with torch.no_grad():  # TODO: speed
+                    pred_mask = pred.F.squeeze() > self.square_dist_upper_bound
+                    target_mask = loss_target > self.square_dist_upper_bound
+                    bound_target_mask = (~pred_mask) & target_mask
+                    ignore_target_mask = pred_mask & target_mask
+                    loss_target[bound_target_mask] = self.square_dist_upper_bound
+                    loss_target[ignore_target_mask] = pred.F.squeeze()[ignore_target_mask]
 
             else:
                 raise NotImplementedError

@@ -10,6 +10,7 @@ class ModelConfig(SimpleConfig):
     bottleneck_scaler: int = 2 ** 7
     bpp_loss_factor: float = 0.1
     reconstruct_loss_factor: float = 1.0
+    dist_upper_bound = 2.0
     aux_loss_factor: float = 10.0
 
     # only for test phase:
