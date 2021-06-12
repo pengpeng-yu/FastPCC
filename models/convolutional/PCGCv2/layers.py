@@ -74,7 +74,13 @@ class Encoder(nn.Module):
                                     MConv(ch[3], ch[4], 3, 1, bias=True, dimension=3))
 
     def forward(self, x):
-        return self.block2(self.block1(self.block0(x)))
+        points_num_list = [x.shape[0]]
+        x = self.block0(x)
+        points_num_list.append(x.shape[0])
+        x = self.block1(x)
+        points_num_list.append(x.shape[0])
+        x = self.block2(x)
+        return x, points_num_list
 
 
 class GenerativeUpsample(AbstractGenerativeUpsample):

@@ -79,6 +79,13 @@ class PCC(nn.Module):
                     fileinfo_path = out_file_path + '_info.txt'
                     reconstructed_path = out_file_path + '_recon.ply'
 
+                    if not file_path.endswith('.ply'):
+                        file_path = out_file_path + '.ply'
+                        o3d.io.write_point_cloud(file_path,
+                                                 o3d.geometry.PointCloud(
+                                                     o3d.utility.Vector3dVector(
+                                                         target.cpu())), write_ascii=True)
+
                     with open(compressed_path, 'wb') as f:
                         f.write(com_string)
 
@@ -100,8 +107,8 @@ class PCC(nn.Module):
                                                        resolution=resolution, normal=False,
                                                        command=self.cfg.mpeg_pcc_error_command,
                                                        threads=self.cfg.mpeg_pcc_error_threads)
-                    assert mpeg_pc_error_dict != {}, f'Error when call mpeg pc error software with' \
-                                                     f'infile1={os.path.abspath(file_path)}' \
+                    assert mpeg_pc_error_dict != {}, f'Error when call mpeg pc error software with ' \
+                                                     f'infile1={os.path.abspath(file_path)} ' \
                                                      f'infile2={os.path.abspath(reconstructed_path)}'
 
                     for key, value in mpeg_pc_error_dict.items():
@@ -138,7 +145,8 @@ class PCC(nn.Module):
             xyz, file_path_list, resolutions, results_dir = x
         xyz = ME.SparseTensor(torch.ones(xyz.shape[0], 1, dtype=torch.float, device=xyz.device),
                               xyz)
-        fea = self.encoder(xyz)
+        fea, points_num_list = self.encoder(xyz)
+        if not self.cfg.adaptive_pruning: points_num_list = None
 
         if self.training:
             # TODO: scaler?
@@ -148,8 +156,8 @@ class PCC(nn.Module):
                                         coordinate_map_key=fea.coordinate_map_key,
                                         coordinate_manager=ME.global_coordinate_manager())
 
-            _, cached_pred, cached_target, _ = \
-                self.decoder((fea_tilde, None, None, xyz.coordinate_map_key))
+            _, cached_pred, cached_target = \
+                self.decoder((fea_tilde, None, None, xyz.coordinate_map_key, points_num_list.copy()))
 
             bpp_loss = torch.log2(likelihood).sum() * (
                     -self.cfg.bpp_loss_factor / xyz.shape[0])
@@ -184,8 +192,8 @@ class PCC(nn.Module):
             fea = ME.SparseTensor(fea / self.cfg.bottleneck_scaler,
                                   coordinate_map_key=cached_map_key,
                                   coordinate_manager=ME.global_coordinate_manager())
-            _, cached_pred, _, _ = \
-                self.decoder((fea, None, None, None))
+            _, cached_pred, _ = \
+                self.decoder((fea, None, None, None, points_num_list.copy()))
 
             decoder_output = cached_pred[-1].decomposed_coordinates
             items_to_save = self.log_pred_res('log', decoder_output, xyz.decomposed_coordinates,

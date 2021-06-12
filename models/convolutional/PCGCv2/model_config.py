@@ -6,9 +6,10 @@ from lib.config import SimpleConfig
 class ModelConfig(SimpleConfig):
     res_block_type: str = 'InceptionResNet'
     compressed_channels: int = 8
-    reconstruct_loss_type: str = 'Dist'  # BCE or Dist
+    reconstruct_loss_type: str = 'BCE'  # BCE or Dist
+    adaptive_pruning: bool = True
     bottleneck_scaler: int = 2 ** 7
-    bpp_loss_factor: float = 0.1
+    bpp_loss_factor: float = 0.3
     reconstruct_loss_factor: float = 1.0
     dist_upper_bound = 2.0
     aux_loss_factor: float = 10.0

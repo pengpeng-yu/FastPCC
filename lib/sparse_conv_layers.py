@@ -37,17 +37,33 @@ class AbstractGenerativeUpsample(nn.Module):
 
         During testing, cached_target and target_key are no longer needed.
         """
-        fea, cached_pred, cached_target, target_key = input_tuple
+        fea, cached_pred, cached_target, target_key, points_num_list = input_tuple
 
         fea = self.upsample_block(fea)
         pred = self.classify_block(fea)
 
-        with torch.no_grad():  # TODO: adaptive
+        with torch.no_grad():
             if self.loss_type == 'BCE':
-                keep = (pred.F.squeeze() > 0)
+                if points_num_list is not None:
+                    target_points_num = points_num_list.pop()
+                    if pred.F.shape[0] > target_points_num:
+                        thres = torch.kthvalue(pred.F, pred.F.shape[0] - target_points_num, dim=0).values
+                        keep = (pred.F.squeeze() > thres)
+                    else:
+                        keep = torch.full_like(pred.F.squeeze(), fill_value=True, dtype=torch.bool)
+                else:
+                    keep = (pred.F.squeeze() > 0)
 
             elif self.loss_type == 'Dist':
-                keep = (pred.F.squeeze() < 0.5)
+                if points_num_list is not None:
+                    target_points_num = points_num_list.pop()
+                    if pred.F.shape[0] > target_points_num:
+                        thres = torch.kthvalue(pred.F, target_points_num, dim=0).values
+                        keep = (pred.F.squeeze() <= thres)
+                    else:
+                        keep = torch.full_like(pred.F.squeeze(), fill_value=True, dtype=torch.bool)
+                else:
+                    keep = (pred.F.squeeze() < 0.5)
 
             else:
                 raise NotImplementedError
@@ -116,7 +132,10 @@ class AbstractGenerativeUpsample(nn.Module):
             else:
                 cached_pred = [self.pruning(pred, keep)]
 
-        return fea, cached_pred, cached_target, target_key
+        if not self.is_last_layer:
+            return fea, cached_pred, cached_target, target_key, points_num_list
+        else:
+            return fea, cached_pred, cached_target
 
 
 def generative_upsample_t():

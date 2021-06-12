@@ -252,6 +252,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                     loss = loss_dict['loss']
 
                 scaler.scale(loss).backward()
+                if cfg.train.max_grad_norm != 0:
+                    torch.nn.utils.clip_grad_norm(model.parameters(), cfg.train.max_grad_norm)
                 scaler.step(optimizer)
                 if aux_optimizer is not None:
                     scaler.step(aux_optimizer)
@@ -260,6 +262,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 loss_dict = model(batch_data)
                 loss = loss_dict['loss']
                 loss.backward()
+                if cfg.train.max_grad_norm != 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.max_grad_norm)
                 optimizer.step()
                 if aux_optimizer is not None:
                     aux_optimizer.step()

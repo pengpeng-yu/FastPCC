@@ -23,6 +23,7 @@ class TrainConfig(SimpleConfig):
     momentum: float = 0.9
     weight_decay: float = 0.0
     aux_weight_decay: float = 0.0
+    max_grad_norm: float = 0.0  # 0.0 to close
     lr_step_size: int = 25
     lr_step_gamma: float = 0.3
 
