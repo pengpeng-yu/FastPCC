@@ -17,7 +17,7 @@ class PCGCv2Data(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(PCGCv2Data, self).__init__()
 
-        if cfg.resolution != 256:
+        if cfg.resolution != 128:
             raise NotImplementedError
 
         # define files list path and cache path

@@ -17,9 +17,6 @@ from lib.datasets.PlyVoxel.dataset_config import DatasetConfig
 class PlyVoxel(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(PlyVoxel, self).__init__()
-        # only for test purpose
-        if is_training is True:
-            raise NotImplementedError
 
         def get_collections(x, repeat):
             return x if isinstance(x, tuple) or isinstance(x, list) else (x,) * repeat
@@ -33,7 +30,7 @@ class PlyVoxel(torch.utils.data.Dataset):
         if not all([ori == tgt for ori, tgt in zip(ori_resolutions, resolutions)]):
             raise NotImplementedError
 
-        # define files list path and cache path
+        # define files list path
         for root, filelist_path, file_path_pattern in zip(roots, filelist_paths, file_path_patterns):
             filelist_abs_path = os.path.join(root, filelist_path)
 
