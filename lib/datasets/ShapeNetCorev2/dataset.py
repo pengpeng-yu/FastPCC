@@ -1,6 +1,7 @@
 import os
 import pathlib
 
+import open3d as o3d
 import numpy as np
 import torch
 import torch.utils.data
@@ -11,6 +12,7 @@ except ImportError: pass
 
 from lib.data_utils import binvox_rw
 from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
+from lib.data_utils import o3d_coords_from_triangle_mesh
 
 
 class ShapeNetCorev2(torch.utils.data.Dataset):
@@ -20,7 +22,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         if cfg.data_format in ['.solid.binvox', '.surface.binvox']:
             if cfg.resolution != 128:
                 raise NotImplementedError
-        else:
+        elif cfg.data_format != '.obj':
             raise NotImplementedError
 
         # define files list path and cache path
@@ -49,9 +51,15 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 f.writelines([_ + '\n' for _ in file_list])
 
         # load files list
+        self.file_list = []
         logger.info(f'using filelist: "{filelist_abs_path}"')
         with open(filelist_abs_path) as f:
-            self.file_list = [os.path.join(cfg.root, _.strip()) for _ in f]
+            for line in f:
+                line = line.strip()
+                assert os.path.splitext(line)[1] == cfg.data_format, \
+                    f'"{line}" in "{filelist_abs_path}" is inconsistent with ' \
+                    f'data format "{cfg.data_format}" in config'
+                self.file_list.append(os.path.join(cfg.root, line))
 
         try:
             if cfg.data_format == '.surface.binvox':
@@ -75,8 +83,22 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
     def __getitem__(self, index):
         # load
         file_path = self.file_list[index]
-        with open(file_path, 'rb') as f:
-            xyz = binvox_rw.read_as_coord_array(f).data.astype(np.int32).T
+        assert os.path.splitext(file_path)[1] == self.cfg.data_format, \
+            f'"{file_path}" in file list is inconsistent with data format "{self.cfg.data_format}" in config'
+
+        if self.cfg.data_format in ['.solid.binvox', '.surface.binvox']:
+            with open(file_path, 'rb') as f:
+                xyz = binvox_rw.read_as_coord_array(f).data.astype(np.int32).T
+        else:
+            xyz = o3d_coords_from_triangle_mesh(file_path,
+                                                self.cfg.points_num,
+                                                self.cfg.mesh_sample_point_method,
+                                                normalized=True)
+
+            if self.cfg.resolution != 0:
+                assert self.cfg.resolution > 1
+                xyz *= self.cfg.resolution
+                xyz = ME.utils.sparse_quantize(xyz)
 
         return_obj = {'xyz': xyz,
                       'file_path': file_path if self.cfg.with_file_path else None}
@@ -118,6 +140,9 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
 if __name__ == '__main__':
     config = DatasetConfig()
+    config.data_format = '.obj'
+    config.points_num = 5000000
+    config.resolution = 512
 
     from loguru import logger
     dataset = ShapeNetCorev2(config, True, logger)

@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import open3d as o3d
 
 
 class OFFIO:
@@ -25,7 +26,32 @@ class OFFIO:
         return True
 
 
-def resample_mesh_by_faces(mesh_cad, density=1):
+def o3d_coords_from_triangle_mesh(triangle_mesh_path: str, points_num: int,
+                                  sample_method: str = 'uniform', normalized: bool = True):
+    mesh_object = o3d.io.read_triangle_mesh(triangle_mesh_path)
+    vertices = np.asarray(mesh_object.vertices)
+
+    if normalized is True:
+        vmax = vertices.max(0, keepdims=True)
+        vmin = vertices.min(0, keepdims=True)
+        vertices = (vertices - vmin) / (vmax - vmin).max()
+        mesh_object.vertices = o3d.utility.Vector3dVector(vertices)
+
+    if sample_method == 'barycentric':
+        point_cloud = resample_mesh_by_faces(
+            mesh_object,
+            density=points_num / len(mesh_object.triangles))
+    elif sample_method == 'poisson_disk':
+        point_cloud = np.asarray(mesh_object.sample_points_poisson_disk(points_num).points)
+    elif sample_method == 'uniform':
+        point_cloud = np.asarray(mesh_object.sample_points_uniformly(points_num).points)
+    else:
+        raise NotImplementedError
+    point_cloud = point_cloud.astype(np.float32)
+    return point_cloud
+
+
+def resample_mesh_by_faces(mesh_cad, density=1.0):
     """
     https://chrischoy.github.io/research/barycentric-coordinate-for-mesh-sampling/
     Samples point cloud on the surface of the model defined as vectices and

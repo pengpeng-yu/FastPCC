@@ -1,7 +1,7 @@
 import os
 import pathlib
 import hashlib
-from tqdm import tqdm
+
 import open3d as o3d
 import numpy as np
 import torch
@@ -12,7 +12,7 @@ try:
 except ImportError: pass
 
 from lib.datasets.ModelNet.dataset_config import DatasetConfig
-from lib.data_utils import OFFIO, resample_mesh_by_faces
+from lib.data_utils import OFFIO, o3d_coords_from_triangle_mesh
 
 
 class ModelNetDataset(torch.utils.data.Dataset):
@@ -112,26 +112,10 @@ class ModelNetDataset(torch.utils.data.Dataset):
             if self.cfg.with_normal_channel: raise NotImplementedError
 
             # mesh -> points
-            mesh_object = o3d.io.read_triangle_mesh(file_path)
-            vertices = np.asarray(mesh_object.vertices)
-
-            vmax = vertices.max(0, keepdims=True)
-            vmin = vertices.min(0, keepdims=True)
-            vertices = (vertices - vmin) / (vmax - vmin).max()
-            mesh_object.vertices = o3d.utility.Vector3dVector(vertices)
-
-            # sample points from mesh
-            if self.cfg.mesh_sample_point_method == 'barycentric':
-                point_cloud = resample_mesh_by_faces(
-                    mesh_object,
-                    density=self.cfg.input_points_num / len(mesh_object.triangles))
-            elif self.cfg.mesh_sample_point_method == 'poisson_disk':
-                point_cloud = np.asarray(mesh_object.sample_points_poisson_disk(self.cfg.input_points_num).points)
-            elif self.cfg.mesh_sample_point_method == 'uniform':
-                point_cloud = np.asarray(mesh_object.sample_points_uniformly(self.cfg.input_points_num).points)
-            else:
-                raise NotImplementedError
-            point_cloud = point_cloud.astype(np.float32)
+            point_cloud = o3d_coords_from_triangle_mesh(file_path,
+                                                        self.cfg.input_points_num,
+                                                        self.cfg.mesh_sample_point_method,
+                                                        normalized=True)
 
             # # mesh -> voxel points
             # # could produce strange result if surface is not closed

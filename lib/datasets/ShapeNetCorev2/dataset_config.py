@@ -15,6 +15,9 @@ class DatasetConfig(SimpleConfig):
     # '.obj' or '.solid.binvox' or '.surface.binvox'
     data_format: str = '.surface.binvox'
 
+    points_num: int = 0
+    mesh_sample_point_method: str = 'uniform'
+
     resolution: int = 128
     with_file_path: bool = True
     with_resolution: bool = True
