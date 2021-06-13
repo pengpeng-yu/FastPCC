@@ -12,7 +12,7 @@ try:
 except ImportError: pass
 
 from lib.datasets.ModelNet.dataset_config import DatasetConfig
-from lib.data_utils import OFFIO, o3d_coords_from_triangle_mesh
+from lib.data_utils import OFFIO, o3d_coords_from_triangle_mesh, normalize_coords
 
 
 class ModelNetDataset(torch.utils.data.Dataset):
@@ -114,8 +114,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
             # mesh -> points
             point_cloud = o3d_coords_from_triangle_mesh(file_path,
                                                         self.cfg.input_points_num,
-                                                        self.cfg.mesh_sample_point_method,
-                                                        normalized=True)
+                                                        self.cfg.mesh_sample_point_method,)
 
             # # mesh -> voxel points
             # # could produce strange result if surface is not closed
@@ -146,6 +145,8 @@ class ModelNetDataset(torch.utils.data.Dataset):
         if not self.gen_cache and self.cfg.random_rotation:
             if self.cfg.with_normal_channel: raise NotImplementedError
             xyz = R.random().apply(xyz).astype(np.float32)
+
+        xyz = normalize_coords(xyz)
 
         # quantize  points: ndarray -> voxel points: torch.Tensor
         if self.cfg.resolution != 0:

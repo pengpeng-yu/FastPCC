@@ -3,6 +3,7 @@ import pathlib
 
 import open3d as o3d
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 import torch
 import torch.utils.data
 
@@ -12,14 +13,16 @@ except ImportError: pass
 
 from lib.data_utils import binvox_rw
 from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
-from lib.data_utils import o3d_coords_from_triangle_mesh
+from lib.data_utils import o3d_coords_from_triangle_mesh, normalize_coords
 
 
 class ShapeNetCorev2(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(ShapeNetCorev2, self).__init__()
 
-        if cfg.data_format in ['.solid.binvox', '.surface.binvox']:
+        if cfg.data_format in ['.solid.binvox', '.surface.binvox'] or \
+                cfg.data_format == ['.solid.binvox', '.surface.binvox'] or \
+                cfg.data_format == ['.surface.binvox', '.solid.binvox']:
             if cfg.resolution != 128:
                 raise NotImplementedError
         elif cfg.data_format != '.obj':
@@ -40,12 +43,17 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 f.readline()
                 for line in f:
                     _, synset_id, _, model_id, split = line.strip().split(',')
-                    file_path = os.path.join(synset_id, model_id, 'models', 'model_normalized' + cfg.data_format)
+                    file_paths = [os.path.join(synset_id, model_id, 'models', 'model_normalized' + d_format)
+                                  for d_format in ([cfg.data_format]
+                                  if isinstance(cfg.data_format, str) else cfg.data_format)
+                                  if model_id != '7edb40d76dff7455c2ff7551a4114669']
+                    # 7edb40d76dff7455c2ff7551a4114669 seems to be problematic
 
-                    if os.path.exists(os.path.join(cfg.root, file_path)):
-                        if (is_training and split == 'train') or \
-                                not is_training and split == 'test':
-                            file_list.append(file_path)
+                    for file_path in file_paths:
+                        if os.path.exists(os.path.join(cfg.root, file_path)):
+                            if (is_training and split == 'train') or \
+                                    not is_training and split == 'test':
+                                file_list.append(file_path)
 
             with open(filelist_abs_path, 'w') as f:
                 f.writelines([_ + '\n' for _ in file_list])
@@ -56,17 +64,21 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         with open(filelist_abs_path) as f:
             for line in f:
                 line = line.strip()
-                assert os.path.splitext(line)[1] == cfg.data_format, \
+                ext_name = '.' + '.'.join(os.path.split(line)[1].rsplit('.', 2)[1:])
+                assert ext_name == cfg.data_format or ext_name in cfg.data_format, \
                     f'"{line}" in "{filelist_abs_path}" is inconsistent with ' \
                     f'data format "{cfg.data_format}" in config'
                 self.file_list.append(os.path.join(cfg.root, line))
+        logger.info(f'filelist[0]: {self.file_list[0]}')
+        logger.info(f'filelist[1]: {self.file_list[1]}')
+        logger.info(f'length of filelist: {len(self.file_list)}')
 
         try:
             if cfg.data_format == '.surface.binvox':
                 if is_training:
-                    assert len(self.file_list) == 35765 - 80  # 80 have no binvox files
+                    assert len(self.file_list) == 35765 - 80 - 2  # 80 have no binvox files
                 else:
-                    assert len(self.file_list) == 10266 - 13  # 13 has no binvox files
+                    assert len(self.file_list) == 10266 - 13 - 2  # 13 has no binvox files
             elif cfg.data_format == '.solid.binvox':
                 pass
             elif cfg.data_format == '.obj':
@@ -83,22 +95,25 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
     def __getitem__(self, index):
         # load
         file_path = self.file_list[index]
-        assert os.path.splitext(file_path)[1] == self.cfg.data_format, \
-            f'"{file_path}" in file list is inconsistent with data format "{self.cfg.data_format}" in config'
 
-        if self.cfg.data_format in ['.solid.binvox', '.surface.binvox']:
+        if self.cfg.data_format != '.obj':
             with open(file_path, 'rb') as f:
                 xyz = binvox_rw.read_as_coord_array(f).data.astype(np.int32).T
+                xyz = np.ascontiguousarray(xyz)
         else:
             xyz = o3d_coords_from_triangle_mesh(file_path,
                                                 self.cfg.points_num,
-                                                self.cfg.mesh_sample_point_method,
-                                                normalized=True)
+                                                self.cfg.mesh_sample_point_method)
 
-            if self.cfg.resolution != 0:
-                assert self.cfg.resolution > 1
-                xyz *= self.cfg.resolution
-                xyz = ME.utils.sparse_quantize(xyz)
+        if self.cfg.random_rotation:
+            xyz = R.random().apply(xyz).astype(np.float32)
+
+        xyz = normalize_coords(xyz)
+
+        if self.cfg.resolution != 0:
+            assert self.cfg.resolution > 1
+            xyz *= self.cfg.resolution
+            xyz = ME.utils.sparse_quantize(xyz)
 
         return_obj = {'xyz': xyz,
                       'file_path': file_path if self.cfg.with_file_path else None}

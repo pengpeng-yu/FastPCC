@@ -1,6 +1,7 @@
 import subprocess
 
 
+# TODO: precision recall metric
 def mpeg_pc_error(infile1, infile2, resolution, normal=False, command='pc_error_d', threads=1):
     # https://github.com/NJUVISION/PCGCv2
     # Symmetric Metrics. D1 mse, D1 hausdorff.

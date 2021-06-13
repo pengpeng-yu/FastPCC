@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import open3d as o3d
+import torch
 
 
 class OFFIO:
@@ -27,15 +28,8 @@ class OFFIO:
 
 
 def o3d_coords_from_triangle_mesh(triangle_mesh_path: str, points_num: int,
-                                  sample_method: str = 'uniform', normalized: bool = True):
+                                  sample_method: str = 'uniform') -> np.ndarray:
     mesh_object = o3d.io.read_triangle_mesh(triangle_mesh_path)
-    vertices = np.asarray(mesh_object.vertices)
-
-    if normalized is True:
-        vmax = vertices.max(0, keepdims=True)
-        vmin = vertices.min(0, keepdims=True)
-        vertices = (vertices - vmin) / (vmax - vmin).max()
-        mesh_object.vertices = o3d.utility.Vector3dVector(vertices)
 
     if sample_method == 'barycentric':
         point_cloud = resample_mesh_by_faces(
@@ -49,6 +43,13 @@ def o3d_coords_from_triangle_mesh(triangle_mesh_path: str, points_num: int,
         raise NotImplementedError
     point_cloud = point_cloud.astype(np.float32)
     return point_cloud
+
+
+def normalize_coords(xyz: np.ndarray):
+    coord_max = xyz.max(axis=0, keepdims=True)
+    coord_min = xyz.min(axis=0, keepdims=True)
+    xyz = (xyz - coord_min) / (coord_max - coord_min).max()
+    return xyz
 
 
 def resample_mesh_by_faces(mesh_cad, density=1.0):

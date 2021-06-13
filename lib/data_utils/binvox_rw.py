@@ -142,7 +142,7 @@ def read_as_3d_array(fp, fix_coords=True):
     return Voxels(data, dims, translate, scale, axis_order)
 
 
-def read_as_coord_array(fp, fix_coords=True, dtype=np.int64):
+def read_as_coord_array(fp, fix_coords=True, dtype=np.int64) -> np.ndarray:
     """ Read binary binvox format as coordinates.
     Returns binvox model with voxels in a "coordinate" representation, i.e.  an
     3 x N array where N is the number of nonzero voxels. Each column
