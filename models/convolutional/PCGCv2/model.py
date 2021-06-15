@@ -11,7 +11,8 @@ from compressai.models.utils import update_registered_buffers
 
 from lib.metric import mpeg_pc_error
 from lib.loss_function import chamfer_loss
-from models.convolutional.PCGCv2.layers import Encoder, GenerativeUpsample
+from lib.sparse_conv_layers import GenerativeUpsampleMessage
+from models.convolutional.PCGCv2.layers import Encoder, DecoderBlock
 from models.convolutional.PCGCv2.model_config import ModelConfig
 
 
@@ -22,17 +23,17 @@ class PCC(nn.Module):
         self.encoder = Encoder(cfg.compressed_channels,
                                res_blocks_num=3,
                                res_block_type=cfg.res_block_type)
-        self.decoder = self.layers = nn.Sequential(GenerativeUpsample(cfg.compressed_channels,
-                                                                      64, 3, cfg.res_block_type,
-                                                                      loss_type=cfg.reconstruct_loss_type,
-                                                                      dist_upper_bound=cfg.dist_upper_bound),
-                                                   GenerativeUpsample(64, 32, 3, cfg.res_block_type,
-                                                                      loss_type=cfg.reconstruct_loss_type,
-                                                                      dist_upper_bound=cfg.dist_upper_bound),
-                                                   GenerativeUpsample(32, 16, 3, cfg.res_block_type,
-                                                                      loss_type=cfg.reconstruct_loss_type,
-                                                                      dist_upper_bound=cfg.dist_upper_bound,
-                                                                      is_last_layer=True))
+        self.decoder = self.layers = nn.Sequential(DecoderBlock(cfg.compressed_channels,
+                                                                64, 3, cfg.res_block_type,
+                                                                loss_type=cfg.reconstruct_loss_type,
+                                                                dist_upper_bound=cfg.dist_upper_bound),
+                                                   DecoderBlock(64, 32, 3, cfg.res_block_type,
+                                                                loss_type=cfg.reconstruct_loss_type,
+                                                                dist_upper_bound=cfg.dist_upper_bound),
+                                                   DecoderBlock(32, 16, 3, cfg.res_block_type,
+                                                                loss_type=cfg.reconstruct_loss_type,
+                                                                dist_upper_bound=cfg.dist_upper_bound,
+                                                                is_last_layer=True))
         self.entropy_bottleneck = EntropyBottleneck(cfg.compressed_channels)
         self.cfg = cfg
         self.log_pred_res('init')
@@ -156,8 +157,12 @@ class PCC(nn.Module):
                                         coordinate_map_key=fea.coordinate_map_key,
                                         coordinate_manager=ME.global_coordinate_manager())
 
-            _, cached_pred, cached_target = \
-                self.decoder((fea_tilde, None, None, xyz.coordinate_map_key, points_num_list.copy()))
+            message: GenerativeUpsampleMessage = \
+                self.decoder(GenerativeUpsampleMessage(fea=fea_tilde,
+                                                       target_key=xyz.coordinate_map_key,
+                                                       points_num_list=points_num_list))
+            cached_pred = message.cached_pred
+            cached_target = message.cached_target
 
             bpp_loss = torch.log2(likelihood).sum() * (
                     -self.cfg.bpp_loss_factor / xyz.shape[0])
@@ -192,8 +197,9 @@ class PCC(nn.Module):
             fea = ME.SparseTensor(fea / self.cfg.bottleneck_scaler,
                                   coordinate_map_key=cached_map_key,
                                   coordinate_manager=ME.global_coordinate_manager())
-            _, cached_pred, _ = \
-                self.decoder((fea, None, None, None, points_num_list.copy()))
+            cached_pred = \
+                self.decoder(GenerativeUpsampleMessage(fea=fea,
+                                                       points_num_list=points_num_list)).cached_pred
 
             decoder_output = cached_pred[-1].decomposed_coordinates
             items_to_save = self.log_pred_res('log', decoder_output, xyz.decomposed_coordinates,

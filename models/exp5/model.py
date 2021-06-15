@@ -53,7 +53,7 @@ class PointCompressor(nn.Module):
             balance_loss = torch.mean(fea) * self.cfg.balance_loss_factor
 
             fea = fea + quantize_diff  # binary
-            fea = self.decoder_layers((xyz, fea, None, None, None))[1]  # TODO: eliminate xyz here
+            fea = self.decoder_layers((xyz, fea, None, None, None))[1]
             fea = self.mlp_dec_out(fea)
             fea = fea.reshape(batch_size, self.cfg.input_points_num, 3)
 

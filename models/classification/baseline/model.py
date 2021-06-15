@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from lib.points_layers import TransitionDownWithDistFea, RotationInvariantDistFea, DeepRotationInvariantDistFea, LocalFeatureAggregation as LFA
+from lib.points_layers import PointLayerMessage, TransitionDownWithDistFea, \
+    RotationInvariantDistFea, DeepRotationInvariantDistFea, LocalFeatureAggregation as LFA
 from lib.torch_utils import MLPBlock
 from models.classification.baseline import Config
 
@@ -14,9 +15,10 @@ class Model(nn.Module):
         self.cfg = cfg
         # self.neighbor_fea_generator = \
         #     DeepRotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, 16, 32, retain_xyz_dists=True)
-        self.neighbor_fea_generator = RotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, retain_xyz_dists=True)
+        self.neighbor_fea_generator = \
+            RotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, retain_xyz_dists=True)
 
-        # the first layer has no features, thus its in_channels == 0 and mlp_shortcut == False
+        # the first layer has no features, thus its in_channels == 0 and mlp_shortcut == None
         self.layers = nn.Sequential(LFA(0, self.neighbor_fea_generator, 8, 8),
                                     LFA(8, self.neighbor_fea_generator, 8, 16),
                                     TransitionDownWithDistFea(self.neighbor_fea_generator, 16, 16, 32, 'uniform', 0.25),
@@ -68,7 +70,7 @@ class Model(nn.Module):
 
     def forward(self, x, requires_fea_in_test=False):
         xyz, target = x
-        feature = self.layers((xyz, None, None, None, None))[1]
+        feature = self.layers(PointLayerMessage(xyz=xyz)).feature
         feature = torch.max(feature, dim=1).values
         feature = self.head(feature)
 
@@ -127,6 +129,7 @@ def main_t():
 
     test_res = model.module.log_pred_res('show')
     print('Done')
+
 
 if __name__ == '__main__':
     main_t()

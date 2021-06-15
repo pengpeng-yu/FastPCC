@@ -6,7 +6,7 @@ from compressai.models.utils import update_registered_buffers
 
 from lib import loss_function
 from lib.torch_utils import MLPBlock
-from lib.points_layers import TransitionDown, TransformerBlock
+from lib.points_layers import PointLayerMessage, TransitionDown, TransformerBlock
 from models.exp0.model_config import ModelConfig
 
 
@@ -34,9 +34,9 @@ class PointCompressor(nn.Module):
 
         self.entropy_bottleneck = compressai.entropy_models.EntropyBottleneck(self.encoded_points_dim)
 
-        self.decoder = [TransformerBlock(1024, 512, cfg.neighbor_num, True),
-                        TransformerBlock(512, 256, cfg.neighbor_num, True),
-                        TransformerBlock(256, 96, cfg.neighbor_num, False)]
+        self.decoder = [TransformerBlock(1024, 512, cfg.neighbor_num),
+                        TransformerBlock(512, 256, cfg.neighbor_num),
+                        TransformerBlock(256, 96, cfg.neighbor_num)]
         self.mlp_dec_out = MLPBlock(96, 96, activation=None, batchnorm='nn.bn1d')
         self.decoder = nn.Sequential(*self.decoder)
         self.init_weights()
@@ -46,14 +46,15 @@ class PointCompressor(nn.Module):
         batch_size = fea.shape[0]
         xyz = fea[..., :3]  # B, N, C only coordinate supported
         # encode
-        xyz, fea = self.encoder((xyz, fea, None, None, None))[:2]
+        msg = self.encoder(PointLayerMessage(xyz=xyz, feature=fea))  # type: PointLayerMessage
+        xyz, fea = msg.xyz, msg.feature
         fea = self.mlp_enc_out(fea)
 
         if self.training:
             fea, likelihoods = self.entropy_bottleneck(fea.permute(0, 2, 1).unsqueeze(3).contiguous())
             fea = fea.squeeze(3).permute(0, 2, 1).contiguous()
             likelihoods = likelihoods.squeeze(3).permute(0, 2, 1).contiguous()
-            fea = self.decoder((xyz, fea, None, None, None))[1]
+            fea = self.decoder(PointLayerMessage(xyz=xyz, feature=fea)).feature
             fea = self.mlp_dec_out(fea)
             fea = fea.reshape(batch_size, self.cfg.input_points_num, self.cfg.input_points_dim)
 
@@ -68,7 +69,7 @@ class PointCompressor(nn.Module):
         else:
             compressed_strings = self.entropy_bottleneck_compress(fea)
             decompressed_tensors = self.entropy_bottleneck_decompress(compressed_strings)
-            decoder_output = self.decoder((xyz, decompressed_tensors, None, None, None))[1]
+            decoder_output = self.decoder(PointLayerMessage(xyz=xyz, feature=decompressed_tensors)).feature
             decoder_output = self.mlp_dec_out(decoder_output)
             decoder_output = decoder_output.reshape(batch_size, self.cfg.input_points_num, self.cfg.input_points_dim)
 
@@ -115,6 +116,7 @@ def main_t():
     model.eval()
     model.entropy_bottleneck.update()
     val_out = model(point_cloud)
+    print('Done')
 
 
 if __name__ == '__main__':

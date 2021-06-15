@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import MinkowskiEngine as ME
 
-from lib.sparse_conv_layers import AbstractGenerativeUpsample
+from lib.sparse_conv_layers import GenerativeUpsample, GenerativeUpsampleMessage
 
 MConv = ME.MinkowskiConvolution
 MReLU = ME.MinkowskiReLU
@@ -83,13 +83,10 @@ class Encoder(nn.Module):
         return x, points_num_list
 
 
-class GenerativeUpsample(AbstractGenerativeUpsample):
+class DecoderBlock(nn.Module):
     def __init__(self, in_channels, out_channels, res_blocks_num, res_block_type,
                  mapping_target_kernel_size=1, loss_type='BCE', dist_upper_bound=2.0, is_last_layer=False):
-        super(GenerativeUpsample, self).__init__(mapping_target_kernel_size=mapping_target_kernel_size,
-                                                 loss_type=loss_type,
-                                                 dist_upper_bound=dist_upper_bound,
-                                                 is_last_layer=is_last_layer)
+        super(DecoderBlock, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.res_blocks_num = res_blocks_num
@@ -97,12 +94,21 @@ class GenerativeUpsample(AbstractGenerativeUpsample):
             self.basic_block = ResBlock
         elif res_block_type == 'InceptionResNet':
             self.basic_block = InceptionResBlock
-        self.upsample_block = nn.Sequential(MGenConvTranspose(self.in_channels, self.out_channels,
-                                                              2, 2, bias=True, dimension=3),
-                                            MReLU(inplace=True),
-                                            MConv(self.out_channels, self.out_channels, 3, 1, bias=True, dimension=3),
-                                            MReLU(inplace=True),
-                                            *[self.basic_block(self.out_channels) for _ in range(self.res_blocks_num)])
+        upsample_block = nn.Sequential(MGenConvTranspose(self.in_channels, self.out_channels,
+                                                         2, 2, bias=True, dimension=3),
+                                       MReLU(inplace=True),
+                                       MConv(self.out_channels, self.out_channels, 3, 1, bias=True, dimension=3),
+                                       MReLU(inplace=True),
+                                       *[self.basic_block(self.out_channels) for _ in range(self.res_blocks_num)])
         classify_block = [MConv(self.out_channels, 1, 3, 1, bias=True, dimension=3)]
         if loss_type == 'Dist': classify_block.append(MReLU(inplace=True))
-        self.classify_block = nn.Sequential(*classify_block)
+        classify_block = nn.Sequential(*classify_block)
+
+        self.generative_upsample = GenerativeUpsample(upsample_block, classify_block,
+                                                      mapping_target_kernel_size=mapping_target_kernel_size,
+                                                      loss_type=loss_type,
+                                                      dist_upper_bound=dist_upper_bound,
+                                                      is_last_layer=is_last_layer)
+
+    def forward(self, x: GenerativeUpsampleMessage):
+        return self.generative_upsample(x)
