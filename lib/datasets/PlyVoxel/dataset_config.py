@@ -17,3 +17,4 @@ class DatasetConfig(SimpleConfig):
     ori_resolution: Union[int, Tuple[int]] = (512, 1024, 2048)  # depends on the datatsets themselves
     resolution: Union[int, Tuple[int]] = (512, 1024, 2048)  # target resolution
     with_resolution: bool = True
+    with_ori_resolution: bool = False

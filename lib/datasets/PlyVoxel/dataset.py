@@ -27,8 +27,13 @@ class PlyVoxel(torch.utils.data.Dataset):
         ori_resolutions = get_collections(cfg.ori_resolution, len(roots))
         resolutions = get_collections(cfg.resolution, len(roots))
 
-        if not all([ori == tgt for ori, tgt in zip(ori_resolutions, resolutions)]):
+        if not all([ori == tgt or tgt == 0 for ori, tgt in zip(ori_resolutions, resolutions)]):
             raise NotImplementedError
+
+        if sum(resolutions) == 0:
+            self.voxelized = False
+        else:
+            self.voxelized = True
 
         # define files list path
         for root, filelist_path, file_path_pattern in zip(roots, filelist_paths, file_path_patterns):
@@ -44,7 +49,8 @@ class PlyVoxel(torch.utils.data.Dataset):
         # load files list
         self.file_list = []
         self.file_resolutions = []
-        for root, filelist_path, resolution in zip(roots, filelist_paths, resolutions):
+        self.file_ori_resolutions = []
+        for root, filelist_path, ori_resolution, resolution in zip(roots, filelist_paths, ori_resolutions, resolutions):
             filelist_abs_path = os.path.join(root, filelist_path)
             logger.info(f'using filelist: "{filelist_abs_path}"')
             with open(filelist_abs_path) as f:
@@ -52,6 +58,7 @@ class PlyVoxel(torch.utils.data.Dataset):
                     line = line.strip()
                     self.file_list.append(os.path.join(root, line))
                     self.file_resolutions.append(resolution)
+                    self.file_ori_resolutions.append(ori_resolution)
 
         self.cfg = cfg
 
@@ -68,7 +75,10 @@ class PlyVoxel(torch.utils.data.Dataset):
             raise e
 
         # xyz
-        xyz = torch.from_numpy(np.asarray(point_cloud.points, dtype=np.int32))
+        xyz = np.asarray(point_cloud.points, dtype=np.int32)
+
+        if not self.voxelized:
+            xyz = xyz.astype(np.float32) / self.file_ori_resolutions[index]
 
         if self.cfg.with_color:
             color = torch.from_numpy(np.asarray(point_cloud.colors, dtype=np.float32))
@@ -91,7 +101,8 @@ class PlyVoxel(torch.utils.data.Dataset):
                 'color': color,
                 'normal': normal,
                 'file_path': rel_file_path,
-                'resolution': self.file_resolutions[index] if self.cfg.with_resolution else None}
+                'resolution': self.file_resolutions[index] if self.cfg.with_resolution else None,
+                'ori_resolution': self.file_ori_resolutions[index] if self.cfg.with_ori_resolution else None}
 
     def collate_fn(self, batch):
         assert isinstance(batch, list)
@@ -100,15 +111,20 @@ class PlyVoxel(torch.utils.data.Dataset):
         has_normal = self.cfg.with_normal
         has_color = self.cfg.with_color
         has_resolution = self.cfg.with_resolution
+        has_ori_resolution = self.cfg.with_ori_resolution
 
         xyz_list = []
         file_path_list = []
         normal_list = []
         color_list = []
         resolution_list = []
+        ori_resolution_list = []
 
         for sample in batch:
-            xyz_list.append(sample['xyz'])
+            if isinstance(sample['xyz'], np.ndarray):
+                xyz_list.append(torch.from_numpy(sample['xyz']))
+            else:
+                xyz_list.append(sample['xyz'])
             if has_file_path:
                 file_path_list.append(sample['file_path'])
             if has_normal:
@@ -117,23 +133,37 @@ class PlyVoxel(torch.utils.data.Dataset):
                 color_list.append(sample['color'])
             if has_resolution:
                 resolution_list.append(sample['resolution'])
+            if has_ori_resolution:
+                ori_resolution_list.append(sample['ori_resolution'])
 
         return_obj = []
 
-        batch_xyz = ME.utils.batched_coordinates(xyz_list)
+        if self.voxelized:
+            batch_xyz = ME.utils.batched_coordinates(xyz_list)
+        else:
+            batch_xyz = torch.stack(xyz_list, dim=0)
         return_obj.append(batch_xyz)
 
         if has_normal:
-            return_obj.append(torch.cat(normal_list, dim=0))
+            if self.voxelized:
+                return_obj.append(torch.cat(normal_list, dim=0))
+            else:
+                return_obj.append(torch.stack(normal_list, dim=0))
 
         if has_color:
-            return_obj.append(torch.cat(color_list, dim=0))
+            if self.voxelized:
+                return_obj.append(torch.cat(color_list, dim=0))
+            else:
+                return_obj.append(torch.stack(color_list, dim=0))
 
         if has_file_path:
             return_obj.append(file_path_list)
 
         if has_resolution:
             return_obj.append(torch.tensor(resolution_list, dtype=torch.int32))
+
+        if has_ori_resolution:
+            return_obj.append(torch.tensor(ori_resolution_list, dtype=torch.int32))
 
         if len(return_obj) == 1:
             return_obj = return_obj[0]

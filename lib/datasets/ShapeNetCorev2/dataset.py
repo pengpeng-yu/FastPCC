@@ -137,7 +137,10 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         return_obj = []
 
-        batch_xyz = ME.utils.batched_coordinates(xyz_list)
+        if self.cfg.resolution != 0:
+            batch_xyz = ME.utils.batched_coordinates(xyz_list)
+        else:
+            batch_xyz = torch.stack(xyz_list, dim=0)
         return_obj.append(batch_xyz)
 
         if has_file_path:
@@ -157,7 +160,6 @@ if __name__ == '__main__':
     config = DatasetConfig()
     config.data_format = '.obj'
     config.points_num = 5000000
-    config.resolution = 512
 
     from loguru import logger
     dataset = ShapeNetCorev2(config, True, logger)

@@ -253,7 +253,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
                 scaler.scale(loss).backward()
                 if cfg.train.max_grad_norm != 0:
-                    torch.nn.utils.clip_grad_norm(model.parameters(), cfg.train.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(parameters, cfg.train.max_grad_norm)
                 scaler.step(optimizer)
                 if aux_optimizer is not None:
                     scaler.step(aux_optimizer)

@@ -90,7 +90,7 @@ class Config(SimpleConfig):
         self.check()
 
     def check_local_value(self):
-        if hasattr(self.model, 'input_points_num'):
+        if hasattr(self.model, 'input_points_num') and hasattr(self.train.dataset, 'input_points_num'):
             assert self.model.input_points_num == self.train.dataset.input_points_num
             if hasattr(self.test.dataset, 'input_points_num'):
                 assert self.model.input_points_num == self.test.dataset.input_points_num

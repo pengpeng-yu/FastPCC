@@ -283,7 +283,7 @@ class TransitionDown(nn.Module):
             nsample = self.nsample
         else:
             nsample = int(self.sample_rate * points_num)
-            assert nsample / points_num == self.sample_rate
+            # assert nsample / points_num == self.sample_rate
 
         if self.sample_method == 'uniform':
             sample_indexes = torch.multinomial(torch.ones((1, 1), device=xyz.device).expand(batch_size, points_num),
