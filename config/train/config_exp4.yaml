@@ -1,21 +1,56 @@
 model_path: models.exp4
+
+
 train:
   rundir_name: 'train_<autoindex>'
   device: '3'
-  batch_size: 8
+  batch_size: 4
+  num_workers: 4
+  optimizer: adam
+  momentum: 0.9
   weight_decay: 0.0001
-  epochs: 100
-  ckpt_frequency: 5
-  lr_step_size: 20
-  lr_step_gamma: 0.1
+  max_grad_norm: 1.0
+
+  learning_rate: 0.001
+  epochs: 20
+
+  ckpt_frequency: 2
+  lr_step_size: 2
+  lr_step_gamma: 0.5
   resume_from_ckpt: ''
   resume_items: ['state_dict']
-  learning_rate: 0.001
-  test_frequency: 0
+  test_frequency: 2
+
+  dataset_path: 'lib.datasets.ShapeNetCorev2'
   dataset:
-    root: 'datasets/modelnet40_manually_aligned'
-    input_points_num: 32768
-test:
-  batch_size: 8
+    data_format: '.obj'
+    points_num: 200000
+    resolution: 0
+
+
 model:
-  input_points_num: 32768
+  input_points_num: 200000
+
+
+test:
+  batch_size: 1
+  num_workers: 2
+  save_results: True
+  dataset_path:
+    'lib.datasets.PlyVoxel'
+  log_frequency: 1
+  dataset:
+    root: ['datasets/Owlii', 'datasets/8iVFBv2', 'datasets/MVUB']
+    filelist_path: 'list.txt'
+    file_path_pattern: '**/*.ply'
+
+    with_color: False
+    with_normal: False
+    with_file_path: True
+
+    ori_resolution: [2048, 1024, 512]
+    resolution: [0, 0, 0]
+
+    with_resolution: False
+    with_ori_resolution: True
+

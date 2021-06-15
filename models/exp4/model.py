@@ -1,11 +1,17 @@
+import os
 from functools import reduce
+from collections import defaultdict
+from typing import Tuple, List, Optional, Union
+
+import open3d as o3d
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import compressai
 from compressai.models.utils import update_registered_buffers
 
-from lib import loss_function
+from lib.metric import mpeg_pc_error
+from lib.loss_function import chamfer_loss
 from lib.points_layers import PointLayerMessage, TransitionDown, RandLANeighborFea, \
     LocalFeatureAggregation as LFA
 from lib.torch_utils import MLPBlock
@@ -76,8 +82,12 @@ class PointCompressor(nn.Module):
                                    upsample_rate=2)
         )
 
-    def forward(self, raw_fea):
-        raw_xyz = raw_fea[:, :, :3]
+    def forward(self, x):
+        if self.training:
+            raw_xyz, _, _ = x
+        else:
+            raw_xyz, file_path_list, resolutions, results_dir = x
+        raw_fea = raw_xyz
 
         # encode
         msg = self.encoder(PointLayerMessage(xyz=raw_xyz, feature=raw_fea))  # type: PointLayerMessage
@@ -92,7 +102,7 @@ class PointCompressor(nn.Module):
             msg = self.decoder(PointLayerMessage(xyz=msg.xyz, feature=fea))
 
             bpp_loss = torch.log2(likelihoods).sum() * (-self.cfg.bpp_loss_factor / (fea.shape[0] * fea.shape[1]))
-            reconstruct_loss = sum([loss_function.chamfer_loss(p, raw_xyz) for p in msg.cached_feature])
+            reconstruct_loss = sum([chamfer_loss(p, raw_xyz) for p in msg.cached_feature])
             aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
             loss = reconstruct_loss + bpp_loss + aux_loss
 
@@ -102,14 +112,115 @@ class PointCompressor(nn.Module):
                     'loss': loss}
         else:
             compressed_strings = self.entropy_bottleneck_compress(fea)
-            decompressed_tensors = self.entropy_bottleneck_decompress(compressed_strings)
+            decompressed_tensors = self.entropy_bottleneck_decompress(compressed_strings, fea.shape[1])
             fea = decompressed_tensors / self.cfg.bottleneck_scaler
             msg = self.decoder(PointLayerMessage(xyz=msg.xyz, feature=fea))  # type: PointLayerMessage
             decoder_output = msg.cached_feature[-1]
 
-            return {'compressed_strings': compressed_strings,
-                    'decompressed_tensors': decompressed_tensors,
-                    'decoder_output': decoder_output}
+            self.log_pred_res('log', decoder_output, raw_xyz,
+                              file_path_list, compressed_strings,
+                              resolutions, results_dir)
+
+            return True
+
+    def log_pred_res(self, mode, preds=None, targets=None,
+                     file_path_list: str = None, compressed_strings: List[bytes] = None,
+                     resolutions: Union[int, torch.Tensor] = None, results_dir: str = None):
+        if mode == 'init':
+            self.total_reconstruct_loss = 0.0
+            self.total_bpp = 0.0
+            self.samples_num = 0
+            self.totall_metric_values = defaultdict(float)
+
+        elif mode == 'reset':
+            self.total_reconstruct_loss = 0.0
+            self.total_bpp = 0.0
+            self.samples_num = 0
+            self.totall_metric_values = defaultdict(float)
+
+        elif mode == 'log':
+            assert not self.training
+
+            resolutions = resolutions if isinstance(resolutions, torch.Tensor) \
+                else torch.tensor([resolutions], dtype=torch.int32).expand(len(preds))
+
+            for pred, target, file_path, com_string, resolution \
+                    in zip(preds, targets, file_path_list, compressed_strings, resolutions):
+                resolution = resolution.item()
+
+                if self.cfg.chamfer_dist_test_phase is True:
+                    self.total_reconstruct_loss += chamfer_loss(
+                        pred.unsqueeze(0).type(torch.float) / resolution,
+                        target.unsqueeze(0).type(torch.float) / resolution).item()
+
+                bpp = len(com_string) * 8 / target.shape[0]
+                self.total_bpp += bpp
+
+                if results_dir is not None:
+                    out_file_path = os.path.join(results_dir, os.path.splitext(file_path)[0])
+                    os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
+                    compressed_path = out_file_path + '.txt'
+                    fileinfo_path = out_file_path + '_info.txt'
+                    reconstructed_path = out_file_path + '_recon.ply'
+
+                    if not file_path.endswith('.ply'):
+                        target = torch.round(target * resolution).type(torch.int32)
+                        file_path = out_file_path + '.ply'
+                        o3d.io.write_point_cloud(file_path,
+                                                 o3d.geometry.PointCloud(
+                                                     o3d.utility.Vector3dVector(
+                                                         target.cpu())), write_ascii=True)
+
+                    with open(compressed_path, 'wb') as f:
+                        f.write(com_string)
+
+                    fileinfo = f'scaler: {self.cfg.bottleneck_scaler}\n' \
+                               f'\n' \
+                               f'input_points_num: {target.shape[0]}\n' \
+                               f'output_points_num: {pred.shape[0]}\n' \
+                               f'compressed_bytes: {len(com_string)}\n' \
+                               f'bpp: {bpp}\n' \
+                               f'\n'
+
+                    pred = torch.round(pred * resolution).type(torch.int32)
+                    o3d.io.write_point_cloud(reconstructed_path,
+                                             o3d.geometry.PointCloud(
+                                                 o3d.utility.Vector3dVector(
+                                                     pred.detach().clone().cpu())), write_ascii=True)
+
+                    mpeg_pc_error_dict = mpeg_pc_error(os.path.abspath(file_path), os.path.abspath(reconstructed_path),
+                                                       resolution=resolution, normal=False,
+                                                       command=self.cfg.mpeg_pcc_error_command,
+                                                       threads=self.cfg.mpeg_pcc_error_threads)
+                    assert mpeg_pc_error_dict != {}, f'Error when call mpeg pc error software with ' \
+                                                     f'infile1={os.path.abspath(file_path)} ' \
+                                                     f'infile2={os.path.abspath(reconstructed_path)}'
+
+                    for key, value in mpeg_pc_error_dict.items():
+                        self.totall_metric_values[key] += value
+                        fileinfo += f'{key}: {value} \n'
+
+                    with open(fileinfo_path, 'w') as f:
+                        f.write(fileinfo)
+
+            self.samples_num += len(targets)
+
+            return True
+
+        elif mode == 'show':
+            metric_dict = {'samples_num': self.samples_num,
+                           'mean_bpp': (self.total_bpp / self.samples_num)}
+
+            for key, value in self.totall_metric_values.items():
+                metric_dict[key] = value / self.samples_num
+
+            if self.cfg.chamfer_dist_test_phase > 0:
+                metric_dict['mean_recontruct_loss'] = self.total_reconstruct_loss / self.samples_num
+
+            return metric_dict
+
+        else:
+            raise NotImplementedError
 
     def load_state_dict(self, state_dict, strict: bool = True):
         # Dynamically update the entropy bottleneck buffers related to the CDFs
@@ -126,9 +237,9 @@ class PointCompressor(nn.Module):
         encoder_output = encoder_output.permute(0, 2, 1).unsqueeze(3).contiguous()
         return self.entropy_bottleneck.compress(encoder_output)
 
-    def entropy_bottleneck_decompress(self, compressed_strings):
+    def entropy_bottleneck_decompress(self, compressed_strings, points_num):
         assert not self.training
-        decompressed_tensors = self.entropy_bottleneck.decompress(compressed_strings, size=(self.encoded_points_num, 1))
+        decompressed_tensors = self.entropy_bottleneck.decompress(compressed_strings, size=(points_num, 1))
         decompressed_tensors = decompressed_tensors.squeeze(3).permute(0, 2, 1)
         return decompressed_tensors
 
