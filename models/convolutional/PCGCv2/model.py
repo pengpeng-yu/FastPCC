@@ -41,13 +41,7 @@ class PCC(nn.Module):
     def log_pred_res(self, mode, preds=None, targets=None,
                      file_path_list: str = None, compressed_strings: List[bytes] = None,
                      fea_points_num: int = None, resolutions: Union[int, torch.Tensor] = None, results_dir: str = None):
-        if mode == 'init':
-            self.total_reconstruct_loss = 0.0
-            self.total_bpp = 0.0
-            self.samples_num = 0
-            self.totall_metric_values = defaultdict(float)
-
-        elif mode == 'reset':
+        if mode == 'init' or mode == 'reset':
             self.total_reconstruct_loss = 0.0
             self.total_bpp = 0.0
             self.samples_num = 0
@@ -56,6 +50,8 @@ class PCC(nn.Module):
         elif mode == 'log':
             assert not self.training
             assert isinstance(preds, list) and isinstance(targets, list)
+
+            if preds.shape[0] != 1: raise NotImplementedError
 
             resolutions = resolutions if isinstance(resolutions, torch.Tensor) \
                 else torch.tensor([resolutions], dtype=torch.int32).expand(len(preds))
@@ -141,7 +137,8 @@ class PCC(nn.Module):
     def forward(self, x):
         ME.clear_global_coordinate_manager()
         if self.training:
-            xyz, _, _ = x
+            xyz, file_path_list, resolutions = x
+            results_dir = None
         else:
             xyz, file_path_list, resolutions, results_dir = x
         xyz = ME.SparseTensor(torch.ones(xyz.shape[0], 1, dtype=torch.float, device=xyz.device),
@@ -190,7 +187,6 @@ class PCC(nn.Module):
                     'aux_loss': aux_loss.detach().cpu().item()}
 
         else:
-            # TODO: decomposed_coordinates_and_features before compressing?
             cached_map_key = fea.coordinate_map_key
             compressed_strings = self.entropy_bottleneck_compress(fea.F * self.cfg.bottleneck_scaler)
             fea = self.entropy_bottleneck_decompress(compressed_strings, fea.shape[0])

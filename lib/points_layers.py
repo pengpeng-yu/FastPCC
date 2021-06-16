@@ -81,7 +81,7 @@ class TransformerBlock(nn.Module):
             msg.raw_neighbors_feature = \
                 msg.xyz[:, :, None, :] - index_points(msg.xyz, msg.neighbors_idx)
 
-        pos_enc = self.fc_delta(msg.raw_neighbors_feature)  # pos_enc: b, n, k, d_model TODO: pos_encoding
+        pos_enc = self.fc_delta(msg.raw_neighbors_feature)  # pos_enc: b, n, k, d_model
 
         feature = self.fc1(msg.feature)
         knn_feature = index_points(feature, msg.neighbors_idx)  # knn_feature: b, n, k, d_model

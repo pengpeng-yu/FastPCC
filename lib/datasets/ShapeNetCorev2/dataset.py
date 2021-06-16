@@ -23,7 +23,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         if cfg.data_format in ['.solid.binvox', '.surface.binvox'] or \
                 cfg.data_format == ['.solid.binvox', '.surface.binvox'] or \
                 cfg.data_format == ['.surface.binvox', '.solid.binvox']:
-            if cfg.resolution != 128:
+            if cfg.resolution != 128 and cfg.resolution != 0:
                 raise NotImplementedError
         elif cfg.data_format != '.obj':
             raise NotImplementedError
@@ -76,9 +76,9 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         try:
             if cfg.data_format == '.surface.binvox':
                 if is_training:
-                    assert len(self.file_list) == 35765 - 80 - 2  # 80 have no binvox files
+                    assert len(self.file_list) == 35765 - 80 - 1  # 80 have no binvox files
                 else:
-                    assert len(self.file_list) == 10266 - 13 - 2  # 13 has no binvox files
+                    assert len(self.file_list) == 10266 - 13  # 13 has no binvox files
             elif cfg.data_format == '.solid.binvox':
                 pass
             elif cfg.data_format == '.obj':
@@ -148,6 +148,9 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         if self.cfg.with_resolution:
             return_obj.append(self.cfg.resolution)
+
+        if self.cfg.with_ori_resolution:
+            return_obj.append(self.cfg.ori_resolution)
 
         if len(return_obj) == 1:
             return_obj = return_obj[0]

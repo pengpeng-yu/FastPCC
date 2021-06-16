@@ -4,32 +4,28 @@ model_path: models.exp4
 train:
   rundir_name: 'train_<autoindex>'
   device: '3'
-  batch_size: 4
+  batch_size: 8
   num_workers: 4
   optimizer: adam
   momentum: 0.9
   weight_decay: 0.0001
   max_grad_norm: 1.0
 
-  learning_rate: 0.001
+  learning_rate: 0.0005
   epochs: 20
 
   ckpt_frequency: 2
-  lr_step_size: 2
+  lr_step_size: 4
   lr_step_gamma: 0.5
-  resume_from_ckpt: ''
+  resume_from_ckpt: 'runs/train_0/ckpts/epoch_<maxindex>.pt'
   resume_items: ['state_dict']
   test_frequency: 2
 
   dataset_path: 'lib.datasets.ShapeNetCorev2'
   dataset:
     data_format: '.obj'
-    points_num: 200000
+    points_num: 100000
     resolution: 0
-
-
-model:
-  input_points_num: 200000
 
 
 test:

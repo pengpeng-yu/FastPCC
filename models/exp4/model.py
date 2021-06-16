@@ -53,21 +53,18 @@ class PointCompressor(nn.Module):
         self.encoder = [LFA(3, neighbor_fea_generator, 8, 16),
                         LFA(16, neighbor_fea_generator, 8, 16),
 
-                        TransitionDown(cfg.sample_method, 0.5),
+                        TransitionDown(cfg.sample_method, 0.25),
                         LFA(16, neighbor_fea_generator, 16, 32),
                         LFA(32, neighbor_fea_generator, 16, 32),
 
-                        TransitionDown(cfg.sample_method, 0.5),
+                        TransitionDown(cfg.sample_method, 0.25),
                         LFA(32, neighbor_fea_generator, 32, 64),
                         LFA(64, neighbor_fea_generator, 32, 64),
 
-                        TransitionDown(cfg.sample_method, 0.5),
+                        TransitionDown(cfg.sample_method, 0.25),
                         LFA(64, neighbor_fea_generator, 32, 64),
                         LFA(64, neighbor_fea_generator, 32, 64)]
 
-        self.encoded_points_num = int(reduce(lambda x, y: x * y,
-                                             [t.sample_rate for t in self.encoder
-                                              if isinstance(t, TransitionDown)] + [cfg.input_points_num]))
         self.encoder = nn.Sequential(*self.encoder)
         self.mlp_enc_out = nn.Sequential(MLPBlock(64, 32, activation=None, batchnorm='nn.bn1d'))
 
@@ -75,16 +72,17 @@ class PointCompressor(nn.Module):
 
         self.decoder = nn.Sequential(
             GenerativeTransitionUp(LFA(32, neighbor_fea_generator, 32, 64),
-                                   upsample_rate=2),
-            GenerativeTransitionUp(LFA(32, neighbor_fea_generator, 16, 32),
-                                   upsample_rate=2),
-            GenerativeTransitionUp(LFA(16, neighbor_fea_generator, 8, 16),
-                                   upsample_rate=2)
+                                   upsample_rate=4),
+            GenerativeTransitionUp(LFA(16, neighbor_fea_generator, 16, 32),
+                                   upsample_rate=4),
+            GenerativeTransitionUp(LFA(8, neighbor_fea_generator, 8, 16),
+                                   upsample_rate=4)
         )
 
     def forward(self, x):
         if self.training:
-            raw_xyz, _, _ = x
+            raw_xyz, file_path_list, resolutions = x
+            results_dir = None
         else:
             raw_xyz, file_path_list, resolutions, results_dir = x
         raw_fea = raw_xyz
@@ -104,7 +102,7 @@ class PointCompressor(nn.Module):
             bpp_loss = torch.log2(likelihoods).sum() * (-self.cfg.bpp_loss_factor / (fea.shape[0] * fea.shape[1]))
             reconstruct_loss = sum([chamfer_loss(p, raw_xyz) for p in msg.cached_feature])
             aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
-            loss = reconstruct_loss + bpp_loss + aux_loss
+            loss = reconstruct_loss * self.cfg.recontrcut_loss_factor + bpp_loss + aux_loss
 
             return {'aux_loss': aux_loss.detach().cpu().item(),
                     'bpp_loss': bpp_loss.detach().cpu().item(),
@@ -126,13 +124,7 @@ class PointCompressor(nn.Module):
     def log_pred_res(self, mode, preds=None, targets=None,
                      file_path_list: str = None, compressed_strings: List[bytes] = None,
                      resolutions: Union[int, torch.Tensor] = None, results_dir: str = None):
-        if mode == 'init':
-            self.total_reconstruct_loss = 0.0
-            self.total_bpp = 0.0
-            self.samples_num = 0
-            self.totall_metric_values = defaultdict(float)
-
-        elif mode == 'reset':
+        if mode == 'init' or mode == 'reset':
             self.total_reconstruct_loss = 0.0
             self.total_bpp = 0.0
             self.samples_num = 0
@@ -237,9 +229,9 @@ class PointCompressor(nn.Module):
         encoder_output = encoder_output.permute(0, 2, 1).unsqueeze(3).contiguous()
         return self.entropy_bottleneck.compress(encoder_output)
 
-    def entropy_bottleneck_decompress(self, compressed_strings, points_num):
+    def entropy_bottleneck_decompress(self, compressed_strings, fea_points_num):
         assert not self.training
-        decompressed_tensors = self.entropy_bottleneck.decompress(compressed_strings, size=(points_num, 1))
+        decompressed_tensors = self.entropy_bottleneck.decompress(compressed_strings, size=(fea_points_num, 1))
         decompressed_tensors = decompressed_tensors.squeeze(3).permute(0, 2, 1)
         return decompressed_tensors
 
@@ -252,7 +244,7 @@ def main_t():
     torch.cuda.set_device('cuda:3')
     model = PointCompressor(cfg).cuda()
     model.train()
-    batch_points = torch.rand(2, cfg.input_points_num, 3).cuda()
+    batch_points = torch.rand(2, 1024, 3).cuda()
     out = model(batch_points)
     model.entropy_bottleneck.update()
     model.eval()
