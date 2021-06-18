@@ -13,6 +13,7 @@ import torch.utils.data
 from lib import torch_utils
 from lib.config import Config
 from lib import utils
+from lib.data_utils import PCData
 
 
 def main():
@@ -112,6 +113,12 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         elif isinstance(batch_data, list) or isinstance(batch_data, tuple):
             batch_data = [d.to(device, non_blocking=True) if isinstance(d, torch.Tensor) else d for d in batch_data] \
                          + [results_dir]
+        elif isinstance(batch_data, dict):
+            batch_data = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+                          for k, v in batch_data.items()}.update({'results_dir': results_dir})
+        elif isinstance(batch_data, PCData):
+            batch_data.to(device=device, non_blocking=True)
+            batch_data.results_dir = results_dir
         else:
             raise NotImplementedError
 

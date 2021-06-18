@@ -10,6 +10,7 @@ try:
     import MinkowskiEngine as ME
 except ImportError: pass
 
+from lib.data_utils import PCData, pc_data_collate_fn
 from lib.datasets.PCGCv2Data.dataset_config import DatasetConfig
 
 
@@ -52,43 +53,16 @@ class PCGCv2Data(torch.utils.data.Dataset):
         return len(self.file_list)
 
     def __getitem__(self, index):
-        # load
         file_path = self.file_list[index]
         xyz = h5py.File(file_path)['data'][:, :3]
 
-        return_obj = {'xyz': xyz,
-                      'file_path': file_path if self.cfg.with_file_path else None}
-        return return_obj
+        return PCData(xyz=torch.from_numpy(xyz.astype(np.int32)),
+                      file_path=file_path if self.cfg.with_file_path else None,
+                      ori_resolution=128 if self.cfg.with_ori_resolution else None,
+                      resolution=self.cfg.resolution if self.cfg.with_resolution else None)
 
     def collate_fn(self, batch):
-        assert isinstance(batch, list)
-
-        has_file_path = self.cfg.with_file_path
-
-        xyz_list = []
-        file_path_list = [] if has_file_path else None
-
-        for sample in batch:
-            xyz_list.append(torch.from_numpy(sample['xyz'].astype(np.int32)))
-            if has_file_path:
-                file_path_list.append(sample['file_path'])
-
-        return_obj = []
-
-        batch_xyz = ME.utils.batched_coordinates(xyz_list)
-        return_obj.append(batch_xyz)
-
-        if has_file_path:
-            return_obj.append(file_path_list)
-
-        if self.cfg.with_resolution:
-            return_obj.append(self.cfg.resolution)
-
-        if len(return_obj) == 1:
-            return_obj = return_obj[0]
-        else:
-            return_obj = tuple(return_obj)
-        return return_obj
+        return pc_data_collate_fn(batch, sparse_collate=True)
 
 
 if __name__ == '__main__':
@@ -102,10 +76,7 @@ if __name__ == '__main__':
     sample = next(dataloader)
 
     from main_debug import plt_batch_sparse_coord
-    if config.with_file_path or config.with_resolution:
-        sample_coords = sample[0]
-    else:
-        sample_coords = sample
+    sample_coords = sample.xyz
     plt_batch_sparse_coord(sample_coords, 0, False)
     plt_batch_sparse_coord(sample_coords, 1, False)
     print('Done')

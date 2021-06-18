@@ -11,7 +11,7 @@ try:
     import MinkowskiEngine as ME
 except ImportError: pass
 
-from lib.data_utils import binvox_rw
+from lib.data_utils import binvox_rw, PCData, pc_data_collate_fn
 from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
 from lib.data_utils import o3d_coords_from_triangle_mesh, normalize_coords
 
@@ -93,7 +93,6 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         return len(self.file_list)
 
     def __getitem__(self, index):
-        # load
         file_path = self.file_list[index]
 
         if self.cfg.data_format != '.obj':
@@ -102,7 +101,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 xyz = np.ascontiguousarray(xyz)
         else:
             xyz = o3d_coords_from_triangle_mesh(file_path,
-                                                self.cfg.points_num,
+                                                self.cfg.mesh_sample_points_num,
                                                 self.cfg.mesh_sample_point_method)
 
         if self.cfg.random_rotation:
@@ -115,67 +114,29 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             xyz *= self.cfg.resolution
             xyz = ME.utils.sparse_quantize(xyz)
 
-        return_obj = {'xyz': xyz,
-                      'file_path': file_path if self.cfg.with_file_path else None}
-        return return_obj
+        return PCData(xyz=xyz if isinstance(xyz, torch.Tensor) else torch.from_numpy(xyz),
+                      file_path=file_path if self.cfg.with_file_path else None,
+                      ori_resolution=None if not self.cfg.with_ori_resolution or self.cfg.data_format == '.obj' else 128,
+                      resolution=self.cfg.resolution if self.cfg.with_resolution else None)
 
     def collate_fn(self, batch):
-        assert isinstance(batch, list)
-
-        has_file_path = self.cfg.with_file_path
-
-        xyz_list = []
-        file_path_list = [] if has_file_path else None
-
-        for sample in batch:
-            if isinstance(sample['xyz'], torch.Tensor):
-                xyz_list.append(sample['xyz'])
-            else:
-                xyz_list.append(torch.from_numpy(sample['xyz']))
-            if has_file_path:
-                file_path_list.append(sample['file_path'])
-
-        return_obj = []
-
-        if self.cfg.resolution != 0:
-            batch_xyz = ME.utils.batched_coordinates(xyz_list)
-        else:
-            batch_xyz = torch.stack(xyz_list, dim=0)
-        return_obj.append(batch_xyz)
-
-        if has_file_path:
-            return_obj.append(file_path_list)
-
-        if self.cfg.with_resolution:
-            return_obj.append(self.cfg.resolution)
-
-        if self.cfg.with_ori_resolution:
-            return_obj.append(self.cfg.ori_resolution)
-
-        if len(return_obj) == 1:
-            return_obj = return_obj[0]
-        else:
-            return_obj = tuple(return_obj)
-        return return_obj
+        return pc_data_collate_fn(batch, sparse_collate=self.cfg.resolution != 0)
 
 
 if __name__ == '__main__':
     config = DatasetConfig()
-    config.data_format = '.obj'
-    config.points_num = 5000000
+    # config.data_format = '.obj'
+    config.mesh_sample_points_num = 5000000
 
     from loguru import logger
     dataset = ShapeNetCorev2(config, True, logger)
 
     dataloader = torch.utils.data.DataLoader(dataset, 4, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
-    sample = next(dataloader)
+    sample: PCData = next(dataloader)
 
     from main_debug import plt_batch_sparse_coord
-    if config.with_file_path or config.with_resolution:
-        sample_coords = sample[0]
-    else:
-        sample_coords = sample
+    sample_coords = sample.xyz
     plt_batch_sparse_coord(sample_coords, 0, False)
     plt_batch_sparse_coord(sample_coords, 1, False)
     print('Done')

@@ -15,12 +15,11 @@ class DatasetConfig(SimpleConfig):
     # '.obj' or '.solid.binvox' or '.surface.binvox' or ['.solid.binvox', '.surface.binvox']
     data_format: Union[str, Tuple[str]] = '.surface.binvox'
 
-    points_num: int = 0
+    mesh_sample_points_num: int = 0
     mesh_sample_point_method: str = 'uniform'
     random_rotation: bool = True
 
-    ori_resolution: int = 128
     resolution: int = 128
-    with_file_path: bool = True
-    with_resolution: bool = True
+    with_file_path: bool = False
+    with_resolution: bool = False
     with_ori_resolution: bool = False

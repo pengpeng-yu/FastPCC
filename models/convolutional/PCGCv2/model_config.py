@@ -13,6 +13,8 @@ class ModelConfig(SimpleConfig):
     reconstruct_loss_factor: float = 1.0
     dist_upper_bound = 2.0
     aux_loss_factor: float = 10.0
+    bottleneck: str = 'DeepFactorized'
+    balance_loss_factor: float = 1.0
 
     # only for test phase:
     chamfer_dist_test_phase: bool = False

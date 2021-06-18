@@ -1,6 +1,9 @@
+import math
 import os
 from collections import defaultdict
 from typing import Union, List
+
+import numpy as np
 import open3d as o3d
 import torch
 import torch.nn as nn
@@ -9,6 +12,7 @@ import MinkowskiEngine as ME
 from compressai.entropy_models import EntropyBottleneck
 from compressai.models.utils import update_registered_buffers
 
+from lib.data_utils import PCData
 from lib.metric import mpeg_pc_error
 from lib.loss_function import chamfer_loss
 from lib.sparse_conv_layers import GenerativeUpsampleMessage
@@ -34,13 +38,19 @@ class PCC(nn.Module):
                                                                 loss_type=cfg.reconstruct_loss_type,
                                                                 dist_upper_bound=cfg.dist_upper_bound,
                                                                 is_last_layer=True))
-        self.entropy_bottleneck = EntropyBottleneck(cfg.compressed_channels)
+
+        if cfg.bottleneck not in ['DeepFactorized', 'BinaryClassification']:
+            raise NotImplementedError
+        if cfg.bottleneck == 'DeepFactorized':
+            self.entropy_bottleneck = EntropyBottleneck(cfg.compressed_channels)
         self.cfg = cfg
         self.log_pred_res('init')
+        self.init_parameters()
 
     def log_pred_res(self, mode, preds=None, targets=None,
-                     file_path_list: str = None, compressed_strings: List[bytes] = None,
-                     fea_points_num: int = None, resolutions: Union[int, torch.Tensor] = None, results_dir: str = None):
+                     compressed_strings: List[bytes] = None,
+                     fea_points_num: int = None,
+                     pc_data: PCData = None):
         if mode == 'init' or mode == 'reset':
             self.total_reconstruct_loss = 0.0
             self.total_bpp = 0.0
@@ -51,14 +61,10 @@ class PCC(nn.Module):
             assert not self.training
             assert isinstance(preds, list) and isinstance(targets, list)
 
-            if preds.shape[0] != 1: raise NotImplementedError
+            if len(preds) != 1: raise NotImplementedError
 
-            resolutions = resolutions if isinstance(resolutions, torch.Tensor) \
-                else torch.tensor([resolutions], dtype=torch.int32).expand(len(preds))
-
-            for pred, target, file_path, resolution \
-                    in zip(preds, targets, file_path_list, resolutions):
-                resolution = resolution.item()
+            for pred, target, file_path, ori_resolution, resolution \
+                    in zip(preds, targets, pc_data.file_path, pc_data.ori_resolution, pc_data.resolution):
                 com_string = compressed_strings[0]
 
                 if self.cfg.chamfer_dist_test_phase is True:
@@ -69,8 +75,8 @@ class PCC(nn.Module):
                 bpp = len(com_string) * 8 / target.shape[0]
                 self.total_bpp += bpp
 
-                if results_dir is not None:
-                    out_file_path = os.path.join(results_dir, os.path.splitext(file_path)[0])
+                if hasattr(pc_data, 'results_dir'):
+                    out_file_path = os.path.join(pc_data.results_dir, os.path.splitext(file_path)[0])
                     os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
                     compressed_path = out_file_path + '.txt'
                     fileinfo_path = out_file_path + '_info.txt'
@@ -134,84 +140,103 @@ class PCC(nn.Module):
         else:
             raise NotImplementedError
 
-    def forward(self, x):
+    def forward(self, pc_data: PCData):
         ME.clear_global_coordinate_manager()
-        if self.training:
-            xyz, file_path_list, resolutions = x
-            results_dir = None
-        else:
-            xyz, file_path_list, resolutions, results_dir = x
-        xyz = ME.SparseTensor(torch.ones(xyz.shape[0], 1, dtype=torch.float, device=xyz.device),
-                              xyz)
+        xyz = ME.SparseTensor(torch.ones(pc_data.xyz.shape[0], 1, dtype=torch.float, device=pc_data.xyz.device),
+                              pc_data.xyz)
         fea, points_num_list = self.encoder(xyz)
         if not self.cfg.adaptive_pruning: points_num_list = None
 
+        # bottleneck, decoder and loss in training
         if self.training:
-            # TODO: scaler?
-            fea_tilde, likelihood = self.entropy_bottleneck(fea.F.T.unsqueeze(0) * self.cfg.bottleneck_scaler)
-            fea_tilde = fea_tilde / self.cfg.bottleneck_scaler
-            fea_tilde = ME.SparseTensor(fea_tilde.squeeze(0).T,
-                                        coordinate_map_key=fea.coordinate_map_key,
-                                        coordinate_manager=ME.global_coordinate_manager())
+            if self.cfg.bottleneck == 'DeepFactorized':
+                # TODO: scaler?
+                fea_tilde, likelihood = self.entropy_bottleneck(fea.F.T.unsqueeze(0) * self.cfg.bottleneck_scaler)
+                fea_tilde = fea_tilde / self.cfg.bottleneck_scaler
+                fea_tilde = ME.SparseTensor(fea_tilde.squeeze(0).T,
+                                            coordinate_map_key=fea.coordinate_map_key,
+                                            coordinate_manager=ME.global_coordinate_manager())
+
+            elif self.cfg.bottleneck == 'BinaryClassification':
+                with torch.no_grad():
+                    quantize_diff = torch.round(torch.clip(fea.F, 0, 1)) - fea.F
+                fea_tilde = ME.SparseTensor(fea.F + quantize_diff,
+                                            coordinate_map_key=fea.coordinate_map_key,
+                                            coordinate_manager=ME.global_coordinate_manager())
+                likelihood = None
+
+            else: raise NotImplementedError
 
             message: GenerativeUpsampleMessage = \
                 self.decoder(GenerativeUpsampleMessage(fea=fea_tilde,
                                                        target_key=xyz.coordinate_map_key,
                                                        points_num_list=points_num_list))
-            cached_pred = message.cached_pred
-            cached_target = message.cached_target
 
-            bpp_loss = torch.log2(likelihood).sum() * (
-                    -self.cfg.bpp_loss_factor / xyz.shape[0])
+            reconstruct_loss = self.get_reconstruct_loss(message.cached_pred, message.cached_target)
 
-            if self.cfg.reconstruct_loss_type == 'BCE':
-                reconstruct_loss = sum([nn.functional.binary_cross_entropy_with_logits(pred.F.squeeze(),
-                                                                                       target.type(pred.F.dtype))
-                                        for pred, target in zip(cached_pred, cached_target)])
-                reconstruct_loss /= len(cached_pred)
-            elif self.cfg.reconstruct_loss_type == 'Dist':
-                reconstruct_loss = sum([nn.functional.smooth_l1_loss(pred.F.squeeze(),
-                                                                     target.type(pred.F.dtype))
-                                        for pred, target in zip(cached_pred, cached_target)])
-                reconstruct_loss /= len(cached_pred)
-            else: raise NotImplementedError
-            if self.cfg.reconstruct_loss_factor != 1:
-                reconstruct_loss *= self.cfg.reconstruct_loss_factor
+            if self.cfg.bottleneck == 'DeepFactorized':
+                bpp_loss = torch.log2(likelihood).sum() * (
+                        -self.cfg.bpp_loss_factor / xyz.shape[0])
 
-            aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
-            loss = bpp_loss + reconstruct_loss + aux_loss
+                aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
 
-            return {'loss': loss,
-                    'bpp_loss': bpp_loss.detach().cpu().item(),
-                    'reconstruct_loss': reconstruct_loss.detach().cpu().item(),
-                    'aux_loss': aux_loss.detach().cpu().item()}
+                loss = bpp_loss + reconstruct_loss + aux_loss
 
-        else:
+                return {'loss': loss,
+                        'bpp_loss': bpp_loss.detach().cpu().item(),
+                        'reconstruct_loss': reconstruct_loss.detach().cpu().item(),
+                        'aux_loss': aux_loss.detach().cpu().item()}
+
+            elif self.cfg.bottleneck == 'BinaryClassification':
+                balance_loss = fea_tilde.F.mean() * self.cfg.balance_loss_factor
+                loss = balance_loss + reconstruct_loss
+                return {'loss': loss,
+                        'balance_loss': balance_loss.detach().cpu().item(),
+                        'reconstruct_loss': reconstruct_loss.detach().cpu().item()}
+
+        # bottleneck, decoder and metric in testing
+        elif not self.training:
             cached_map_key = fea.coordinate_map_key
-            compressed_strings = self.entropy_bottleneck_compress(fea.F * self.cfg.bottleneck_scaler)
-            fea = self.entropy_bottleneck_decompress(compressed_strings, fea.shape[0])
-            fea = ME.SparseTensor(fea / self.cfg.bottleneck_scaler,
-                                  coordinate_map_key=cached_map_key,
-                                  coordinate_manager=ME.global_coordinate_manager())
+
+            if self.cfg.bottleneck == 'DeepFactorized':
+                compressed_strings = self.entropy_bottleneck_compress(fea.F * self.cfg.bottleneck_scaler)
+                fea = self.entropy_bottleneck_decompress(compressed_strings, fea.shape[0])
+                fea = ME.SparseTensor(fea / self.cfg.bottleneck_scaler,
+                                      coordinate_map_key=cached_map_key,
+                                      coordinate_manager=ME.global_coordinate_manager())
+
+            elif self.cfg.bottleneck == 'BinaryClassification':
+                fea = ME.SparseTensor(torch.round(torch.clip(fea.F, 0, 1)),
+                                      coordinate_map_key=cached_map_key,
+                                      coordinate_manager=ME.global_coordinate_manager())
+                ones_num = int(fea.F.sum().item())
+                compressed_bits = self.entropy(ones_num, fea.F.numel() - ones_num)
+                compressed_strings = [b'a' * math.ceil(compressed_bits / 8)]  # TODO: entropy encoder
+
+            else: raise NotImplementedError
+
             cached_pred = \
                 self.decoder(GenerativeUpsampleMessage(fea=fea,
                                                        points_num_list=points_num_list)).cached_pred
 
             decoder_output = cached_pred[-1].decomposed_coordinates
-            items_to_save = self.log_pred_res('log', decoder_output, xyz.decomposed_coordinates,
-                                              file_path_list, compressed_strings, fea.shape[0],
-                                              resolutions, results_dir)
+            items_to_save = self.log_pred_res('log', preds=decoder_output,
+                                              targets=xyz.decomposed_coordinates,
+                                              compressed_strings=compressed_strings,
+                                              fea_points_num=fea.shape[0],
+                                              pc_data=pc_data)
 
             return items_to_save
 
     def load_state_dict(self, state_dict, strict: bool = True):
         # Dynamically update the entropy bottleneck buffers related to the CDFs
-        update_registered_buffers(
-            self.entropy_bottleneck,
-            "entropy_bottleneck",
-            ["_quantized_cdf", "_offset", "_cdf_length"],
-            state_dict,
-        )
+        if self.cfg.bottleneck == 'DeepFactorized':
+            update_registered_buffers(
+                self.entropy_bottleneck,
+                "entropy_bottleneck",
+                ["_quantized_cdf", "_offset", "_cdf_length"],
+                state_dict,
+            )
         super().load_state_dict(state_dict, strict=strict)
 
     def entropy_bottleneck_compress(self, encoder_output):
@@ -224,6 +249,38 @@ class PCC(nn.Module):
         decompressed_tensors = self.entropy_bottleneck.decompress(compressed_strings, size=(points_num, 1))
         decompressed_tensors = decompressed_tensors.squeeze().T
         return decompressed_tensors
+
+    def get_reconstruct_loss(self, cached_pred, cached_target):
+        if self.cfg.reconstruct_loss_type == 'BCE':
+            reconstruct_loss = sum([nn.functional.binary_cross_entropy_with_logits(pred.F.squeeze(),
+                                                                                   target.type(pred.F.dtype))
+                                    for pred, target in zip(cached_pred, cached_target)])
+            reconstruct_loss /= len(cached_pred)
+        elif self.cfg.reconstruct_loss_type == 'Dist':
+            reconstruct_loss = sum([nn.functional.smooth_l1_loss(pred.F.squeeze(),
+                                                                 target.type(pred.F.dtype))
+                                    for pred, target in zip(cached_pred, cached_target)])
+            reconstruct_loss /= len(cached_pred)
+        else:
+            raise NotImplementedError
+        if self.cfg.reconstruct_loss_factor != 1:
+            reconstruct_loss *= self.cfg.reconstruct_loss_factor
+
+        return reconstruct_loss
+
+    def init_parameters(self):
+        pass
+        # for m in self.modules():
+        #     if isinstance(m, (ME.MinkowskiConvolution, ME.MinkowskiGenerativeConvolutionTranspose)):
+        #         torch.nn.init.uniform_(m.kernel, -0.35, 0.35)
+        #         torch.nn.init.zeros_(m.bias)
+
+    @staticmethod
+    def entropy(*num_list: int) -> float:
+        num_list = np.array(num_list)
+        num_list_non_zero = num_list[num_list.nonzero()]
+        freq_list = num_list_non_zero / num_list_non_zero.sum()
+        return ((-freq_list * np.log2(freq_list)).sum() * num_list.sum()).item()
 
 
 def main_debug():
@@ -255,6 +312,7 @@ def main_debug():
 def model_debug():
     cfg = ModelConfig()
     cfg.resolution = 128
+    cfg.bottleneck = 'BinaryClassification'
     model = PCC(cfg)
     xyz_c = [ME.utils.sparse_quantize(torch.randint(-128, 128, (100, 3))) for _ in range(16)]
     xyz_f = [torch.ones((_.shape[0], 1), dtype=torch.float32) for _ in xyz_c]
@@ -262,8 +320,9 @@ def model_debug():
     out = model((xyz[0], [''], 0))
     out['loss'].backward()
     model.eval()
-    model.entropy_bottleneck.update()
-    test_out = model((xyz[0], [''], 0, None))
+    if hasattr(model, 'entropy_bottleneck'):
+        model.entropy_bottleneck.update()
+    test_out = model((xyz[0][xyz[0][:, 0] == 0, :], [''], 0, None))
     print('Done')
 
 

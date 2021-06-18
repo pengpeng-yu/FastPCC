@@ -1,7 +1,69 @@
 import os
+from collections import defaultdict
+from typing import Tuple, List, Optional, Union
+
 import numpy as np
 import open3d as o3d
 import torch
+try:
+    import MinkowskiEngine as ME
+except ImportError: pass
+
+
+class PCData:
+    def __init__(self, xyz: torch.Tensor,
+                 colors: Optional[torch.Tensor] = None,
+                 normals: Optional[torch.Tensor] = None,
+                 class_idx: Optional[Union[int, torch.Tensor]] = None,
+                 ori_resolution: Optional[Union[int, List[int]]] = None,
+                 resolution: Optional[Union[int, List[int]]] = None,
+                 file_path: Optional[Union[str, List[str]]] = None):
+        super(PCData, self).__init__()
+        self.xyz = xyz
+        self.colors = colors
+        self.normals = normals
+        self.ori_resolution = ori_resolution
+        self.resolution = resolution
+        self.file_path = file_path
+        self.class_idx = class_idx
+
+    def to(self, device, non_blocking=False):
+        for key, value in self.__dict__.items():
+            if isinstance(value, torch.Tensor):
+                self.__dict__[key] = value.to(device, non_blocking=non_blocking)
+
+
+def pc_data_collate_fn(pc_data_list: List[PCData],
+                       sparse_collate: bool) -> PCData:
+    pc_data_dict = defaultdict(list)
+    for pc_data in pc_data_list:
+        for key, value in pc_data.__dict__.items():
+            if value is not None:
+                pc_data_dict[key].append(value)
+            else:
+                pc_data_dict[key] = [None]
+
+    batched_pc_data_dict = {}
+    for key, value in pc_data_dict.items():
+        if value[0] is None:
+            batched_pc_data_dict[key] = None
+
+        elif key in ('xyz', 'colors', 'normals'):
+            if not sparse_collate:
+                batched_pc_data_dict[key] = torch.stack(value, dim=0)
+            else:
+                if key == 'xyz':
+                    batched_pc_data_dict[key] = ME.utils.batched_coordinates(value)
+                else:
+                    batched_pc_data_dict[key] = torch.cat(value, dim=0)
+
+        elif key in ('class_idx',):
+            batched_pc_data_dict[key] = torch.tensor(value)
+
+        else:
+            batched_pc_data_dict[key] = value
+
+    return PCData(**batched_pc_data_dict)
 
 
 class OFFIO:

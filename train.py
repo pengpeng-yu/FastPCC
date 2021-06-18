@@ -21,6 +21,7 @@ from test import test
 from lib.config import Config
 from lib import utils
 from lib import torch_utils
+from lib.data_utils import PCData
 
 
 def main():
@@ -243,7 +244,13 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             if isinstance(batch_data, torch.Tensor):
                 batch_data = batch_data.to(device, non_blocking=True)
             elif isinstance(batch_data, list) or isinstance(batch_data, tuple):
-                batch_data = [d.to(device, non_blocking=True) if isinstance(d, torch.Tensor) else d for d in batch_data]
+                batch_data = [d.to(device, non_blocking=True) if isinstance(d, torch.Tensor) else d
+                              for d in batch_data]
+            elif isinstance(batch_data, dict):
+                batch_data = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+                              for k, v in batch_data.items()}
+            elif isinstance(batch_data, PCData):
+                batch_data.to(device=device, non_blocking=True)
             else: raise NotImplementedError
 
             if cfg.train.amp:
@@ -305,13 +312,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         if local_rank in (-1, 0):
             tb_writer.add_scalar('Train/Epochs', epoch, global_step - 1)
 
-        # Model test
-        torch.cuda.empty_cache()
-        if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and (epoch + 1) % cfg.train.test_frequency == 0:
-            test_items = test(cfg, logger, run_dir, model)
-            for item_name, item in test_items.items():
-                tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
-
         # Save checkpoints
         if local_rank in (-1, 0) and (epoch + 1) % cfg.train.ckpt_frequency == 0:
             ckpt_name = 'epoch_{}.pt'.format(epoch)
@@ -322,6 +322,13 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             }
             torch.save(ckpt, ckpts_dir / ckpt_name)
             del ckpt
+
+        # Model test
+        torch.cuda.empty_cache()
+        if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and (epoch + 1) % cfg.train.test_frequency == 0:
+            test_items = test(cfg, logger, run_dir, model)
+            for item_name, item in test_items.items():
+                tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
 
         torch.cuda.empty_cache()
 

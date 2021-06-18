@@ -11,6 +11,7 @@ try:
 except ImportError:
     pass
 
+from lib.data_utils import PCData, pc_data_collate_fn
 from lib.datasets.PlyVoxel.dataset_config import DatasetConfig
 
 
@@ -92,84 +93,15 @@ class PlyVoxel(torch.utils.data.Dataset):
         else:
             normal = None
 
-        if self.cfg.with_file_path:
-            rel_file_path = file_path
-        else:
-            rel_file_path = None
-
-        return {'xyz': xyz,
-                'color': color,
-                'normal': normal,
-                'file_path': rel_file_path,
-                'resolution': self.file_resolutions[index] if self.cfg.with_resolution else None,
-                'ori_resolution': self.file_ori_resolutions[index] if self.cfg.with_ori_resolution else None}
+        return PCData(xyz=xyz if isinstance(xyz, torch.Tensor) else torch.from_numpy(xyz),
+                      colors=color,
+                      normals=normal,
+                      file_path=file_path if self.cfg.with_file_path else None,
+                      ori_resolution=self.file_ori_resolutions[index] if self.cfg.with_ori_resolution else None,
+                      resolution=self.file_resolutions[index] if self.cfg.with_resolution else None)
 
     def collate_fn(self, batch):
-        assert isinstance(batch, list)
-
-        has_file_path = self.cfg.with_file_path
-        has_normal = self.cfg.with_normal
-        has_color = self.cfg.with_color
-        has_resolution = self.cfg.with_resolution
-        has_ori_resolution = self.cfg.with_ori_resolution
-
-        xyz_list = []
-        file_path_list = []
-        normal_list = []
-        color_list = []
-        resolution_list = []
-        ori_resolution_list = []
-
-        for sample in batch:
-            if isinstance(sample['xyz'], np.ndarray):
-                xyz_list.append(torch.from_numpy(sample['xyz']))
-            else:
-                xyz_list.append(sample['xyz'])
-            if has_file_path:
-                file_path_list.append(sample['file_path'])
-            if has_normal:
-                normal_list.append(sample['normal'])
-            if has_color:
-                color_list.append(sample['color'])
-            if has_resolution:
-                resolution_list.append(sample['resolution'])
-            if has_ori_resolution:
-                ori_resolution_list.append(sample['ori_resolution'])
-
-        return_obj = []
-
-        if self.voxelized:
-            batch_xyz = ME.utils.batched_coordinates(xyz_list)
-        else:
-            batch_xyz = torch.stack(xyz_list, dim=0)
-        return_obj.append(batch_xyz)
-
-        if has_normal:
-            if self.voxelized:
-                return_obj.append(torch.cat(normal_list, dim=0))
-            else:
-                return_obj.append(torch.stack(normal_list, dim=0))
-
-        if has_color:
-            if self.voxelized:
-                return_obj.append(torch.cat(color_list, dim=0))
-            else:
-                return_obj.append(torch.stack(color_list, dim=0))
-
-        if has_file_path:
-            return_obj.append(file_path_list)
-
-        if has_resolution:
-            return_obj.append(torch.tensor(resolution_list, dtype=torch.int32))
-
-        if has_ori_resolution:
-            return_obj.append(torch.tensor(ori_resolution_list, dtype=torch.int32))
-
-        if len(return_obj) == 1:
-            return_obj = return_obj[0]
-        else:
-            return_obj = tuple(return_obj)
-        return return_obj
+        return pc_data_collate_fn(batch, sparse_collate=self.voxelized)
 
 
 if __name__ == '__main__':
@@ -184,14 +116,11 @@ if __name__ == '__main__':
 
     dataloader = torch.utils.data.DataLoader(dataset, 4, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
-    sample = next(dataloader)
+    sample: PCData = next(dataloader)
 
     from main_debug import plt_batch_sparse_coord
 
-    if config.with_color or config.with_normal or config.with_file_path:
-        sample_coords = sample[0]
-    else:
-        sample_coords = sample
+    sample_coords = sample.xyz
     plt_batch_sparse_coord(sample_coords, 0, False)
     plt_batch_sparse_coord(sample_coords, 1, False)
     print('Done')

@@ -11,6 +11,7 @@ try:
     import MinkowskiEngine as ME
 except ImportError: pass
 
+from lib.data_utils import PCData, pc_data_collate_fn
 from lib.datasets.ModelNet.dataset_config import DatasetConfig
 from lib.data_utils import OFFIO, o3d_coords_from_triangle_mesh, normalize_coords
 
@@ -168,10 +169,11 @@ class ModelNetDataset(torch.utils.data.Dataset):
             cls_idx = None
 
         # cache and return
-        return_obj = {'xyz': xyz,
-                      'normals': normals,
-                      'class_index': cls_idx,
-                      'file_path': file_path if self.cfg.with_file_path else None}
+        return_obj = PCData(xyz=xyz,
+                            normals=normals,
+                            class_idx=cls_idx,
+                            file_path=file_path if self.cfg.with_file_path else None,
+                            resolution=self.cfg.resolution if self.cfg.with_resolution else None)
 
         if self.gen_cache is True:
             cache_file_path = file_path.replace(self.cfg.root, self.cache_root, 1).replace('.off', '.pt')
@@ -183,63 +185,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
         return return_obj
 
     def collate_fn(self, batch):
-        assert isinstance(batch, list)
-
-        has_normals = self.cfg.with_normal_channel
-        has_class_index = self.cfg.with_classes
-        has_file_path = self.cfg.with_file_path
-
-        xyz_list = []
-        normals_list = [] if has_normals else None
-        class_index_list = [] if has_class_index else None
-        file_path_list = [] if has_file_path else None
-
-        for sample in batch:
-            if isinstance(sample['xyz'], torch.Tensor):
-                xyz_list.append(sample['xyz'])
-            else:
-                xyz_list.append(torch.from_numpy(sample['xyz']))
-            if has_normals:
-                if isinstance(sample['normals'], torch.Tensor):
-                    normals_list.append(sample['normals'])
-                else:
-                    normals_list.append(torch.from_numpy(sample['normals']))
-            if has_class_index:
-                class_index_list.append(sample['class_index'])
-            if has_file_path:
-                file_path_list.append(sample['file_path'])
-
-        return_obj = []
-
-        if self.cfg.resolution == 0:
-            batch_xyz = torch.stack(xyz_list, dim=0)
-            return_obj.append(batch_xyz)
-            if has_normals:
-                batch_normals = torch.stack(normals_list, dim=0)
-                return_obj.append(batch_normals)
-
-        else:
-            if has_normals:
-                batch_xyz, batch_normals = ME.utils.sparse_collate(xyz_list, normals_list)
-                return_obj.extend((batch_xyz, batch_normals))
-            else:
-                batch_xyz = ME.utils.batched_coordinates(xyz_list)
-                return_obj.append(batch_xyz)
-
-        if has_class_index:
-            return_obj.append(torch.tensor(class_index_list))
-
-        if has_file_path:
-            return_obj.append(file_path_list)
-
-        if self.cfg.with_resolution:
-            return_obj.append(self.cfg.resolution)
-
-        if len(return_obj) == 1:
-            return_obj = return_obj[0]
-        else:
-            return_obj = tuple(return_obj)
-        return return_obj
+        return pc_data_collate_fn(batch, sparse_collate=self.cfg.resolution != 0)
 
 
 if __name__ == '__main__':
@@ -256,13 +202,10 @@ if __name__ == '__main__':
 
     dataloader = torch.utils.data.DataLoader(dataset, 16, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
-    sample = next(dataloader)
+    sample: PCData = next(dataloader)
 
     from main_debug import plt_draw, plt_batch_sparse_coord
-    if config.with_classes or config.with_normal_channel:
-        sample_coords = sample[0]
-    else:
-        sample_coords = sample
+    sample_coords = sample.xyz
     if config.resolution == 0:
         plt_draw(sample_coords[0])
         plt_draw(sample_coords[1])

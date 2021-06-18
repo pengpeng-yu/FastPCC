@@ -34,4 +34,4 @@ class DatasetConfig(SimpleConfig):
 
     # for ME sparse tensor. 0 means no quantization (use points as model input).
     resolution: int = 0
-    with_resolution: bool = True
+    with_resolution: bool = False
