@@ -4,7 +4,7 @@ model_path: models.exp4
 train:
   rundir_name: 'train_<autoindex>'
   device: '3'
-  batch_size: 8
+  batch_size: 16
   num_workers: 4
   optimizer: adam
   momentum: 0.9
@@ -24,7 +24,7 @@ train:
   dataset_path: 'lib.datasets.ShapeNetCorev2'
   dataset:
     data_format: '.obj'
-    points_num: 100000
+    points_num: 50000
     resolution: 0
 
 

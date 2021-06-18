@@ -22,7 +22,7 @@ class GenerativeTransitionUp(nn.Module):
     def __init__(self, lfa: LFA, upsample_rate: int = 2,):
         super(GenerativeTransitionUp, self).__init__()
         self.lfa = lfa
-        self.mlp_pred = MLPBlock(lfa.out_channels // upsample_rate, 3)
+        self.mlp_pred = MLPBlock(lfa.out_channels // upsample_rate, 3, activation=None, batchnorm='nn.bn1d')
         self.upsample_rate = upsample_rate
 
     def forward(self, msg: PointLayerMessage):
@@ -100,9 +100,10 @@ class PointCompressor(nn.Module):
             msg = self.decoder(PointLayerMessage(xyz=msg.xyz, feature=fea))
 
             bpp_loss = torch.log2(likelihoods).sum() * (-self.cfg.bpp_loss_factor / (fea.shape[0] * fea.shape[1]))
-            reconstruct_loss = sum([chamfer_loss(p, raw_xyz) for p in msg.cached_feature])
+            reconstruct_loss = sum([chamfer_loss(p, raw_xyz) for p in msg.cached_feature]) \
+                * self.cfg.recontrcut_loss_factor
             aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
-            loss = reconstruct_loss * self.cfg.recontrcut_loss_factor + bpp_loss + aux_loss
+            loss = reconstruct_loss + bpp_loss + aux_loss
 
             return {'aux_loss': aux_loss.detach().cpu().item(),
                     'bpp_loss': bpp_loss.detach().cpu().item(),
@@ -245,10 +246,10 @@ def main_t():
     model = PointCompressor(cfg).cuda()
     model.train()
     batch_points = torch.rand(2, 1024, 3).cuda()
-    out = model(batch_points)
+    out = model((batch_points, [''], 0))
     model.entropy_bottleneck.update()
     model.eval()
-    test_out = model(batch_points)
+    test_out = model((batch_points, [''], 0, None))
 
     macs, params = profile(model, inputs=(batch_points,))
     macs, params = clever_format([macs, params], "%.3f")
