@@ -223,7 +223,7 @@ class PointCompressor(nn.Module):
             ["_quantized_cdf", "_offset", "_cdf_length"],
             state_dict,
         )
-        super().load_state_dict(state_dict, strict=strict)
+        return super().load_state_dict(state_dict, strict=strict)
 
     def entropy_bottleneck_compress(self, encoder_output):
         assert not self.training

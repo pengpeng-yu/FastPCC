@@ -82,7 +82,10 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         model = Model(cfg.model)
         ckpt_path = utils.autoindex_obj(cfg.test.weights_from_ckpt)
         logger.info(f'loading weights from {ckpt_path}')
-        model.load_state_dict(torch.load(ckpt_path, map_location=torch.device('cpu'))['state_dict'])
+        incompatible_keys = model.load_state_dict(
+            torch.load(ckpt_path, map_location=torch.device('cpu'))['state_dict'])
+        if incompatible_keys[0] != [] or incompatible_keys[1] != []:
+            logger.warning(incompatible_keys)
         device = torch.device(cfg.test.device if cfg.test.device == 'cpu' or cfg.test.device.startswith('cuda')
                               else f'cuda:{cfg.test.device}')
 

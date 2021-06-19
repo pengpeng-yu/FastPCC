@@ -203,12 +203,14 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         if 'state_dict' in cfg.train.resume_items:
             try:
                 if torch_utils.is_parallel(model):
-                    model.module.load_state_dict(ckpt['state_dict'])
-                else: model.load_state_dict(ckpt['state_dict'])
-            except Exception as e:
+                    incompatible_keys = model.module.load_state_dict(ckpt['state_dict'], strict=False)
+                else: incompatible_keys = model.load_state_dict(ckpt['state_dict'], strict=False)
+            except RuntimeError as e:
                 logger.error('error when loading model_state_dict')
                 raise e
-            logger.info('resuming model_state_dict from checkpoint "{}"'.format(cfg.train.resume_from_ckpt))
+            logger.info('resumed model_state_dict from checkpoint "{}"'.format(cfg.train.resume_from_ckpt))
+            if incompatible_keys[0] != [] or incompatible_keys[1] != []:
+                logger.warning(incompatible_keys)
 
         if 'start_epoch' in cfg.train.resume_items:
             start_epoch = ckpt['scheduler_state_dict']['last_epoch']
