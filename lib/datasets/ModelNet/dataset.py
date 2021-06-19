@@ -204,12 +204,12 @@ if __name__ == '__main__':
     dataloader = iter(dataloader)
     sample: PCData = next(dataloader)
 
-    from main_debug import plt_draw, plt_batch_sparse_coord
-    sample_coords = sample.xyz
+    from lib.vis import plt_draw_xyz, plt_batched_sparse_xyz
+    batched_xyz = sample.xyz
     if config.resolution == 0:
-        plt_draw(sample_coords[0])
-        plt_draw(sample_coords[1])
+        plt_draw_xyz(batched_xyz[0])
+        plt_draw_xyz(batched_xyz[1])
     else:
-        plt_batch_sparse_coord(sample_coords, 0, True)
-        plt_batch_sparse_coord(sample_coords, 1, True)
+        plt_batched_sparse_xyz(batched_xyz, 0, True)
+        plt_batched_sparse_xyz(batched_xyz, 1, True)
     print('Done')

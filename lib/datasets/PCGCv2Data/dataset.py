@@ -75,8 +75,9 @@ if __name__ == '__main__':
     dataloader = iter(dataloader)
     sample = next(dataloader)
 
-    from main_debug import plt_batch_sparse_coord
+    from lib.vis import plt_batched_sparse_xyz
+
     sample_coords = sample.xyz
-    plt_batch_sparse_coord(sample_coords, 0, False)
-    plt_batch_sparse_coord(sample_coords, 1, False)
+    plt_batched_sparse_xyz(sample_coords, 0, False)
+    plt_batched_sparse_xyz(sample_coords, 1, False)
     print('Done')
