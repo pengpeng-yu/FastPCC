@@ -15,6 +15,8 @@ class ModelConfig(SimpleConfig):
     aux_loss_factor: float = 10.0
     bottleneck: str = 'DeepFactorized'
     balance_loss_factor: float = 1.0
+    pred_fea_point_coords: bool = False
+    coords_loss_factor: float = 1.0
 
     # only for test phase:
     chamfer_dist_test_phase: bool = False

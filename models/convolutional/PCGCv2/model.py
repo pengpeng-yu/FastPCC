@@ -12,6 +12,7 @@ import MinkowskiEngine as ME
 from compressai.entropy_models import EntropyBottleneck
 from compressai.models.utils import update_registered_buffers
 
+from lib.torch_utils import MLPBlock
 from lib.data_utils import PCData
 from lib.metric import mpeg_pc_error
 from lib.loss_function import chamfer_loss
@@ -27,6 +28,13 @@ class PCC(nn.Module):
         self.encoder = Encoder(cfg.compressed_channels,
                                res_blocks_num=3,
                                res_block_type=cfg.res_block_type)
+
+        if cfg.pred_fea_point_coords:
+            self.mlp_fea_point_coords = MLPBlock(cfg.compressed_channels, 3,
+                                                 activation='relu', batchnorm='nn.bn1d')
+        else:
+            self.mlp_fea_point_coords = None
+
         self.decoder = self.layers = nn.Sequential(DecoderBlock(cfg.compressed_channels,
                                                                 64, 3, cfg.res_block_type,
                                                                 loss_type=cfg.reconstruct_loss_type,
@@ -82,7 +90,7 @@ class PCC(nn.Module):
                     fileinfo_path = out_file_path + '_info.txt'
                     reconstructed_path = out_file_path + '_recon.ply'
 
-                    if not file_path.endswith('.ply'):
+                    if not file_path.endswith('.ply') or ori_resolution != resolution:
                         file_path = out_file_path + '.ply'
                         o3d.io.write_point_cloud(file_path,
                                                  o3d.geometry.PointCloud(
@@ -144,8 +152,15 @@ class PCC(nn.Module):
         ME.clear_global_coordinate_manager()
         xyz = ME.SparseTensor(torch.ones(pc_data.xyz.shape[0], 1, dtype=torch.float, device=pc_data.xyz.device),
                               pc_data.xyz)
+
         fea, points_num_list = self.encoder(xyz)
         if not self.cfg.adaptive_pruning: points_num_list = None
+
+        if self.cfg.pred_fea_point_coords:
+            pred_coords = self.mlp_fea_point_coords(fea.F)
+            pred_coords_scaler = \
+                torch.tensor(pc_data.resolution, device=fea.C.device)[fea.C[:, 0].type(torch.long), None]
+        else: pred_coords = pred_coords_scaler = None
 
         # bottleneck, decoder and loss in training
         if self.training:
@@ -172,43 +187,47 @@ class PCC(nn.Module):
                                                        target_key=xyz.coordinate_map_key,
                                                        points_num_list=points_num_list))
 
-            reconstruct_loss = self.get_reconstruct_loss(message.cached_pred, message.cached_target)
+            loss_items = {'reconstruct_loss': self.get_reconstruct_loss(message.cached_pred,
+                                                                        message.cached_target)}
+
+            if self.cfg.pred_fea_point_coords:
+                loss_items['coords_loss'] = \
+                    nn.functional.l1_loss(fea.C[:, 1:] / pred_coords_scaler,
+                                          pred_coords) * self.cfg.coords_loss_factor
 
             if self.cfg.bottleneck == 'DeepFactorized':
-                bpp_loss = torch.log2(likelihood).sum() * (
+                loss_items['bpp_loss'] = torch.log2(likelihood).sum() * (
                         -self.cfg.bpp_loss_factor / xyz.shape[0])
 
-                aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
-
-                loss = bpp_loss + reconstruct_loss + aux_loss
-
-                return {'loss': loss,
-                        'bpp_loss': bpp_loss.detach().cpu().item(),
-                        'reconstruct_loss': reconstruct_loss.detach().cpu().item(),
-                        'aux_loss': aux_loss.detach().cpu().item()}
+                loss_items['aux_loss'] = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
 
             elif self.cfg.bottleneck == 'BinaryClassification':
-                balance_loss = fea_tilde.F.mean() * self.cfg.balance_loss_factor
-                loss = balance_loss + reconstruct_loss
-                return {'loss': loss,
-                        'balance_loss': balance_loss.detach().cpu().item(),
-                        'reconstruct_loss': reconstruct_loss.detach().cpu().item()}
+                loss_items['balance_loss'] = fea_tilde.F.mean() * self.cfg.balance_loss_factor
+
+            return_obj = {'loss': sum(loss_items.values())}
+            return_obj.update({k: v.detach().cpu().item() for k, v in loss_items.items()})
+            return return_obj
 
         # bottleneck, decoder and metric in testing
         elif not self.training:
-            cached_map_key = fea.coordinate_map_key
+            if self.cfg.pred_fea_point_coords:
+                pred_coords *= pred_coords_scaler
+                tensor_coord_arg = {'coordinates': torch.cat([fea.C[:, 0:1],
+                                                              torch.round(pred_coords).type(torch.int32)], dim=1),
+                                    'tensor_stride': fea.tensor_stride}
+            else:
+                tensor_coord_arg = {'cached_map_key': fea.coordinate_map_key,
+                                    'coordinate_manager': ME.global_coordinate_manager()}
 
             if self.cfg.bottleneck == 'DeepFactorized':
                 compressed_strings = self.entropy_bottleneck_compress(fea.F * self.cfg.bottleneck_scaler)
                 fea = self.entropy_bottleneck_decompress(compressed_strings, fea.shape[0])
                 fea = ME.SparseTensor(fea / self.cfg.bottleneck_scaler,
-                                      coordinate_map_key=cached_map_key,
-                                      coordinate_manager=ME.global_coordinate_manager())
+                                      **tensor_coord_arg)
 
             elif self.cfg.bottleneck == 'BinaryClassification':
                 fea = ME.SparseTensor(torch.round(torch.clip(fea.F, 0, 1)),
-                                      coordinate_map_key=cached_map_key,
-                                      coordinate_manager=ME.global_coordinate_manager())
+                                      **tensor_coord_arg)
                 ones_num = int(fea.F.sum().item())
                 compressed_bits = self.entropy(ones_num, fea.F.numel() - ones_num)
                 compressed_strings = [b'a' * math.ceil(compressed_bits / 8)]  # TODO: entropy encoder
@@ -312,17 +331,19 @@ def main_debug():
 def model_debug():
     cfg = ModelConfig()
     cfg.resolution = 128
-    cfg.bottleneck = 'BinaryClassification'
+    # cfg.bottleneck = 'BinaryClassification'
+    cfg.pred_fea_point_coords = True
     model = PCC(cfg)
-    xyz_c = [ME.utils.sparse_quantize(torch.randint(-128, 128, (100, 3))) for _ in range(16)]
-    xyz_f = [torch.ones((_.shape[0], 1), dtype=torch.float32) for _ in xyz_c]
-    xyz = ME.utils.sparse_collate(coords=xyz_c, feats=xyz_f)
-    out = model((xyz[0], [''], 0))
+    xyz_c = [ME.utils.sparse_quantize(torch.randint(0, 128, (100, 3))) for _ in range(16)]
+    xyz = ME.utils.batched_coordinates(xyz_c)
+    out = model(PCData(xyz=xyz, resolution=[128] * 16))
     out['loss'].backward()
     model.eval()
     if hasattr(model, 'entropy_bottleneck'):
         model.entropy_bottleneck.update()
-    test_out = model((xyz[0][xyz[0][:, 0] == 0, :], [''], 0, None))
+    with torch.no_grad():
+        test_out = model(PCData(xyz=xyz[xyz[:, 0] == 0, :], file_path=[''] * 16,
+                                ori_resolution=[0] * 16, resolution=[128] * 16))
     print('Done')
 
 
