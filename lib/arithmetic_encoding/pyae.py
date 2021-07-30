@@ -37,7 +37,7 @@ class ArithmeticEncoding:
         After encoding the entire message, this method returns the single value that represents the entire message.
         last_stage_probs: A list of the probabilities in the last stage.
 
-        Returns the minimum and maximum probabilites in the last stage in addition to the value encoding the message.
+        Returns the minimum and maximum probabilities in the last stage in addition to the value encoding the message.
         """
         last_stage_probs = list(last_stage_probs.values())
         last_stage_values = []

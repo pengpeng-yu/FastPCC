@@ -1,6 +1,7 @@
 import os
-import time
 import platform
+from functools import wraps
+from typing import List, Tuple, Union, Dict
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -12,6 +13,10 @@ try:
     import thop  # for FLOPS computation
 except ImportError:
     thop = None
+
+try:
+    import MinkowskiEngine as ME
+except ImportError: ME = None
 
 
 def init_torch_seeds(seed=0):
@@ -54,52 +59,6 @@ def select_device(logger, local_rank, device='', batch_size=None):
         return torch.device('cpu')
 
 
-def time_synchronized():
-    # pytorch-accurate time
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    return time.time()
-
-
-def profile(x, ops, n=100, device=None):
-    # profile a pytorch module or list of modules. Example usage:
-    #     x = torch.randn(16, 3, 640, 640)  # input
-    #     m1 = lambda x: x * torch.sigmoid(x)
-    #     m2 = nn.SiLU()
-    #     profile(x, [m1, m2], n=100)  # profile speed over 100 iterations
-
-    device = device or torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    x = x.to(device)
-    x.requires_grad = True
-    print(torch.__version__, device.type, torch.cuda.get_device_properties(0) if device.type == 'cuda' else '')
-    print(f"\n{'Params':>12s}{'GFLOPS':>12s}{'forward (ms)':>16s}{'backward (ms)':>16s}{'input':>24s}{'output':>24s}")
-    for m in ops if isinstance(ops, list) else [ops]:
-        m = m.to(device) if hasattr(m, 'to') else m  # device
-        m = m.half() if hasattr(m, 'half') and isinstance(x, torch.Tensor) and x.dtype is torch.float16 else m  # type
-        dtf, dtb, t = 0., 0., [0., 0., 0.]  # dt forward, backward
-        try:
-            flops = thop.profile(m, inputs=(x,), verbose=False)[0] / 1E9 * 2  # GFLOPS
-        except:
-            flops = 0
-
-        for _ in range(n):
-            t[0] = time_synchronized()
-            y = m(x)
-            t[1] = time_synchronized()
-            try:
-                _ = y.sum().backward()
-                t[2] = time_synchronized()
-            except:  # no backward method
-                t[2] = float('nan')
-            dtf += (t[1] - t[0]) * 1000 / n  # ms per op forward
-            dtb += (t[2] - t[1]) * 1000 / n  # ms per op backward
-
-        s_in = tuple(x.shape) if isinstance(x, torch.Tensor) else 'list'
-        s_out = tuple(y.shape) if isinstance(y, torch.Tensor) else 'list'
-        p = sum(list(x.numel() for x in m.parameters())) if isinstance(m, nn.Module) else 0  # parameters
-        print(f'{p:12}{flops:12.4g}{dtf:16.4g}{dtb:16.4g}{str(s_in):>24s}{str(s_out):>24s}')
-
-
 def is_parallel(model):
     return type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
 
@@ -140,7 +99,9 @@ class MLPBlock(nn.Module):
         elif activation == 'relu':
             self.activation = nn.ReLU(inplace=True)
         elif activation.startswith('leaky_relu'):
-            self.activation = nn.LeakyReLU(negative_slope=float(activation.split('(', 1)[1].split(')', 1)[0]), inplace=True)
+            self.activation = nn.LeakyReLU(
+                negative_slope=float(activation.split('(', 1)[1].split(')', 1)[0]),
+                inplace=True)
         else: raise NotImplementedError
 
         if self.bn is None and self.activation is None:
@@ -159,7 +120,7 @@ class MLPBlock(nn.Module):
 
             ori_shape = x.shape
             if len(ori_shape) != 3:
-                x = x.reshape(ori_shape[0], -1, ori_shape[-1])
+                x = x.view(ori_shape[0], -1, ori_shape[-1])
 
             x = self.mlp(x)
             if isinstance(self.bn, nn.BatchNorm1d):
@@ -173,7 +134,7 @@ class MLPBlock(nn.Module):
                 x = self.activation(x)
 
             if len(ori_shape) != 3:
-                x = x.reshape(*ori_shape[:-1], self.out_channels)
+                x = x.view(*ori_shape[:-1], self.out_channels)
 
             if self.skip_connection is None:
                 pass
@@ -186,14 +147,14 @@ class MLPBlock(nn.Module):
         elif self.version == 'conv':
             ori_shape = x.shape
             if len(ori_shape) != 3:
-                x = x.reshape(ori_shape[0], ori_shape[1], -1)
+                x = x.view(ori_shape[0], ori_shape[1], -1)
 
             x = self.mlp(x)
             if self.bn is not None: x = self.bn(x)
             if self.activation is not None: x = self.activation(x)
 
             if len(ori_shape) != 3:
-                x = x.reshape(ori_shape[0], self.out_channels, *ori_shape[2:])
+                x = x.view(ori_shape[0], self.out_channels, *ori_shape[2:])
 
             if self.skip_connection is None:
                 pass
@@ -264,10 +225,82 @@ class BatchNorm1dChnlLast(nn.Module):
 
 
 def unbatched_coordinates(coords: torch.Tensor):
+    # Used for Minkowski batched sparse tensor
     assert len(coords.shape) == 2 and coords.shape[1] == 4
     return [coords[coords[:, 0] == batch_idx, 1:] for batch_idx in range(coords[:, 0].max() + 1)]
 
 
+def minkowski_tensor_wrapped(inout_mapping_indexes: str = '00', add_batch_dim=True):
+    arg_mapping_dict = {}  # type: Dict[Union[int, str], int]
+    for m in inout_mapping_indexes.split(' '):
+        if len(m) == 2:
+            in_idx, out_idx = m[0], m[1]
+        else:
+            in_idx, out_idx = m.split('->')
+
+        try:
+            in_idx = int(in_idx)
+        except ValueError: pass
+
+        try:
+            out_idx = int(out_idx)
+        except ValueError: pass
+
+        arg_mapping_dict[in_idx] = out_idx
+    assert arg_mapping_dict != {}
+
+    def func_decorator(func):
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            try:
+                arg_coords_keys = {}
+                arg_coord_mgrs = {}
+
+                new_pos_args = list(args)
+                for idx, in_idx in enumerate(arg_mapping_dict):
+                    if isinstance(in_idx, int):
+                        assert isinstance(new_pos_args[in_idx], ME.SparseTensor)
+                        arg_coords_keys[in_idx] = new_pos_args[in_idx].coordinate_map_key
+                        arg_coord_mgrs[in_idx] = new_pos_args[in_idx].coordinate_manager
+                        new_pos_args[in_idx] = new_pos_args[in_idx].F
+                        if add_batch_dim:
+                            new_pos_args[in_idx] = new_pos_args[in_idx][None]
+
+                    else:
+                        assert isinstance(kwargs[in_idx], ME.SparseTensor)
+                        arg_coords_keys[in_idx] = kwargs[in_idx].coordinate_map_key
+                        arg_coord_mgrs[in_idx] = kwargs[in_idx].coordinate_manager
+                        kwargs[in_idx] = kwargs[in_idx].F
+                        if add_batch_dim:
+                            kwargs[in_idx] = kwargs[in_idx][None]
+
+                new_pos_args = tuple(new_pos_args)
+
+            except AssertionError:  # It seems that wrapping is not needed
+                assert idx == 0
+                # Function call
+                return func(*args, **kwargs)
+
+            else:
+                # Function call
+                returned = list(func(*new_pos_args, **kwargs))
+
+                for in_idx, out_idx in arg_mapping_dict.items():
+                    assert isinstance(returned[out_idx], torch.Tensor)
+                    if out_idx != 'None':
+                        returned[out_idx] = ME.SparseTensor(
+                            returned[out_idx][0] if add_batch_dim else returned[out_idx],
+                            coordinate_map_key=arg_coords_keys[in_idx],
+                            coordinate_manager=arg_coord_mgrs[in_idx])
+
+                if len(returned) == 1:
+                    returned = returned[0]
+                else:
+                    returned = tuple(returned)
+                return returned
+        return wrapped
+    return func_decorator
+
+
 if __name__ == '__main__':
     pass
-

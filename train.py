@@ -179,13 +179,13 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         Optimizer = partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=cfg.train.momentum != 0.0)
     else: raise NotImplementedError
     if cfg.train.aux_optimizer == 'adam':
-        AuxOptimizer = partial(torch.optim.Adam, betas=(cfg.train.momentum, 0.999))
+        AuxOptimizer = partial(torch.optim.Adam, betas=(cfg.train.aux_momentum, 0.999))
     elif cfg.train.aux_optimizer == 'sgd':
-        AuxOptimizer = partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=cfg.train.momentum != 0.0)
+        AuxOptimizer = partial(torch.optim.SGD, momentum=cfg.train.aux_momentum, nesterov=cfg.train.aux_momentum != 0.0)
     else: raise NotImplementedError
 
-    parameters = [p for n, p in model.named_parameters() if not n.endswith(".quantiles")]
-    aux_parameters = [p for n, p in model.named_parameters() if n.endswith(".quantiles")]
+    parameters = [p for n, p in model.named_parameters() if not n.endswith("aux_param")]
+    aux_parameters = [p for n, p in model.named_parameters() if n.endswith("aux_param")]
     optimizer = Optimizer([{'params': parameters, 'lr': cfg.train.learning_rate,
                             'weight_decay': cfg.train.weight_decay}])
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
@@ -220,11 +220,11 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         if 'scheduler_state_dict' in cfg.train.resume_items:
             scheduler.load_state_dict(ckpt['scheduler_state_dict'])
             logger.warning('resuming scheduler_state_dict, '
-                           'hyperparameters of scheduler defined in yaml file will be overrided')
+                           'hyperparameters of scheduler defined in yaml file will be overridden')
         if 'optimizer_state_dict' in cfg.train.resume_items:
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
             logger.warning('resuming optimizer_state_dict, '
-                           'hyperparameters of optimizer defined in yaml file will be overrided')
+                           'hyperparameters of optimizer defined in yaml file will be overridden')
 
         del ckpt
 
@@ -287,10 +287,14 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
             if cfg.train.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.train.log_frequency == 0):
                 expected_total_time, eta = utils.eta_by_seconds((total_steps - global_step - 1) * ave_time_onestep)
-                logger.info(f'step {step_idx}/{steps_one_epoch - 1} of epoch {epoch}/{cfg.train.epochs - 1}, '
-                            f'speed: {utils.totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/epoch, '
-                            f'eta(current): {utils.eta_by_seconds((steps_one_epoch - step_idx - 1) * ave_time_onestep)[1]}, '
-                            f'eta(total): {eta} in {expected_total_time}')
+                logger.info(f'step '
+                            f'{step_idx}/{steps_one_epoch - 1} of epoch {epoch}/{cfg.train.epochs - 1}, '
+                            f'speed: '
+                            f'{utils.totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/epoch, '
+                            f'eta(current): '
+                            f'{utils.eta_by_seconds((steps_one_epoch - step_idx - 1) * ave_time_onestep)[1]}, '
+                            f'eta(total): '
+                            f'{eta} in {expected_total_time}')
 
                 # tensorboard items
                 if local_rank in (-1, 0):
@@ -300,9 +304,9 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                         if item_name == 'loss':
                             pass
                         else:
-                            item_categroy = item_name.rsplit("_", 1)[-1].capitalize()
-                            tb_writer.add_scalar(f'Train/{item_categroy}/{item_name}', item, global_step)
-                            if item_categroy == 'Loss' and item_name != 'aux_loss':
+                            item_category = item_name.rsplit("_", 1)[-1].capitalize()
+                            tb_writer.add_scalar(f'Train/{item_category}/{item_name}', item, global_step)
+                            if item_category == 'Loss' and item_name != 'aux_loss':
                                 total_wo_aux += loss_dict[item_name]
                     tb_writer.add_scalar('Train/Loss/total_wo_aux', total_wo_aux, global_step)
 

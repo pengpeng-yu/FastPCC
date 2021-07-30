@@ -10,9 +10,8 @@ class ModelConfig(SimpleConfig):
 
     bottleneck_scaler: int = 2 ** 7
 
-    recontrcut_loss_factor: float = 10000.0
+    reconstruct_loss_factor: float = 10000.0
     bpp_loss_factor: float = 0.3
-    aux_loss_factor: float = 10.0
 
     # only for test phase:
     chamfer_dist_test_phase: bool = False

@@ -2,6 +2,8 @@ import os
 import re
 import datetime
 
+import numpy as np
+
 
 def make_new_dirs(dir_path, logger) -> None:
     if os.path.exists(dir_path):
@@ -23,44 +25,51 @@ def make_new_dirs(dir_path, logger) -> None:
 def autoindex_obj(obj_path: str) -> str:
     dir_path, obj_name = os.path.split(obj_path)
     notations = {
-        '<maxindex>': lambda x: max(x),
-        '<minindex>': lambda x: min(x),
-        '<autoindex>': lambda x: max(x) + 1,
+        '<maxindex>': lambda x: max(x + [0]),
+        '<minindex>': lambda x: min(x + [0]),
+        '<autoindex>': lambda x: max(x + [-1]) + 1,
     }
     if not os.path.exists(dir_path):
-        for notaion in notations:
-            obj_path = obj_path.replace(notaion, '0')
+        for notation in notations:
+            obj_path = obj_path.replace(notation, '0')
         return obj_path
-    for notaion in notations:
-        if obj_name.find(notaion) != -1:
-            pattern = obj_name.replace(notaion, '([0-9]+)')
+    for notation in notations:
+        if obj_name.find(notation) != -1:
+            pattern = obj_name.replace(notation, '([0-9]+)')
             objects_exist = os.listdir(dir_path)
-            indexes_exist = [-1]
+            indexes_exist = []
 
             for name in objects_exist:
                 match_res = re.match(pattern, name)
                 if match_res:
                     indexes_exist.append(int(match_res.group(1)))
 
-            obj_path = obj_path.replace(notaion, str(notations[notaion](indexes_exist)))
+            obj_path = obj_path.replace(notation, str(notations[notation](indexes_exist)))
             break
     return obj_path
 
 
 def totaltime_by_seconds(seconds, no_microseconds=True):
-    totall_time = datetime.timedelta(seconds=seconds)
+    total_time = datetime.timedelta(seconds=seconds)
     if no_microseconds:
-        totall_time = totall_time - datetime.timedelta(microseconds=totall_time.microseconds)
-    return totall_time
+        total_time = total_time - datetime.timedelta(microseconds=total_time.microseconds)
+    return total_time
 
 
 def eta_by_seconds(seconds, no_microseconds=True):
     time_now = datetime.datetime.now()
-    totall_time = datetime.timedelta(seconds=seconds)
+    total_time = datetime.timedelta(seconds=seconds)
     if no_microseconds:
-        totall_time = totall_time - datetime.timedelta(microseconds=totall_time.microseconds)
+        total_time = total_time - datetime.timedelta(microseconds=total_time.microseconds)
         time_now = time_now - datetime.timedelta(microseconds=time_now.microsecond)
-    return totall_time, time_now + totall_time
+    return total_time, time_now + total_time
+
+
+def entropy(*num_list: int) -> float:
+    num_list = np.array(num_list)
+    num_list_non_zero = num_list[num_list.nonzero()]
+    freq_list = num_list_non_zero / num_list_non_zero.sum()
+    return ((-freq_list * np.log2(freq_list)).sum() * num_list.sum()).item()
 
 
 if __name__ == '__main__':

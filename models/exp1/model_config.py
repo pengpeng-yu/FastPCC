@@ -10,4 +10,3 @@ class ModelConfig(SimpleConfig):
     neighbor_num: int = 8
 
     bpp_loss_factor: float = 1e-4
-    aux_loss_factor: float = 1e2

@@ -49,7 +49,7 @@ class GenerativeUpsample(nn.Module):
         target_key: MinkowskiEngine.CoordinateMapKey or None.
 
         During training, features from last layer are used to generate new features.
-        Existence prediction of each upsample layer and cooresponding target is used for loss computation.
+        Existence prediction of each upsample layer and corresponding target is used for loss computation.
         Target_key(identical for all upsample layers) is for generating target of each upsample layer.
 
         During testing, cached_target and target_key are no longer needed.
@@ -138,7 +138,7 @@ class GenerativeUpsample(nn.Module):
                                        K=1, return_sorted=False).dists[0, :, 0]
                     loss_target[sample_mapping] = dists
 
-                with torch.no_grad():  # TODO: speed
+                with torch.no_grad():
                     pred_mask = pred.F.squeeze() > self.square_dist_upper_bound
                     target_mask = loss_target > self.square_dist_upper_bound
                     bound_target_mask = (~pred_mask) & target_mask

@@ -101,8 +101,8 @@ class PointCompressor(nn.Module):
 
             bpp_loss = torch.log2(likelihoods).sum() * (-self.cfg.bpp_loss_factor / (fea.shape[0] * fea.shape[1]))
             reconstruct_loss = sum([chamfer_loss(p, raw_xyz) for p in msg.cached_feature]) \
-                * self.cfg.recontrcut_loss_factor
-            aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
+                * self.cfg.reconstruct_loss_factor
+            aux_loss = self.entropy_bottleneck.loss()
             loss = reconstruct_loss + bpp_loss + aux_loss
 
             return {'aux_loss': aux_loss.detach().cpu().item(),
@@ -129,7 +129,7 @@ class PointCompressor(nn.Module):
             self.total_reconstruct_loss = 0.0
             self.total_bpp = 0.0
             self.samples_num = 0
-            self.totall_metric_values = defaultdict(float)
+            self.total_metric_values = defaultdict(float)
 
         elif mode == 'log':
             assert not self.training
@@ -190,7 +190,7 @@ class PointCompressor(nn.Module):
                                                      f'infile2={os.path.abspath(reconstructed_path)}'
 
                     for key, value in mpeg_pc_error_dict.items():
-                        self.totall_metric_values[key] += value
+                        self.total_metric_values[key] += value
                         fileinfo += f'{key}: {value} \n'
 
                     with open(fileinfo_path, 'w') as f:
@@ -204,11 +204,11 @@ class PointCompressor(nn.Module):
             metric_dict = {'samples_num': self.samples_num,
                            'mean_bpp': (self.total_bpp / self.samples_num)}
 
-            for key, value in self.totall_metric_values.items():
+            for key, value in self.total_metric_values.items():
                 metric_dict[key] = value / self.samples_num
 
             if self.cfg.chamfer_dist_test_phase > 0:
-                metric_dict['mean_recontruct_loss'] = self.total_reconstruct_loss / self.samples_num
+                metric_dict['mean_reconstruct_loss'] = self.total_reconstruct_loss / self.samples_num
 
             return metric_dict
 

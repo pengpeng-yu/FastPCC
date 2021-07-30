@@ -25,29 +25,34 @@ class ResBlock(nn.Module):
 
 
 class InceptionResBlock(nn.Module):
-    def __init__(self, channels):
+    def __init__(self, channels, out_channels=None):
         super(InceptionResBlock, self).__init__()
-        self.path_0 = nn.Sequential(MConv(channels, channels // 4, 3, 1, bias=True, dimension=3),
+        if out_channels is None: out_channels = channels
+        self.path_0 = nn.Sequential(MConv(channels, out_channels // 4, 3, 1, bias=True, dimension=3),
                                     MReLU(inplace=True),
-                                    MConv(channels // 4, channels // 2, 3, 1, bias=True, dimension=3))
+                                    MConv(out_channels // 4, out_channels // 2, 3, 1, bias=True, dimension=3))
 
-        self.path_1 = nn.Sequential(MConv(channels, channels // 4, 1, 1, bias=True, dimension=3),
+        self.path_1 = nn.Sequential(MConv(channels, out_channels // 4, 1, 1, bias=True, dimension=3),
                                     MReLU(inplace=True),
-                                    MConv(channels // 4, channels // 4, 3, 1, bias=True, dimension=3),
+                                    MConv(out_channels // 4, out_channels // 4, 3, 1, bias=True, dimension=3),
                                     MReLU(inplace=True),
-                                    MConv(channels // 4, channels // 2, 1, 1, bias=True, dimension=3))
+                                    MConv(out_channels // 4, out_channels // 2, 1, 1, bias=True, dimension=3))
+
+        if out_channels != channels:
+            self.skip = MConv(channels, out_channels, 3, 1, bias=True, dimension=3)
+        else:
+            self.skip = None
 
     def forward(self, x):
         out0 = self.path_0(x)
         out1 = self.path_1(x)
-        out = ME.cat(out0, out1) + x
+        out = ME.cat(out0, out1) + (self.skip(x) if self.skip is not None else x)
         return out
 
 
 class Encoder(nn.Module):
-    def __init__(self, out_channels, res_blocks_num, res_block_type):
+    def __init__(self, in_channels, out_channels, res_blocks_num, res_block_type):
         super(Encoder, self).__init__()
-        in_channels = 1
         ch = [16, 32, 64, 32, out_channels]
         if res_block_type == 'ResNet':
             self.basic_block = ResBlock

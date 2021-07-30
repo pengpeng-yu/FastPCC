@@ -1,35 +1,46 @@
 model_path: models.convolutional.PCGCv2
+
 # test custom bottleneck
 #model:
 #  bottleneck: 'BinaryClassification'
 #  compressed_channels: 32
 
+
 train:
   rundir_name: 'train_convolutional_<autoindex>'
-  device: '3'
+  device: '2,3'
   amp: False
-  batch_size: 16  # 4
+  batch_size: 24  # 24
   num_workers: 4
   optimizer: adam
+  aux_optimizer: sgd
   momentum: 0.9
+  aux_momentum: 0.9
   weight_decay: 0.0001
   max_grad_norm: 1.0
 
-# train from random
   learning_rate: 0.0005
   epochs: 20
+
 #  learning_rate: 0.0001
 #  epochs: 10
+
+  more_reproducible: True
 
   ckpt_frequency: 1
   lr_step_size: 4  # 2
   lr_step_gamma: 0.5
-  resume_from_ckpt: ''  # 'runs/train_convolutional_8/ckpts/epoch_<maxindex>.pt'
+  resume_from_ckpt: 'runs/train_convolutional_16/ckpts/epoch_<maxindex>.pt'
   resume_items: ['state_dict']
   test_frequency: 2
 
 #  dataset_path: 'lib.datasets.PCGCv2Data'
   dataset_path: 'lib.datasets.ShapeNetCorev2'
+
+  # for predicting feature points coordinates or using coordinates as input feature
+  dataset:
+    random_rotation: True
+    with_resolution: True
 
 # use mesh objects to generate voxelized points with high resolution
 #  dataset_path: 'lib.datasets.ShapeNetCorev2'
@@ -40,6 +51,7 @@ train:
 
 
 test:
+  device: '3'
   batch_size: 1
   num_workers: 2
   save_results: True
@@ -59,5 +71,3 @@ test:
 
     ori_resolution: [512, 1024, 2048]
     resolution: [512, 1024, 2048]
-
-

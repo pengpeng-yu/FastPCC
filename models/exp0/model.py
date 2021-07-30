@@ -58,9 +58,11 @@ class PointCompressor(nn.Module):
             fea = self.mlp_dec_out(fea)
             fea = fea.reshape(batch_size, self.cfg.input_points_num, self.cfg.input_points_dim)
 
-            bpp_loss = torch.log2(likelihoods).sum() * (-self.cfg.bpp_loss_factor / (ori_fea.shape[0] * ori_fea.shape[1]))
+            bpp_loss = torch.log2(likelihoods).sum() \
+                       * (-self.cfg.bpp_loss_factor /
+                          (ori_fea.shape[0] * ori_fea.shape[1]))
             reconstruct_loss = loss_function.chamfer_loss(fea, ori_fea)
-            aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
+            aux_loss = self.entropy_bottleneck.loss()
             loss = reconstruct_loss + bpp_loss + aux_loss
             return {'aux_loss': aux_loss.detach().cpu().item(),
                     'bpp_loss': bpp_loss.detach().cpu().item(),

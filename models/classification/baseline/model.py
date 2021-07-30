@@ -21,15 +21,18 @@ class Model(nn.Module):
         # the first layer has no features, thus its in_channels == 0 and mlp_shortcut == None
         self.layers = nn.Sequential(LFA(0, self.neighbor_fea_generator, 8, 8),
                                     LFA(8, self.neighbor_fea_generator, 8, 16),
-                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 16, 16, 32, 'uniform', 0.25),
+                                    TransitionDownWithDistFea(self.neighbor_fea_generator,
+                                                              16, 16, 32, 'uniform', 0.25),
 
                                     LFA(32, self.neighbor_fea_generator, 32, 32),
                                     LFA(32, self.neighbor_fea_generator, 32, 64),
-                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 64, 64, 128, 'uniform', 0.25),
+                                    TransitionDownWithDistFea(self.neighbor_fea_generator,
+                                                              64, 64, 128, 'uniform', 0.25),
 
                                     LFA(128, self.neighbor_fea_generator, 64, 128),
                                     LFA(128, self.neighbor_fea_generator, 64, 128),
-                                    TransitionDownWithDistFea(self.neighbor_fea_generator, 128, 128, 128, 'uniform', 0.25),
+                                    TransitionDownWithDistFea(self.neighbor_fea_generator,
+                                                              128, 128, 128, 'uniform', 0.25),
 
                                     LFA(128, self.neighbor_fea_generator, 128, 256),
                                     LFA(256, self.neighbor_fea_generator, 128, 256),
@@ -75,7 +78,7 @@ class Model(nn.Module):
         feature = self.head(feature)
 
         if self.training:
-            loss = nn.functional.cross_entropy(feature, target)
+            loss = F.cross_entropy(feature, target)
             return {'loss': loss,
                     'ce_loss': loss.detach().cpu().item()}
 

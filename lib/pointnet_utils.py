@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from pytorch3d.ops import knn_points as pytorch3d_knn_points
-from time import time
 import numpy as np
 
 
@@ -29,9 +28,9 @@ def index_points(points, idx):
         new_points[i, j, k, l] == old_points[i, idx[i, j, k], l]
     """
     raw_size = idx.size()
-    idx = idx.reshape(raw_size[0], -1)
+    idx = idx.view(raw_size[0], -1)
     res = torch.gather(points, 1, idx[..., None].expand(-1, -1, points.size(-1)))
-    return res.reshape(*raw_size, -1)
+    return res.view(*raw_size, -1)
 
 
 def knn_points(p1, p2, k, return_sorted=False, version='pytorch3d', pytorch3d_version=-1, **kwargs):
@@ -61,9 +60,9 @@ def index_points_dists(dists, idx1, idx2):
     """
     batch_size, n, m = dists.shape
     idx_shape = idx1.shape
-    new_dists = torch.gather(dists, dim=1, index=idx1.reshape(batch_size, -1, 1).expand(-1, -1, m))
-    new_dists = torch.gather(new_dists, dim=2, index=idx2.reshape(batch_size, -1, 1))
-    new_dists = new_dists.reshape(*idx_shape)
+    new_dists = torch.gather(dists, dim=1, index=idx1.view(batch_size, -1, 1).expand(-1, -1, m))
+    new_dists = torch.gather(new_dists, dim=2, index=idx2.view(batch_size, -1, 1))
+    new_dists = new_dists.view(idx_shape)
     return new_dists
 
 
@@ -143,11 +142,11 @@ def sample_and_group(nsample, group_radius, ngroup, xyz, points_fea, returnfps=F
         sampled_xyz: sampled points position data, [B, npoint, nsample, 3]
         new_points: sampled points data, [B, npoint, nsample, 3+D]
     """
-    fps_idx = farthest_point_sample(xyz, nsample) # [B, npoint]
+    fps_idx = farthest_point_sample(xyz, nsample)  # [B, npoint]
     sampled_xyz = index_points(xyz, fps_idx)
 
     if knn:
-        dists, grouped_idx, _ = knn_points(sampled_xyz, xyz, return_sorted=False)
+        dists, grouped_idx, _ = knn_points(sampled_xyz, xyz, k=ngroup, return_sorted=False)
     else:
         grouped_idx = query_ball_point(group_radius, ngroup, xyz, sampled_xyz)
 
@@ -156,7 +155,7 @@ def sample_and_group(nsample, group_radius, ngroup, xyz, points_fea, returnfps=F
 
     if points_fea is not None:
         grouped_points = index_points(points_fea, grouped_idx)
-        new_points = torch.cat([grouped_xyz_norm, grouped_points], dim=-1) # [B, npoint, nsample, C+D]
+        new_points = torch.cat([grouped_xyz_norm, grouped_points], dim=-1)  # [B, npoint, nsample, C+D]
     else:
         new_points = grouped_xyz_norm
     if returnfps:
@@ -213,7 +212,11 @@ class PointNetSetAbstraction(nn.Module):
         if self.group_all:
             sampled_xyz, sampled_points = sample_and_group_all(xyz, points_fea)
         else:
-            sampled_xyz, sampled_points = sample_and_group(self.nsample, self.group_radius, self.ngroup, xyz, points_fea, knn=self.knn)
+            sampled_xyz, sampled_points = sample_and_group(self.nsample,
+                                                           self.group_radius,
+                                                           self.ngroup,
+                                                           xyz, points_fea,
+                                                           knn=self.knn)
         # sampled_xyz: sampled points position data, [B, npoint, C]
         # sampled_points: sampled points data, [B, nsample, ngroup, C+D]
         sampled_points = sampled_points.permute(0, 3, 2, 1)  # [B, C+D, ngroup, nsample]
@@ -221,6 +224,6 @@ class PointNetSetAbstraction(nn.Module):
             sampled_points = F.relu(bn(conv(sampled_points)))
 
         sampled_points = torch.max(sampled_points, 2)[0].transpose(1, 2)  # [B, nsample, last_channel]
-        # maxiunm for each channel for each points group of sampled point
+        # maximum for each channel for each points group of sampled point
         return sampled_xyz, sampled_points
 

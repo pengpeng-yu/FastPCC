@@ -159,7 +159,7 @@ def resample_mesh_by_faces(mesh_cad, density=1.0):
     sample_face_idx = np.zeros((n_samples,), dtype=int)
     acc = 0
     for face_idx, _n_sample in enumerate(n_samples_per_face):
-        sample_face_idx[acc : acc + _n_sample] = face_idx
+        sample_face_idx[acc: acc + _n_sample] = face_idx
         acc += _n_sample
 
     r = np.random.rand(n_samples, 2)

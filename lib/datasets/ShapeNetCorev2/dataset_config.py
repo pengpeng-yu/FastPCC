@@ -17,7 +17,7 @@ class DatasetConfig(SimpleConfig):
 
     mesh_sample_points_num: int = 0
     mesh_sample_point_method: str = 'uniform'
-    random_rotation: bool = True
+    random_rotation: bool = False
 
     resolution: int = 128
     with_file_path: bool = False

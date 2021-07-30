@@ -21,7 +21,7 @@ class PointLayerMessage:
         """
         Args:
             xyz: tensor with shape(B, N, 3), coordinates of points
-            raw_neighbors_feature: tensor with shape(B, N, M, C), neighboring infomation generated using coordinates
+            raw_neighbors_feature: tensor with shape(B, N, M, C), neighboring information generated using coordinates
             neighbors_idx: tensor with shape(B, N, M)
 
             B batch size, N current points number, C current channels number,
@@ -71,7 +71,7 @@ class TransformerBlock(nn.Module):
 
         if d_out is None: d_out = d_model
         self.fc2 = nn.Linear(d_model, d_out)
-        self.shortout_fc = nn.Linear(d_in, d_out)
+        self.shortcut_fc = nn.Linear(d_in, d_out)
         self.cache_out_feature = cache_out_feature
 
     # xyz: b, n, 3, features: b, n, d_in
@@ -93,7 +93,7 @@ class TransformerBlock(nn.Module):
 
         feature = torch.einsum('bmnf,bmnf->bmf', attn,
                                value + pos_enc)  # (attn * (value + pos_enc)).sum(dim=2) feature: b, n, d_model
-        feature = self.fc2(feature) + self.shortout_fc(msg.feature)  # feature: b, n, d_out
+        feature = self.fc2(feature) + self.shortcut_fc(msg.feature)  # feature: b, n, d_out
 
         msg.feature = feature
         if self.cache_out_feature: msg.cached_feature.append(feature)
@@ -196,7 +196,7 @@ class RotationInvariantDistFea(NeighborFeatureGenerator):
 
         # (B, N, neighbor_num, anchor_points(center points index), anchor_points(neighbor points index))
         relative_dists = index_points_dists(xyz_dists, anchor_points_idx, neighbors_anchor_points_idx)
-        relative_dists = relative_dists.reshape(batch_size, points_num, self.neighbor_num, self.anchor_points ** 2)
+        relative_dists = relative_dists.view(batch_size, points_num, self.neighbor_num, self.anchor_points ** 2)
         return relative_dists
 
 
@@ -504,13 +504,13 @@ class LocalFeatureAggregation(nn.Module):
 def transformer_block_t():
     input_xyz = torch.rand(4, 100, 3)
     input_feature = torch.rand(4, 100, 32)
-    transfomer_blocks = nn.Sequential(TransformerBlock(d_in=32, d_model=64, nneighbor=16, cache_out_feature=True),
-                                      TransformerBlock(d_in=64, d_model=128, nneighbor=16, cache_out_feature=True),
-                                      TransitionDown('uniform', 0.5, cache_sample_indexes='upsample'),
-                                      TransformerBlock(d_in=128, d_model=128, nneighbor=16, cache_out_feature=True),
-                                      TransformerBlock(d_in=128, d_model=256, nneighbor=16, cache_out_feature=True),
-                                      TransitionDown('uniform', 0.5, cache_sample_indexes='upsample'))
-    out = transfomer_blocks(PointLayerMessage(xyz=input_xyz, feature=input_feature))
+    transformer_blocks = nn.Sequential(TransformerBlock(d_in=32, d_model=64, nneighbor=16, cache_out_feature=True),
+                                       TransformerBlock(d_in=64, d_model=128, nneighbor=16, cache_out_feature=True),
+                                       TransitionDown('uniform', 0.5, cache_sample_indexes='upsample'),
+                                       TransformerBlock(d_in=128, d_model=128, nneighbor=16, cache_out_feature=True),
+                                       TransformerBlock(d_in=128, d_model=256, nneighbor=16, cache_out_feature=True),
+                                       TransitionDown('uniform', 0.5, cache_sample_indexes='upsample'))
+    out = transformer_blocks(PointLayerMessage(xyz=input_xyz, feature=input_feature))
     out.feature.sum().backward()
     print('Done')
 

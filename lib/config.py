@@ -21,9 +21,10 @@ class TrainConfig(SimpleConfig):
     aux_optimizer: str = 'sgd'
     learning_rate: float = 0.05
     momentum: float = 0.9
+    aux_momentum: float = 0.9
     weight_decay: float = 0.0
     aux_weight_decay: float = 0.0
-    max_grad_norm: float = 0.0  # 0.0 to close
+    max_grad_norm: float = 0.0  # 0.0 to close. aux_param excluded.
     lr_step_size: int = 25
     lr_step_gamma: float = 0.3
 
@@ -61,7 +62,7 @@ class TrainConfig(SimpleConfig):
 @dataclass
 class TestConfig(SimpleConfig):
     rundir_name: str = 'test_<autoindex>'
-    device: str = 'cuda:3'  # 'cpu' or 'cuda'(only single gpu supported)
+    device: str = '3'  # 0 or 1 or cpu (only single gpu supported)
     batch_size: int = 8
     num_workers: int = 4
     weights_from_ckpt: str = ''
@@ -94,11 +95,3 @@ class Config(SimpleConfig):
             assert self.model.input_points_num == self.train.dataset.input_points_num
             if hasattr(self.test.dataset, 'input_points_num'):
                 assert self.model.input_points_num == self.test.dataset.input_points_num
-
-    def merge_with_yaml(self, yaml_path):
-        yaml_dict = yaml.safe_load(open(yaml_path))
-        if 'model_path' in yaml_dict:
-            if not yaml_dict['model_path'].rsplit('.', 1)[-1] in os.path.splitext(os.path.basename(yaml_path))[0]:
-                print(f'Warning: loading configuration from {os.path.basename(yaml_path)} '
-                      f'with model_path == {yaml_dict["model_path"]}. Is this correct?')
-        return self.merge_with_dict(yaml_dict)

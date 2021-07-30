@@ -71,8 +71,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
                                              collate_fn=dataset.collate_fn)
     if model is not None:
         model.eval()
-        current_device = next(model.parameters()).device
-        device = current_device
+        device = next(model.parameters()).device
 
     else:
         try:
@@ -86,21 +85,14 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
             torch.load(ckpt_path, map_location=torch.device('cpu'))['state_dict'])
         if incompatible_keys[0] != [] or incompatible_keys[1] != []:
             logger.warning(incompatible_keys)
-        device = torch.device(cfg.test.device if cfg.test.device == 'cpu' or cfg.test.device.startswith('cuda')
-                              else f'cuda:{cfg.test.device}')
 
+        device = torch_utils.select_device(logger,
+                                           local_rank=-1,
+                                           device=cfg.test.device)
         model.to(device)
-        torch.cuda.set_device(device)
         model.eval()
 
     logger.info(f'start testing using device {device}')
-
-    if hasattr(model, 'entropy_bottleneck'):
-        model.entropy_bottleneck.update()
-    elif torch_utils.is_parallel(model) and hasattr(model.module, 'entropy_bottleneck'):
-        model.module.entropy_bottleneck.update()
-    else:
-        logger.warning('no entropy_bottleneck was found in model')
 
     try:
         if torch_utils.is_parallel(model):

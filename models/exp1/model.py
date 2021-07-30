@@ -31,36 +31,36 @@ class PointEncoder(nn.Module):
                                              TransformerBlock(1024, 1024, cfg.neighbor_num),
                                              TransitionDown('uniform', 0.25))
 
-        self.trainsition_blocks = nn.ModuleList()
-        self.trainsition_blocks.extend((nn.Sequential(TransformerBlock(512, 1024, cfg.neighbor_num),
-                                                      TransitionDown('uniform', nsample=cfg.input_points_num // 16)),
-                                        TransformerBlock(1024, 512, cfg.neighbor_num),
-                                        TransformerBlock(1024, 1024, cfg.neighbor_num)))
+        self.transition_blocks = nn.ModuleList()
+        self.transition_blocks.extend((nn.Sequential(TransformerBlock(512, 1024, cfg.neighbor_num),
+                                                     TransitionDown('uniform', nsample=cfg.input_points_num // 16)),
+                                       TransformerBlock(1024, 512, cfg.neighbor_num),
+                                       TransformerBlock(1024, 1024, cfg.neighbor_num)))
 
         self.init_weights()
 
     def forward(self, msg: PointLayerMessage):
         msg = self.top_down_blocks(msg)  # type: PointLayerMessage
 
-        msg = self.trainsition_blocks[2](msg)
+        msg = self.transition_blocks[2](msg)
 
         msg.xyz = torch.cat((msg.cached_xyz[1], msg.xyz), dim=1)
         msg.feature = torch.cat((msg.cached_feature[1], msg.feature), dim=1)
         msg.raw_neighbors_feature = msg.neighbors_idx = None
 
-        msg = self.trainsition_blocks[1](msg)
+        msg = self.transition_blocks[1](msg)
         msg.xyz = torch.cat((msg.cached_xyz[0], msg.xyz), dim=1)
         msg.feature = torch.cat((msg.cached_feature[0], msg.feature), dim=1)
         msg.raw_neighbors_feature = msg.neighbors_idx = None
 
-        msg = self.trainsition_blocks[0](msg)
+        msg = self.transition_blocks[0](msg)
         return msg
 
     def init_weights(self):
-        torch.nn.init.uniform_(self.trainsition_blocks[0][0].fc2.weight, -10, 10)
-        torch.nn.init.uniform_(self.trainsition_blocks[0][0].fc2.bias, -10, 10)
-        torch.nn.init.uniform_(self.trainsition_blocks[0][0].shortout_fc.weight, -10, 10)
-        torch.nn.init.uniform_(self.trainsition_blocks[0][0].shortout_fc.bias, -10, 10)
+        torch.nn.init.uniform_(self.transition_blocks[0][0].fc2.weight, -10, 10)
+        torch.nn.init.uniform_(self.transition_blocks[0][0].fc2.bias, -10, 10)
+        torch.nn.init.uniform_(self.transition_blocks[0][0].shortcut_fc.weight, -10, 10)
+        torch.nn.init.uniform_(self.transition_blocks[0][0].shortcut_fc.bias, -10, 10)
 
 
 class PointCompressor(nn.Module):
@@ -102,19 +102,19 @@ class PointCompressor(nn.Module):
             bpp_loss = torch.log2(likelihoods).sum() * \
                 (-self.cfg.bpp_loss_factor / (ori_fea.shape[0] * ori_fea.shape[1]))
 
-            reconstruct_reguler_loss = loss_function.chamfer_loss(fea_list[0], ori_fea[:, :, :3]) * 0.05 + \
+            reconstruct_regular_loss = loss_function.chamfer_loss(fea_list[0], ori_fea[:, :, :3]) * 0.05 + \
                                        loss_function.chamfer_loss(fea_list[1], ori_fea[:, :, :3]) * 0.1
 
             reconstruct_loss = loss_function.chamfer_loss(fea_list[2], ori_fea)
 
-            aux_loss = self.entropy_bottleneck.loss() * self.cfg.aux_loss_factor
+            aux_loss = self.entropy_bottleneck.loss()
 
-            loss = reconstruct_reguler_loss + reconstruct_loss + bpp_loss + aux_loss
+            loss = reconstruct_regular_loss + reconstruct_loss + bpp_loss + aux_loss
 
             return {'aux_loss': aux_loss.detach().cpu().item(),
                     'bpp_loss': bpp_loss.detach().cpu().item(),
                     'reconstruct_loss': reconstruct_loss.detach().cpu().item(),
-                    'reconstruct_reguler_loss': reconstruct_reguler_loss.detach().cpu().item(),
+                    'reconstruct_regular_loss': reconstruct_regular_loss.detach().cpu().item(),
                     'loss': loss}
         else:
             compressed_strings = self.entropy_bottleneck_compress(fea)

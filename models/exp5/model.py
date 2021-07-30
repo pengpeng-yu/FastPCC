@@ -49,7 +49,7 @@ class PointCompressor(nn.Module):
                 label = torch.round(fea)
                 quantize_diff = label - fea
 
-            quantize_loss = torch.nn.functional.binary_cross_entropy(fea, label) * self.cfg.quantize_loss_factor
+            quantize_loss = F.binary_cross_entropy(fea, label) * self.cfg.quantize_loss_factor
             balance_loss = torch.mean(fea) * self.cfg.balance_loss_factor
 
             fea = fea + quantize_diff  # binary

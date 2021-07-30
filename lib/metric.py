@@ -14,7 +14,7 @@ def mpeg_pc_error(infile1, infile2, resolution, normal=False, command='pc_error_
     headersF = ["mseF      (p2point)", "mseF,PSNR (p2point)",
                 "h.        (p2point)", "h.,PSNR   (p2point)"]
 
-    haders_p2plane = ["mse1      (p2plane)", "mse1,PSNR (p2plane)",
+    headers_p2plane = ["mse1      (p2plane)", "mse1,PSNR (p2plane)",
                       "mse2      (p2plane)", "mse2,PSNR (p2plane)",
                       "mseF      (p2plane)", "mseF,PSNR (p2plane)"]
 
@@ -28,7 +28,7 @@ def mpeg_pc_error(infile1, infile2, resolution, normal=False, command='pc_error_
               f' --nbThreads={threads}'
 
     if normal:
-        headers += haders_p2plane
+        headers += headers_p2plane
         command = command + ' -n ' + infile1
 
     results = {}

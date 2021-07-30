@@ -12,14 +12,14 @@ class SimpleConfig:
 
     def check(self):
         """
-        Called by a series of merge_xxx func to check all the atributes. You can also call it in __init__().
+        Called by a series of merge_xxx func to check all the attributes. You can also call it in __init__().
         """
         self.check_type()
         self.check_value()
 
     def check_value(self):
         """
-        Recursively call check_local_value() of all attributes to check value. Only callled by check().
+        Recursively call check_local_value() of all attributes to check value. Only called by check().
         """
         self.check_local_value()
         for key, value in self.__dict__.items():
@@ -28,7 +28,7 @@ class SimpleConfig:
 
     def check_local_value(self):
         """
-        This func could be overrided in subclass to check value of attributes. Only callled by check_value().
+        This func could be overridden in subclass to check value of attributes. Only called by check_value().
         """
         pass
 
@@ -58,12 +58,12 @@ class SimpleConfig:
                                            Union[value_type, List[value_type]],
                                            Union[value_type, Tuple[value_type]]),\
                     f'actual type {value_type} of attribute {key} is ' \
-                    f'inconsisent with its annotation type {value_anno_type}'
+                    f'inconsistent with its annotation type {value_anno_type}'
 
             elif value_type in [list, tuple]:
                 element_type = type(value[0])
                 assert element_type in basic_types, \
-                    f'unecpected type {element_type} of items in list/tuple {key}'
+                    f'unexpected type {element_type} of items in list/tuple {key}'
 
                 assert all([type(i) == element_type for i in value]), \
                     f'items in list/tuple {key} are not exactly the same'
@@ -73,14 +73,14 @@ class SimpleConfig:
                                            Union[element_type, List[element_type]],
                                            Union[element_type, Tuple[element_type]]),\
                     f'actual type {value_type} of attribute {key} ' \
-                    f'is inconsisent with its annotation type {value_anno_type}'
+                    f'is inconsistent with its annotation type {value_anno_type}'
 
             elif issubclass(value_type, SimpleConfig):
                 assert issubclass(value_anno_type, SimpleConfig)
                 value.check_type()
 
             else:
-                raise AssertionError(f'unexpected type {value_type} of attirbute {key}')
+                raise AssertionError(f'unexpected type {value_type} of attribute {key}')
 
     def local_auto_import(self, keys=None):
         if keys is None: keys = self.__dict__
@@ -145,7 +145,6 @@ class SimpleConfig:
                 try:
                     yaml_dict = yaml.safe_load(open(arg))
                     dotdict.update(self.dict_to_dotdict(yaml_dict))
-                    print('y')
                 except Exception as e:
                     raise ValueError(f'unexpected arg format: "{arg}"')
 
@@ -224,7 +223,7 @@ class SimpleConfig:
 
 
 def dict_to_dotdict_t():
-    f = {'A': {'a': {'1': [2, 3]}}, 'B': {'a': 't'}, 'C': {'a': 1, 'b': {'1': 2, '2': [3,4]}}}
+    f = {'A': {'a': {'1': [2, 3]}}, 'B': {'a': 't'}, 'C': {'a': 1, 'b': {'1': 2, '2': [3, 4]}}}
     x = SimpleConfig.dict_to_dotdict(f)
     print('Done')
 

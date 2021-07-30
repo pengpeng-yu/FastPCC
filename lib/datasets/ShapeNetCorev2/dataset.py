@@ -114,10 +114,13 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             xyz *= self.cfg.resolution
             xyz = ME.utils.sparse_quantize(xyz)
 
-        return PCData(xyz=xyz if isinstance(xyz, torch.Tensor) else torch.from_numpy(xyz),
-                      file_path=file_path if self.cfg.with_file_path else None,
-                      ori_resolution=None if not self.cfg.with_ori_resolution or self.cfg.data_format == '.obj' else 128,
-                      resolution=self.cfg.resolution if self.cfg.with_resolution else None)
+        return PCData(
+            xyz=xyz if isinstance(xyz, torch.Tensor) else torch.from_numpy(xyz),
+            file_path=file_path if self.cfg.with_file_path else None,
+            ori_resolution=None if
+            not self.cfg.with_ori_resolution or self.cfg.data_format == '.obj'
+            else 128,
+            resolution=self.cfg.resolution if self.cfg.with_resolution else None)
 
     def collate_fn(self, batch):
         return pc_data_collate_fn(batch, sparse_collate=self.cfg.resolution != 0)

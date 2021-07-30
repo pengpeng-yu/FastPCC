@@ -14,7 +14,7 @@ def chamfer_loss(points1: torch.Tensor, points2: torch.Tensor,
 
     if version == 'pytorch':
         with torch.no_grad():
-            # matrix multiplication has lower percision
+            # matrix multiplication has lower precision
             # https://github.com/pytorch/pytorch/issues/37734
             # compute_mode='donot_use_mm_for_euclid_dist'
             dist = torch.cdist(points1, points2, )  # B, N, M
