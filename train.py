@@ -199,7 +199,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     # Resume checkpoint
     start_epoch = 0
     if cfg.train.resume_from_ckpt != '':
-        ckpt = torch.load(utils.autoindex_obj(cfg.train.resume_from_ckpt), map_location=torch.device('cpu'))
+        ckpt_path = utils.autoindex_obj(cfg.train.resume_from_ckpt)
+        ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
         if 'state_dict' in cfg.train.resume_items:
             try:
                 if torch_utils.is_parallel(model):
@@ -208,7 +209,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             except RuntimeError as e:
                 logger.error('error when loading model_state_dict')
                 raise e
-            logger.info('resumed model_state_dict from checkpoint "{}"'.format(cfg.train.resume_from_ckpt))
+            logger.info('resumed model_state_dict from checkpoint "{}"'.format(ckpt_path))
             if incompatible_keys[0] != [] or incompatible_keys[1] != []:
                 logger.warning(incompatible_keys)
 

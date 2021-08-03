@@ -70,8 +70,8 @@ class PointCompressor(nn.Module):
                                nn.BatchNorm1d(1), nn.LeakyReLU(0.2, True),]
 
         self.decoder_layers = nn.Sequential(*self.decoder_layers)
-        self.mlp_dec_out = nn.Sequential(MLPBlock(4096, 1024 * 3, activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
-                                         MLPBlock(1024 * 3, 1024 * 3, activation=None, batchnorm='nn.bn1d'),)
+        self.mlp_dec_out = nn.Sequential(MLPBlock(4096, 1024 * 3, bn='nn.bn1d', act='leaky_relu(0.2)'),
+                                         MLPBlock(1024 * 3, 1024 * 3, bn='nn.bn1d', act=None), )
 
     def forward(self, fea):
         if self.training: ori_fea = fea

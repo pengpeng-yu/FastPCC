@@ -79,12 +79,22 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         except Exception as e:
             raise ImportError(*e.args)
         model = Model(cfg.model)
-        ckpt_path = utils.autoindex_obj(cfg.test.weights_from_ckpt)
-        logger.info(f'loading weights from {ckpt_path}')
-        incompatible_keys = model.load_state_dict(
-            torch.load(ckpt_path, map_location=torch.device('cpu'))['state_dict'])
-        if incompatible_keys[0] != [] or incompatible_keys[1] != []:
-            logger.warning(incompatible_keys)
+
+        if cfg.test.weights_from_ckpt != '':
+            ckpt_path = utils.autoindex_obj(cfg.test.weights_from_ckpt)
+            logger.info(f'loading weights from {ckpt_path}')
+            try:
+                incompatible_keys = model.load_state_dict(
+                    torch.load(ckpt_path, map_location=torch.device('cpu'))['state_dict'], strict=False)
+            except RuntimeError as e:
+                logger.error('error when loading model_state_dict')
+                raise e
+            logger.info('resumed weights in checkpoint "{}"'.format(ckpt_path))
+            if incompatible_keys[0] != [] or incompatible_keys[1] != []:
+                logger.warning(incompatible_keys)
+
+        else:
+            logger.warning(f'no weight is loaded')
 
         device = torch_utils.select_device(logger,
                                            local_rank=-1,

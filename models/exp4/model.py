@@ -22,7 +22,7 @@ class GenerativeTransitionUp(nn.Module):
     def __init__(self, lfa: LFA, upsample_rate: int = 2,):
         super(GenerativeTransitionUp, self).__init__()
         self.lfa = lfa
-        self.mlp_pred = MLPBlock(lfa.out_channels // upsample_rate, 3, activation=None, batchnorm='nn.bn1d')
+        self.mlp_pred = MLPBlock(lfa.out_channels // upsample_rate, 3, bn='nn.bn1d', act=None)
         self.upsample_rate = upsample_rate
 
     def forward(self, msg: PointLayerMessage):
@@ -66,7 +66,7 @@ class PointCompressor(nn.Module):
                         LFA(64, neighbor_fea_generator, 32, 64)]
 
         self.encoder = nn.Sequential(*self.encoder)
-        self.mlp_enc_out = nn.Sequential(MLPBlock(64, 32, activation=None, batchnorm='nn.bn1d'))
+        self.mlp_enc_out = nn.Sequential(MLPBlock(64, 32, bn='nn.bn1d', act=None))
 
         self.entropy_bottleneck = compressai.entropy_models.EntropyBottleneck(self.mlp_enc_out[-1].out_channels)
 

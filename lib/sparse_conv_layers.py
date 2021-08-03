@@ -1,11 +1,11 @@
-from typing import Tuple, List, Union, Optional, Any
+from typing import Tuple, List, Dict, Union, Optional, Any
 
 import torch
 import torch.nn as nn
 from pytorch3d.ops import knn_points
 import MinkowskiEngine as ME
 
-from lib.torch_utils import unbatched_coordinates
+from lib.metric import precision_recall
 
 MConv = ME.MinkowskiConvolution
 MReLU = ME.MinkowskiReLU
@@ -17,81 +17,90 @@ class GenerativeUpsampleMessage:
     def __init__(self,
                  fea: ME.SparseTensor,
                  target_key: ME.CoordinateMapKey = None,
-                 points_num_list: List[int] = None,
-                 cached_pred: Optional[List[ME.SparseTensor]] = None,
-                 cached_target: Optional[List[ME.SparseTensor]] = None):
+                 points_num_list: List[List[int]] = None,
+                 cached_fea_list: List[Union[ME.SparseTensor]] = None,
+                 cached_pred_list: List[ME.SparseTensor] = None,
+                 cached_target_list: List[ME.SparseTensor] = None):
         self.fea = fea
         self.target_key = target_key
         self.points_num_list = points_num_list.copy() if points_num_list is not None else None
-        self.cached_pred = cached_pred or []
-        self.cached_target = cached_target or []
+        self.cached_fea_list = cached_fea_list or []
+        self.cached_pred_list = cached_pred_list or []
+        self.cached_target_list = cached_target_list or []
+        self.cached_metric_list: List[Dict[str, Union[int, float]]] = []
 
 
 class GenerativeUpsample(nn.Module):
-    def __init__(self, upsample_block: nn.Module, classify_block: nn.Module,
-                 mapping_target_kernel_size=1, loss_type='BCE', dist_upper_bound=2.0, is_last_layer=False):
+    def __init__(self,
+                 upsample_block: nn.Module,
+                 classify_block: nn.Module,
+                 mapping_target_kernel_size=1,
+                 loss_type='BCE',
+                 dist_upper_bound=2.0,
+                 is_last_layer=False,
+                 require_metric_during_testing=False,
+                 use_cached_feature=False,
+                 cached_feature_fusion_method='Cat'):
         super(GenerativeUpsample, self).__init__()
-        self.mapping_target_kernel_size = mapping_target_kernel_size
+
         assert loss_type in ['BCE', 'Dist']
+        assert cached_feature_fusion_method in ['Add', 'Cat']
+
+        self.upsample_block = upsample_block
+        # classify_block should not change coordinates of upsample_block's output
+        self.classify_block = classify_block
+
+        self.mapping_target_kernel_size = mapping_target_kernel_size
         self.loss_type = loss_type
         self.square_dist_upper_bound = dist_upper_bound ** 2
         self.is_last_layer = is_last_layer
-        self.upsample_block = upsample_block
-        self.classify_block = classify_block  # classify_block should not change coordinates of upsample_block's output
+        self.require_metric_during_testing = require_metric_during_testing
+        self.use_cached_feature = use_cached_feature
+        self.cached_feature_fusion_method = cached_feature_fusion_method
+
         # It will consume huge memory if too many unnecessary points are retained after pruning
         self.pruning = ME.MinkowskiPruning()
 
     def forward(self, message: GenerativeUpsampleMessage):
         """
         fea: SparseTensor,
-        cached_pred: List[SparseTensor], prediction of existence or distance,
-        cached_target: List[SparseTensor] or None,
+        cached_pred_list: List[SparseTensor], prediction of existence or distance,
+        cached_target_list: List[SparseTensor] or None,
         target_key: MinkowskiEngine.CoordinateMapKey or None.
 
         During training, features from last layer are used to generate new features.
         Existence prediction of each upsample layer and corresponding target is used for loss computation.
         Target_key(identical for all upsample layers) is for generating target of each upsample layer.
 
-        During testing, cached_target and target_key are no longer needed.
+        During testing, cached_target_list and target_key are no longer needed.
         """
         fea = message.fea
 
-        fea = self.upsample_block(fea)
+        if self.use_cached_feature:
+            # Assume that cached_feature and fea share the same coordinate
+            cached_feature = message.cached_fea_list.pop()
+            fea = self.upsample_block(fea, coordinates=cached_feature.coordinate_map_key)
+
+            if self.cached_feature_fusion_method == 'Cat':
+                fea = ME.cat(fea, cached_feature)
+            elif self.cached_feature_fusion_method == 'Add':
+                fea += cached_feature
+            else: raise NotImplementedError
+
+        else:
+            fea = self.upsample_block(fea)
+
         pred = self.classify_block(fea)
 
-        with torch.no_grad():
-            if self.loss_type == 'BCE':
-                if message.points_num_list is not None:
-                    target_points_num = message.points_num_list.pop()
-                    if pred.F.shape[0] > target_points_num:
-                        thres = torch.kthvalue(pred.F, pred.F.shape[0] - target_points_num, dim=0).values
-                        keep = (pred.F.squeeze() > thres)
-                    else:
-                        keep = torch.full_like(pred.F.squeeze(), fill_value=True, dtype=torch.bool)
-                else:
-                    keep = (pred.F.squeeze() > 0)
-
-            elif self.loss_type == 'Dist':
-                if message.points_num_list is not None:
-                    target_points_num = message.points_num_list.pop()
-                    if pred.F.shape[0] > target_points_num:
-                        thres = torch.kthvalue(pred.F, target_points_num, dim=0).values
-                        keep = (pred.F.squeeze() <= thres)
-                    else:
-                        keep = torch.full_like(pred.F.squeeze(), fill_value=True, dtype=torch.bool)
-                else:
-                    keep = (pred.F.squeeze() < 0.5)
-
-            else:
-                raise NotImplementedError
+        keep = self.get_keep(pred, message.points_num_list)
 
         if self.training:
             keep_target, loss_target = self.get_target(fea, pred, message.target_key, True)
 
             keep |= keep_target
 
-            message.cached_target.append(loss_target)
-            message.cached_pred.append(pred)
+            message.cached_target_list.append(loss_target)
+            message.cached_pred_list.append(pred)
 
             if not self.is_last_layer:
                 message.fea = self.pruning(fea, keep)
@@ -99,15 +108,67 @@ class GenerativeUpsample(nn.Module):
                 message.fea = None
 
         elif not self.training:
+            if self.require_metric_during_testing:
+                keep_target = self.get_target(fea, pred, message.target_key, False)
+                message.cached_metric_list.append(
+                    precision_recall(pred=keep, tgt=keep_target))
+
             if not self.is_last_layer:
                 message.fea = self.pruning(fea, keep)
             else:
-                message.cached_pred = [self.pruning(pred, keep)]
+                message.fea = None
+
+            message.cached_pred_list.append(self.pruning(pred, keep))
 
         return message
 
-    def get_target(self, fea, pred, target_key, require_loss_target):
-        # type: (ME.SparseTensor, ME.SparseTensor, ME.CoordinateMapKey, bool) -> Any
+    @torch.no_grad()
+    def get_keep(self, pred: ME.SparseTensor, points_num_list: List[List[int]]) \
+            -> torch.Tensor:
+        if self.loss_type == 'BCE':
+            if points_num_list is not None:
+                target_points_num = points_num_list.pop()
+                sample_threshold = []
+                for sample_tgt, sample in zip(target_points_num, pred.decomposed_features):
+                    if sample.shape[0] > sample_tgt:
+                        sample_threshold.append(torch.kthvalue(sample, sample.shape[0] - sample_tgt, dim=0).values)
+                    else:
+                        sample_threshold.append(torch.finfo(sample.dtype).min)
+                threshold = torch.tensor(sample_threshold, device=pred.F.device, dtype=pred.F.dtype)
+                threshold = threshold[pred.C[:, 0].to(torch.long)]
+
+            else:
+                threshold = 0
+            keep = (pred.F.squeeze(dim=1) > threshold)
+
+        elif self.loss_type == 'Dist':
+            if points_num_list is not None:
+                target_points_num = points_num_list.pop()
+                sample_threshold = []
+                for sample_tgt, sample in zip(target_points_num, pred.decomposed_features):
+                    if sample.shape[0] > sample_tgt:
+                        sample_threshold.append(torch.kthvalue(sample, sample_tgt, dim=0).values)
+                    else:
+                        sample_threshold.append(torch.finfo(sample.dtype).max)
+                threshold = torch.tensor(sample_threshold, device=pred.F.device, dtype=pred.F.dtype)
+                threshold = threshold[pred.C[:, 0].to(torch.long)]
+
+            else:
+                threshold = 0.5
+            keep = (pred.F.squeeze(dim=1) <= threshold)
+
+        else:
+            raise NotImplementedError
+
+        return keep
+
+    @torch.no_grad()
+    def get_target(self,
+                   fea: ME.SparseTensor,
+                   pred: ME.SparseTensor,
+                   target_key: ME.CoordinateMapKey,
+                   require_loss_target: bool) \
+            -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         cm = fea.coordinate_manager
 
         strided_target_key = cm.stride(target_key, fea.tensor_stride)
@@ -117,7 +178,7 @@ class GenerativeUpsample(nn.Module):
                                    region_type=1)
         keep_target = torch.zeros(fea.shape[0], dtype=torch.bool, device=fea.device)
         for _, curr_in in kernel_map.items():
-            keep_target[curr_in[0].type(torch.int64)] = 1
+            keep_target[curr_in[0].type(torch.long)] = 1
 
         if require_loss_target:
             if self.loss_type == 'BCE':
@@ -138,13 +199,12 @@ class GenerativeUpsample(nn.Module):
                                        K=1, return_sorted=False).dists[0, :, 0]
                     loss_target[sample_mapping] = dists
 
-                with torch.no_grad():
-                    pred_mask = pred.F.squeeze() > self.square_dist_upper_bound
-                    target_mask = loss_target > self.square_dist_upper_bound
-                    bound_target_mask = (~pred_mask) & target_mask
-                    ignore_target_mask = pred_mask & target_mask
-                    loss_target[bound_target_mask] = self.square_dist_upper_bound
-                    loss_target[ignore_target_mask] = pred.F.squeeze()[ignore_target_mask]
+                pred_mask = pred.F.squeeze(dim=1) > self.square_dist_upper_bound
+                target_mask = loss_target > self.square_dist_upper_bound
+                bound_target_mask = (~pred_mask) & target_mask
+                ignore_target_mask = pred_mask & target_mask
+                loss_target[bound_target_mask] = self.square_dist_upper_bound
+                loss_target[ignore_target_mask] = pred.F.squeeze(dim=1)[ignore_target_mask]
 
             else:
                 raise NotImplementedError

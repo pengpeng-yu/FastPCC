@@ -74,7 +74,7 @@ class PointCompressor(nn.Module):
 
         self.entropy_bottleneck = compressai.entropy_models.EntropyBottleneck(self.encoded_points_dim)
 
-        self.decoder_in_mlp = MLPBlock(1024, 1024, activation='leaky_relu(0.2)', batchnorm='nn.bn1d')
+        self.decoder_in_mlp = MLPBlock(1024, 1024, bn='nn.bn1d', act='leaky_relu(0.2)')
         self.decoder = nn.Sequential(
             TransformerBlock(1024, 512, cfg.neighbor_num, cache_out_feature=True),
             TransformerBlock(512, 256, cfg.neighbor_num, cache_out_feature=True),

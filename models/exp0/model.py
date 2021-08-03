@@ -28,7 +28,7 @@ class PointCompressor(nn.Module):
                         TransitionDown('uniform', 0.5),
                         TransformerBlock(1024, 1024, cfg.neighbor_num)]
         self.encoder = nn.Sequential(*self.encoder)
-        self.mlp_enc_out = MLPBlock(1024, 1024,  activation=None, batchnorm='nn.bn1d')
+        self.mlp_enc_out = MLPBlock(1024, 1024, bn='nn.bn1d', act=None)
         self.encoded_points_num = cfg.input_points_num // 32
         self.encoded_points_dim = 1024
 
@@ -37,7 +37,7 @@ class PointCompressor(nn.Module):
         self.decoder = [TransformerBlock(1024, 512, cfg.neighbor_num),
                         TransformerBlock(512, 256, cfg.neighbor_num),
                         TransformerBlock(256, 96, cfg.neighbor_num)]
-        self.mlp_dec_out = MLPBlock(96, 96, activation=None, batchnorm='nn.bn1d')
+        self.mlp_dec_out = MLPBlock(96, 96, bn='nn.bn1d', act=None)
         self.decoder = nn.Sequential(*self.decoder)
         self.init_weights()
 

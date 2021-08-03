@@ -1,7 +1,18 @@
 import subprocess
 
 
-# TODO: precision recall metric
+def precision_recall(pred, tgt):
+    true_pos = (pred & tgt).sum().item()
+    false_pos = (pred & ~tgt).sum().item()
+    false_neg = (~pred & tgt).sum().item()
+    return {'Precision': true_pos / (true_pos + false_pos),
+            'Recall': true_pos / (true_pos + false_neg),
+            'TP': true_pos,
+            'FP': false_pos,
+            'FN': false_neg,
+            'total': len(tgt)}
+
+
 def mpeg_pc_error(infile1, infile2, resolution, normal=False, command='pc_error_d', threads=1):
     # https://github.com/NJUVISION/PCGCv2
     # Symmetric Metrics. D1 mse, D1 hausdorff.

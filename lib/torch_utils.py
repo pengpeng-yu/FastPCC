@@ -1,7 +1,8 @@
 import os
 import platform
+import math
 from functools import wraps
-from typing import List, Tuple, Union, Dict
+from typing import List, Tuple, Union, Dict, Optional
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -72,20 +73,25 @@ class MLPBlock(nn.Module):
         input: (N, C_in, L_1, ..., L_n,)
         output: (N, C_out, L_1, ..., L_n)
     """
-    def __init__(self, in_channels, out_channels, activation='leaky_relu(0.2)', batchnorm='nn.bn1d', version='linear',
-                 skip_connection=None):
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 bn: Optional[str] = 'nn.bn1d',
+                 act: Optional[str] = 'leaky_relu(0.2)',
+                 version: str = 'linear',
+                 skip_connection: Optional[str] = None):
         super(MLPBlock, self).__init__()
         assert version in ['linear', 'conv']
-        assert activation is None or activation.split('(', 1)[0] in ['relu', 'leaky_relu']
-        assert batchnorm in ['nn.bn1d', 'custom', None]
+        assert act is None or act.split('(', 1)[0] in ['relu', 'leaky_relu']
+        assert bn in ['nn.bn1d', 'custom', None]
         assert skip_connection in ['sum', 'concat', None]
 
-        if batchnorm == 'nn.bn1d':
+        if bn == 'nn.bn1d':
             self.bn = nn.BatchNorm1d(out_channels)
-        elif batchnorm == 'custom':
+        elif bn == 'custom':
             assert version == 'linear'
             self.bn = BatchNorm1dChnlLast(out_channels)
-        elif batchnorm is None:
+        elif bn is None:
             self.bn = None
         else: raise NotImplementedError
 
@@ -94,17 +100,17 @@ class MLPBlock(nn.Module):
         elif version == 'conv':
             self.mlp = nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=self.bn is None)
 
-        if activation is None:
-            self.activation = None
-        elif activation == 'relu':
-            self.activation = nn.ReLU(inplace=True)
-        elif activation.startswith('leaky_relu'):
-            self.activation = nn.LeakyReLU(
-                negative_slope=float(activation.split('(', 1)[1].split(')', 1)[0]),
+        if act is None:
+            self.act = None
+        elif act == 'relu':
+            self.act = nn.ReLU(inplace=True)
+        elif act.startswith('leaky_relu'):
+            self.act = nn.LeakyReLU(
+                negative_slope=float(act.split('(', 1)[1].split(')', 1)[0]),
                 inplace=True)
         else: raise NotImplementedError
 
-        if self.bn is None and self.activation is None:
+        if self.bn is None and self.act is None:
             print('Warning: You are using a MLPBlock without activation nor batchnorm, '
                   'which is identical to a nn.Linear(bias=True) object')
 
@@ -130,8 +136,8 @@ class MLPBlock(nn.Module):
             elif self.bn is not None:
                 x = self.bn(x)
 
-            if self.activation is not None:
-                x = self.activation(x)
+            if self.act is not None:
+                x = self.act(x)
 
             if len(ori_shape) != 3:
                 x = x.view(*ori_shape[:-1], self.out_channels)
@@ -151,7 +157,7 @@ class MLPBlock(nn.Module):
 
             x = self.mlp(x)
             if self.bn is not None: x = self.bn(x)
-            if self.activation is not None: x = self.activation(x)
+            if self.act is not None: x = self.act(x)
 
             if len(ori_shape) != 3:
                 x = x.view(ori_shape[0], self.out_channels, *ori_shape[2:])
@@ -166,7 +172,7 @@ class MLPBlock(nn.Module):
 
     def __repr__(self):
         return f'MLPBlock(in_channels={self.in_channels}, out_channels={self.out_channels}, ' \
-               f'activation={self.activation}, batchnorm={self.bn}, version={self.version}, ' \
+               f'activation={self.act}, bn={self.bn}, version={self.version}, ' \
                f'skip_connection={self.skip_connection}'
 
 
@@ -283,23 +289,90 @@ def minkowski_tensor_wrapped(inout_mapping_indexes: str = '00', add_batch_dim=Tr
 
             else:
                 # Function call
-                returned = list(func(*new_pos_args, **kwargs))
+                ret = list(func(*new_pos_args, **kwargs))
 
                 for in_idx, out_idx in arg_mapping_dict.items():
-                    assert isinstance(returned[out_idx], torch.Tensor)
+                    assert isinstance(ret[out_idx], torch.Tensor)
                     if out_idx != 'None':
-                        returned[out_idx] = ME.SparseTensor(
-                            returned[out_idx][0] if add_batch_dim else returned[out_idx],
+                        ret[out_idx] = ME.SparseTensor(
+                            ret[out_idx][0] if add_batch_dim else ret[out_idx],
                             coordinate_map_key=arg_coords_keys[in_idx],
                             coordinate_manager=arg_coord_mgrs[in_idx])
 
-                if len(returned) == 1:
-                    returned = returned[0]
+                if len(ret) == 1:
+                    ret = ret[0]
                 else:
-                    returned = tuple(returned)
-                return returned
+                    ret = tuple(ret)
+                return ret
         return wrapped
     return func_decorator
+
+
+def minkowski_tensor_split(x: ME.SparseTensor, split_size: Union[int, List[int]]) \
+        -> List[ME.SparseTensor]:
+    ret = []
+
+    if isinstance(split_size, List):
+        points = torch.empty(len(split_size), 2, dtype=torch.long)
+        points[:, 1] = torch.cumsum(torch.tensor(split_size), dim=0)
+        points[1:, 0] = points[:-1, 1]
+        points[0, 0] = 0
+
+    elif isinstance(split_size, int):
+        block_num = math.ceil(x.F.shape[1] / split_size)
+        assert block_num > 1
+        print(block_num)
+        points = torch.empty(block_num, 2, dtype=torch.long)
+        points[:, 0] = torch.arange(0, block_num, dtype=torch.long) * split_size
+        points[:-1, 1] = points[1:, 0]
+        points[-1, 1] = x.F.shape[1]
+
+    else: raise NotImplementedError
+
+    for start, end in points:
+        ret.append(ME.SparseTensor(
+            features=x.F[:, start: end],
+            coordinate_map_key=x.coordinate_map_key,
+            coordinate_manager=x.coordinate_manager))
+    return ret
+
+
+def gumbel_sigmoid(logits, tau=1, hard=False):
+    gumbels = -torch.empty_like(
+        logits, memory_format=torch.legacy_contiguous_format).exponential_().log()  # ~Gumbel(0,1)
+    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
+    y_soft = gumbels.sigmoid()
+
+    if hard:
+        # Straight through.
+        y_hard = y_soft.round()
+        ret = y_hard - y_soft.detach() + y_soft
+    else:
+        # Reparametrization trick.
+        ret = y_soft
+    return ret
+
+
+class GumbelSigmoidMLPBlock(MLPBlock):
+    """
+    if version == 'linear':
+        input: (N, L_1, ..., L_n, C_in)
+        output: (N, L_1, ..., L_n, C_out)
+    elif version == 'conv':
+        input: (N, C_in, L_1, ..., L_n,)
+        output: (N, C_out, L_1, ..., L_n)
+    """
+    def __init__(self, in_channels, batchnorm='nn.bn1d', version='linear',
+                 skip_connection=None, tau=1, hard=False):
+        super(GumbelSigmoidMLPBlock, self).__init__(in_channels=in_channels, out_channels=1, bn=batchnorm, act=None,
+                                                    version=version, skip_connection=skip_connection)
+        self.tau = tau
+        self.hard = hard
+
+    def forward(self, x):
+        logits = super(GumbelSigmoidMLPBlock, self).forward(x)
+        logits = gumbel_sigmoid(logits, tau=self.tau, hard=self.hard)
+        return logits * x
 
 
 if __name__ == '__main__':

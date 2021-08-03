@@ -15,7 +15,7 @@ class PointLayerMessage:
                  feature: Optional[torch.Tensor] = None,
                  raw_neighbors_feature: Optional[torch.Tensor] = None,
                  neighbors_idx: Optional[torch.Tensor] = None,
-                 cached_xyz: Optional[torch.Tensor] = None,
+                 cached_xyz: Optional[List[torch.Tensor]] = None,
                  cached_feature: Optional[List[torch.Tensor]] = None,
                  cached_sample_indexes: Optional[List[torch.Tensor]] = None):
         """
@@ -208,10 +208,10 @@ class DeepRotationInvariantDistFea(RotationInvariantDistFea):  # deprecated
         mlp_relative_fea_in_chnls = (self.intra_anchor_dists_chnls + extra_intra_anchor_dists_chnls) * 2 \
                                     + self.inter_anchor_dists_chnls
 
-        self.mlp_intra_dist = MLPBlock(self.intra_anchor_dists_chnls, extra_intra_anchor_dists_chnls,
-                                       activation='leaky_relu(0.2)', batchnorm='nn.bn1d', skip_connection='concat')
-        self.mlp_relative_fea = MLPBlock(mlp_relative_fea_in_chnls, extra_relative_fea_chnls,
-                                         activation='leaky_relu(0.2)', batchnorm='nn.bn1d', skip_connection='concat')
+        self.mlp_intra_dist = MLPBlock(self.intra_anchor_dists_chnls, extra_intra_anchor_dists_chnls, bn='nn.bn1d',
+                                       act='leaky_relu(0.2)', skip_connection='concat')
+        self.mlp_relative_fea = MLPBlock(mlp_relative_fea_in_chnls, extra_relative_fea_chnls, bn='nn.bn1d',
+                                         act='leaky_relu(0.2)', skip_connection='concat')
 
         # assert extra_intra_anchor_dists_chnls >= self.intra_anchor_dists_chnls
         # assert extra_relative_fea_chnls >= self.inter_anchor_dists_chnls
@@ -335,14 +335,13 @@ class TransitionDownWithDistFea(TransitionDown):
         # assert self.in_channels >= self.neighbor_fea_generator.channels
 
         self.mlp_anchor_transition_fea = nn.Sequential(
-            MLPBlock(self.neighbor_fea_generator.channels, self.transition_fea_chnls,
-                     activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
-            MLPBlock(self.transition_fea_chnls, self.transition_fea_chnls,
-                     activation='leaky_relu(0.2)', batchnorm='nn.bn1d'))
+            MLPBlock(self.neighbor_fea_generator.channels, self.transition_fea_chnls, bn='nn.bn1d',
+                     act='leaky_relu(0.2)'),
+            MLPBlock(self.transition_fea_chnls, self.transition_fea_chnls, bn='nn.bn1d', act='leaky_relu(0.2)'))
 
-        self.mlp_out = nn.Sequential(MLPBlock(self.in_channels + self.transition_fea_chnls,
-                                              self.out_channels,
-                                              activation='leaky_relu(0.2)', batchnorm='nn.bn1d'))
+        self.mlp_out = nn.Sequential(
+            MLPBlock(self.in_channels + self.transition_fea_chnls, self.out_channels, bn='nn.bn1d',
+                     act='leaky_relu(0.2)'))
 
     def forward(self, msg: PointLayerMessage):
         batch_size, points_num, _ = msg.xyz.shape
@@ -433,23 +432,22 @@ class LocalFeatureAggregation(nn.Module):
         # assert neighbor_fea_out_chnls >= neighbor_feature_generator.channels
 
         self.mlp_raw_neighbor_fea = nn.Sequential(
-            MLPBlock(neighbor_feature_generator.channels, raw_neighbor_fea_out_chnls,
-                     activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
-            MLPBlock(raw_neighbor_fea_out_chnls, raw_neighbor_fea_out_chnls,
-                     activation='leaky_relu(0.2)', batchnorm='nn.bn1d'))
+            MLPBlock(neighbor_feature_generator.channels, raw_neighbor_fea_out_chnls, bn='nn.bn1d',
+                     act='leaky_relu(0.2)'),
+            MLPBlock(raw_neighbor_fea_out_chnls, raw_neighbor_fea_out_chnls, bn='nn.bn1d', act='leaky_relu(0.2)'))
 
         if in_channels != 0:
             self.neighbor_fea_chnls = in_channels + raw_neighbor_fea_out_chnls
         else:
             self.neighbor_fea_chnls = neighbor_feature_generator.channels + raw_neighbor_fea_out_chnls
-        self.mlp_neighbor_fea = nn.Sequential(MLPBlock(self.neighbor_fea_chnls, self.neighbor_fea_chnls,
-                                                       activation='leaky_relu(0.2)', batchnorm='nn.bn1d'))
+        self.mlp_neighbor_fea = nn.Sequential(
+            MLPBlock(self.neighbor_fea_chnls, self.neighbor_fea_chnls, bn='nn.bn1d', act='leaky_relu(0.2)'))
 
         self.mlp_attn = nn.Linear(self.neighbor_fea_chnls, self.neighbor_fea_chnls, bias=False)
-        self.mlp_out = MLPBlock(self.neighbor_fea_chnls, out_channels, activation=None, batchnorm='nn.bn1d')
+        self.mlp_out = MLPBlock(self.neighbor_fea_chnls, out_channels, bn='nn.bn1d', act=None)
 
         if in_channels != 0:
-            self.mlp_shortcut = MLPBlock(in_channels, out_channels, None, 'nn.bn1d')
+            self.mlp_shortcut = MLPBlock(in_channels, out_channels, 'nn.bn1d', None)
         else:
             self.mlp_shortcut = None
 

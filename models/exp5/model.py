@@ -13,7 +13,6 @@ class PointCompressor(nn.Module):
         super().__init__()
         self.cfg = cfg
         neighbor_fea_generator = RandLANeighborFea(cfg.neighbor_num)
-        # TODO: should I use Gumbel-Softmax trick?
         self.encoder_layers = [LFA(3, neighbor_fea_generator, 16, 24),
                                LFA(24, neighbor_fea_generator, 16, 32),
                                LFA(32, neighbor_fea_generator, 16, 48),
@@ -25,15 +24,15 @@ class PointCompressor(nn.Module):
         self.encoder_layers = nn.Sequential(*self.encoder_layers)
         self.encoded_points_num = cfg.input_points_num
 
-        self.mlp_enc_out = nn.Sequential(MLPBlock(128, 128, activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
-                                         MLPBlock(128, 32 * 3, activation=None, batchnorm='nn.bn1d'))
+        self.mlp_enc_out = nn.Sequential(MLPBlock(128, 128, bn='nn.bn1d', act='leaky_relu(0.2)'),
+                                         MLPBlock(128, 32 * 3, bn='nn.bn1d', act=None))
 
         self.decoder_layers = [LFA(32 * 3, neighbor_fea_generator, 128, 128),
                                LFA(128, neighbor_fea_generator, 128, 128)]
         self.decoder_layers = nn.Sequential(*self.decoder_layers)
 
-        self.mlp_dec_out = nn.Sequential(MLPBlock(128, 128, activation='leaky_relu(0.2)', batchnorm='nn.bn1d'),
-                                         MLPBlock(128, 3, activation=None, batchnorm='nn.bn1d'))
+        self.mlp_dec_out = nn.Sequential(MLPBlock(128, 128, bn='nn.bn1d', act='leaky_relu(0.2)'),
+                                         MLPBlock(128, 3, bn='nn.bn1d', act=None))
 
     def forward(self, fea):
         if self.training: ori_fea = fea
