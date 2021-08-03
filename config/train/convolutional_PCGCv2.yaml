@@ -1,9 +1,22 @@
 model_path: models.convolutional.baseline
+model:
+  input_feature_type: 'Occupation'
+  res_block_type: 'InceptionResNet'
+  use_batch_norm: False
+  use_skip_connection: False
+  encoder_channels: Tuple[int] = (16, 32, 64, 32)
+  compressed_channels: int = 8
+  decoder_channels: Tuple[int] = (64, 32, 16)
+  reconstruct_loss_type: 'BCE'
+  adaptive_pruning: bool = True
+  adaptive_pruning_num_scaler: float = 1.0
+
 
 train:
   rundir_name: 'train_convolutional_<autoindex>'
   device: '2,3'
   amp: False
+  more_reproducible: True
   batch_size: 24
   num_workers: 4
   optimizer: adam
@@ -15,8 +28,6 @@ train:
 
   learning_rate: 0.0001
   epochs: 10
-
-  more_reproducible: True
 
   ckpt_frequency: 1
   lr_step_size: 2

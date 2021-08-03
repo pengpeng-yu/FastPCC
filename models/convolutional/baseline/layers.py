@@ -96,11 +96,12 @@ class Encoder(nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
+                 intra_channels: Tuple[int],
                  res_blocks_num: int,
                  res_block_type: str,
                  use_batch_norm: bool,
-                 intra_channels: Tuple[int] = (16, 32, 64, 32),
-                 use_skip_connection=False):
+                 use_skip_connection: bool,
+                 skip_connection_channels: Tuple[int] = (0, 0)):
         super(Encoder, self).__init__()
         assert len(intra_channels) == 4
 
@@ -132,20 +133,18 @@ class Encoder(nn.Module):
         if self.use_skip_connection:
             self.skip_block0 = nn.Sequential(
                 ConvBlock(ch[1], ch[1], 3, 1, bn=use_batch_norm),
-                ConvBlock(ch[1], ch[3], 4, 4, bn=use_batch_norm),
-                ConvBlock(ch[3], ch[3], 3, 1, bn=use_batch_norm, act=None))
+                ConvBlock(ch[1], skip_connection_channels[0], 4, 4, bn=use_batch_norm),
+                ConvBlock(skip_connection_channels[0],
+                          skip_connection_channels[0], 3, 1, bn=use_batch_norm, act=None))
 
             self.skip_block1 = nn.Sequential(
                 ConvBlock(ch[2], ch[2], 3, 1, bn=use_batch_norm),
-                ConvBlock(ch[2], ch[3], 2, 2, bn=use_batch_norm),
-                ConvBlock(ch[3], ch[3], 3, 1, bn=use_batch_norm, act=None))
-
-            self.skip_block0_channels = ch[3]
-            self.skip_block1_channels = ch[3]
+                ConvBlock(ch[2], skip_connection_channels[1], 2, 2, bn=use_batch_norm),
+                ConvBlock(skip_connection_channels[1],
+                          skip_connection_channels[1], 3, 1, bn=use_batch_norm, act=None))
 
         else:
             self.skip_block0 = self.skip_block1 = None
-            self.skip_block0_channels = self.skip_block1_channels = 0
 
     def forward(self, x) -> Union[ME.SparseTensor, List[ME.SparseTensor], List[List[int]]]:
         points_num_list = [[_.shape[0] for _ in x.decomposed_coordinates]]
@@ -216,12 +215,12 @@ class DecoderBlock(nn.Module):
 class Decoder(nn.Module):
     def __init__(self,
                  in_channels,
+                 intra_channels: Tuple[int],
                  res_blocks_num: int,
                  res_block_type: str,
                  use_batch_norm: bool,
-                 intra_channels: Tuple[int] = (64, 32, 16),
-                 use_skip_connection=False,
-                 skip_connection_channels=(0, 0),
+                 use_skip_connection: bool,
+                 skip_connection_channels: Tuple[int] = (0, 0),
                  skipped_fea_fusion_method='Cat',
                  **kwargs):
         super(Decoder, self).__init__()

@@ -27,22 +27,27 @@ class PCC(nn.Module):
         ME.set_sparse_tensor_operation_mode(ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
         self.encoder = Encoder(1 if cfg.input_feature_type == 'Occupation' else 3,
                                cfg.compressed_channels,
-                               3, cfg.res_block_type, cfg.use_batch_norm,
-                               use_skip_connection=cfg.use_skip_connection)
+                               cfg.encoder_channels,
+                               3, cfg.res_block_type,
+                               cfg.use_batch_norm,
+                               cfg.use_skip_connection,
+                               cfg.skip_connection_channels)
 
         self.decoder = Decoder(cfg.compressed_channels,
-                               3, cfg.res_block_type, cfg.use_batch_norm,
-                               use_skip_connection=cfg.use_skip_connection,
-                               skip_connection_channels=(self.encoder.skip_block0_channels,
-                                                         self.encoder.skip_block0_channels),
-                               skipped_fea_fusion_method=cfg.skipped_fea_fusion_method,
+                               cfg.decoder_channels,
+                               3, cfg.res_block_type,
+                               cfg.use_batch_norm,
+                               cfg.use_skip_connection,
+                               cfg.skip_connection_channels,
+                               cfg.skipped_fea_fusion_method,
                                loss_type='BCE' if cfg.reconstruct_loss_type == 'Focal'
                                else cfg.reconstruct_loss_type,
                                dist_upper_bound=cfg.dist_upper_bound)
 
         prior_channels = cfg.compressed_channels
         if cfg.use_skip_connection:
-            prior_channels += self.encoder.skip_block0_channels + self.encoder.skip_block1_channels
+            prior_channels += sum(cfg.skip_connection_channels)
+
         self.entropy_bottleneck = NoisyDeepFactorizedEntropyModel(
             prior_batch_shape=torch.Size([prior_channels]),
             coding_ndim=2,
@@ -92,8 +97,7 @@ class PCC(nn.Module):
             if self.cfg.use_skip_connection:
                 fea_tilde, *cached_feature_list = minkowski_tensor_split(
                     fea_tilde, [self.cfg.compressed_channels,
-                                self.encoder.skip_block0_channels,
-                                self.encoder.skip_block1_channels])
+                                *self.cfg.skip_connection_channels])
 
             decoder_message = self.decoder(
                 GenerativeUpsampleMessage(
@@ -123,8 +127,7 @@ class PCC(nn.Module):
             if self.cfg.use_skip_connection:
                 fea_reconstructed, *cached_feature_list = minkowski_tensor_split(
                     fea_reconstructed, [self.cfg.compressed_channels,
-                                        self.encoder.skip_block0_channels,
-                                        self.encoder.skip_block1_channels])
+                                        *self.cfg.skip_connection_channels])
 
             decoder_message = self.decoder(
                 GenerativeUpsampleMessage(

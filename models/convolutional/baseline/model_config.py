@@ -6,12 +6,16 @@ from lib.config import SimpleConfig
 
 @dataclass
 class ModelConfig(SimpleConfig):
+    input_feature_type: str = 'Occupation'  # Occupation or Coordinate
     res_block_type: str = 'InceptionResNet'  # ResNet or InceptionResNet
     use_batch_norm: bool = False
-    input_feature_type: str = 'Occupation'  # Occupation or Coordinate
     use_skip_connection: bool = False
     skipped_fea_fusion_method: str = 'Add'  # Add or Cat
+    encoder_channels: Tuple[int] = (16, 32, 64, 32)
     compressed_channels: int = 8
+    decoder_channels: Tuple[int] = (64, 32, 16)
+    skip_connection_channels: Tuple[int] = (32, 32)
+
     reconstruct_loss_type: str = 'BCE'  # BCE or Dist or Focal
     dist_upper_bound = 2.0
     adaptive_pruning: bool = True
