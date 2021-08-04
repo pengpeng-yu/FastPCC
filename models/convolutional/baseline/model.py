@@ -28,18 +28,22 @@ class PCC(nn.Module):
         self.encoder = Encoder(1 if cfg.input_feature_type == 'Occupation' else 3,
                                cfg.compressed_channels,
                                cfg.encoder_channels,
-                               3, cfg.res_block_type,
+                               cfg.basic_block_type,
+                               cfg.basic_block_num,
                                cfg.use_batch_norm,
+                               cfg.activation,
                                cfg.use_skip_connection,
                                cfg.skip_connection_channels)
 
         self.decoder = Decoder(cfg.compressed_channels,
                                cfg.decoder_channels,
-                               3, cfg.res_block_type,
+                               cfg.basic_block_type,
+                               cfg.basic_block_num,
                                cfg.use_batch_norm,
+                               cfg.activation,
                                cfg.use_skip_connection,
-                               cfg.skip_connection_channels,
                                cfg.skipped_fea_fusion_method,
+                               cfg.skip_connection_channels,
                                loss_type='BCE' if cfg.reconstruct_loss_type == 'Focal'
                                else cfg.reconstruct_loss_type,
                                dist_upper_bound=cfg.dist_upper_bound)

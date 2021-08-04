@@ -1,15 +1,17 @@
 model_path: models.convolutional.baseline
 model:
   input_feature_type: 'Occupation'
-  res_block_type: 'InceptionResNet'
+  basic_block_type: 'InceptionResNet'
+  basic_block_num: 3
   use_batch_norm: False
+  activation: 'relu'
   use_skip_connection: False
-  encoder_channels: Tuple[int] = (16, 32, 64, 32)
-  compressed_channels: int = 8
-  decoder_channels: Tuple[int] = (64, 32, 16)
+  encoder_channels: [16, 32, 64, 32]
+  compressed_channels: 8
+  decoder_channels: [64, 32, 16]
   reconstruct_loss_type: 'BCE'
-  adaptive_pruning: bool = True
-  adaptive_pruning_num_scaler: float = 1.0
+  adaptive_pruning: True
+  adaptive_pruning_num_scaler: 1.0
 
 
 train:

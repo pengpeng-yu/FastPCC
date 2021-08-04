@@ -1,11 +1,14 @@
 model_path: models.convolutional.baseline
 model:
-  use_batch_norm: True
-  use_skip_connection: False
-  encoder_channels: [16, 32, 32, 16]
-  compressed_channels: 8
-  decoder_channels: [32, 32, 16]
-  skip_connection_channels: [32, 32]
+  basic_block_type: 'ResNet'
+  basic_block_num: 3
+  use_batch_norm: False
+  activation: 'leaky_relu(0.2)'
+  use_skip_connection: True
+  encoder_channels: [8, 16, 32, 16]
+  compressed_channels: 16
+  decoder_channels: [32, 16, 1]
+  skip_connection_channels: [1, 16, 32]
 
 
 train:
@@ -33,7 +36,6 @@ train:
   test_frequency: 4
 
   dataset_path: 'lib.datasets.ShapeNetCorev2'
-
   dataset:
     random_rotation: True
     # for predicting feature points coordinates or using coordinates as input feature
@@ -43,8 +45,10 @@ train:
 #  dataset_path: 'lib.datasets.ShapeNetCorev2'
 #  dataset:
 #    data_format: '.obj'
-#    points_num: 5000000
+#    mesh_sample_points_num: 5000000
 #    resolution: 256
+#    random_rotation: True
+#    with_resolution: True
 
 
 test:
