@@ -19,6 +19,8 @@ class LowerBoundFunction(torch.autograd.Function):
 
 def lower_bound(x: torch.Tensor, bound: Union[int, float, torch.Tensor]) \
         -> torch.Tensor:
+    if not isinstance(bound, torch.Tensor):
+        bound = torch.tensor([bound], dtype=x.dtype, device=x.device)
     return LowerBoundFunction.apply(x, bound)
 
 
@@ -37,6 +39,8 @@ class UpperBoundFunction(torch.autograd.Function):
 
 def upper_bound(x: torch.Tensor, bound: Union[int, float, torch.Tensor]) \
         -> torch.Tensor:
+    if not isinstance(bound, torch.Tensor):
+        bound = torch.tensor([bound], dtype=x.dtype, device=x.device)
     return UpperBoundFunction.apply(x, bound)
 
 

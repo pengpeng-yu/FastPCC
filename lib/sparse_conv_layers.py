@@ -28,6 +28,7 @@ class GenerativeUpsampleMessage:
         self.cached_pred_list = cached_pred_list or []
         self.cached_target_list = cached_target_list or []
         self.cached_metric_list: List[Dict[str, Union[int, float]]] = []
+        self.cached_fea_module_list: List[nn.Module] = []
 
 
 class GenerativeUpsample(nn.Module):
@@ -75,20 +76,19 @@ class GenerativeUpsample(nn.Module):
         During testing, cached_target_list and target_key are no longer needed.
         """
         fea = message.fea
+        fea = self.upsample_block(fea)
 
         if self.use_cached_feature:
-            # Assume that cached_feature and fea share the same coordinate
             cached_feature = message.cached_fea_list.pop()
-            fea = self.upsample_block(fea, coordinates=cached_feature.coordinate_map_key)
+            if message.cached_fea_module_list:
+                cached_fea_module = message.cached_fea_module_list.pop()
+                cached_feature = cached_fea_module(cached_feature, coordinates=fea.coordinate_map_key)
 
             if self.cached_feature_fusion_method == 'Cat':
                 fea = ME.cat(fea, cached_feature)
             elif self.cached_feature_fusion_method == 'Add':
                 fea += cached_feature
             else: raise NotImplementedError
-
-        else:
-            fea = self.upsample_block(fea)
 
         pred = self.classify_block(fea)
 

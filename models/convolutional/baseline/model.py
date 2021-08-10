@@ -1,9 +1,9 @@
 import os
+import math
 from collections import defaultdict
 from typing import List
 from functools import partial
 
-import numpy as np
 import open3d as o3d
 import torch
 import torch.nn as nn
@@ -16,8 +16,11 @@ from lib.data_utils import PCData
 from lib.metric import mpeg_pc_error
 from lib.loss_function import chamfer_loss
 from lib.sparse_conv_layers import GenerativeUpsampleMessage
+from lib.entropy_models.distributions.uniform_noise import NoisyNormal
 from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyModel
-from models.convolutional.baseline.layers import Encoder, Decoder, DecoderBlock
+from lib.entropy_models.hyperprior import NoisyDeepFactorizedHyperPriorEntropyModel
+
+from models.convolutional.baseline.layers import Encoder, Decoder, ConvBlock
 from models.convolutional.baseline.model_config import ModelConfig
 
 
@@ -52,10 +55,42 @@ class PCC(nn.Module):
         if cfg.use_skip_connection:
             prior_channels += sum(cfg.skip_connection_channels)
 
-        self.entropy_bottleneck = NoisyDeepFactorizedEntropyModel(
-            prior_batch_shape=torch.Size([prior_channels]),
-            coding_ndim=2,
-            init_scale=5)
+        if not cfg.use_hyperprior:
+            self.entropy_bottleneck = NoisyDeepFactorizedEntropyModel(
+                prior_batch_shape=torch.Size([prior_channels]),
+                coding_ndim=2,
+                init_scale=2)
+
+        else:
+            hyper_encoder = nn.Sequential(
+                *[ConvBlock(cfg.compressed_channels, cfg.compressed_channels,
+                            3, 1,
+                            bn=cfg.use_batch_norm,
+                            act=cfg.activation if idx != 2 else None)
+                  for idx in range(3)]
+            )
+            hyper_decoder = nn.Sequential(
+                *[ConvBlock(cfg.compressed_channels, cfg.compressed_channels,
+                            3, 1,
+                            bn=cfg.use_batch_norm,
+                            act=cfg.activation if idx != 2 else None)
+                  for idx in range(3)]
+            )
+            num_scales = 64
+            scale_min, scale_max = 0.11, 256
+            offset = math.log(scale_min)
+            factor = (math.log(scale_max) - math.log(scale_min)) / (num_scales - 1)
+
+            self.entropy_bottleneck = NoisyDeepFactorizedHyperPriorEntropyModel(
+                hyper_encoder=hyper_encoder,
+                hyper_decoder=hyper_decoder,
+                hyperprior_batch_shape=torch.Size([prior_channels]),
+                coding_ndim=2,
+                prior_fn=NoisyNormal,
+                index_ranges=[64],
+                parameter_fns={'loc': lambda _: 0,
+                               'scale': lambda i: torch.exp(offset + factor * i)},
+            )
 
         self.cfg = cfg
         self.log_pred_res('init')
@@ -92,16 +127,18 @@ class PCC(nn.Module):
                                for _ in points_num_list[1:]]
 
         if self.cfg.use_skip_connection:
-            feature = ME.cat(feature, *cached_feature_list)
+            # feature = ME.cat(feature, *cached_feature_list)
+            raise NotImplementedError
 
         # bottleneck, decoder and loss during training
         if self.training:
             fea_tilde, loss_dict = self.entropy_bottleneck(feature)
 
             if self.cfg.use_skip_connection:
-                fea_tilde, *cached_feature_list = minkowski_tensor_split(
-                    fea_tilde, [self.cfg.compressed_channels,
-                                *self.cfg.skip_connection_channels])
+                # fea_tilde, *cached_feature_list = minkowski_tensor_split(
+                #     fea_tilde, [self.cfg.compressed_channels,
+                #                 *self.cfg.skip_connection_channels])
+                raise NotImplementedError
 
             decoder_message = self.decoder(
                 GenerativeUpsampleMessage(
@@ -116,6 +153,11 @@ class PCC(nn.Module):
 
             loss_dict['bits_loss'] = loss_dict['bits_loss'] * \
                 (self.cfg.bpp_loss_factor / sparse_pc.shape[0])
+
+            try:
+                loss_dict['hyper_bits_loss'] = loss_dict['hyper_bits_loss'] * \
+                    (self.cfg.bpp_loss_factor / sparse_pc.shape[0])
+            except KeyError: pass
 
             loss_dict['loss'] = sum(loss_dict.values())
             for key in loss_dict:
@@ -154,17 +196,6 @@ class PCC(nn.Module):
 
             return items_dict
 
-    def load_state_dict(self, state_dict, strict: bool = True):
-        # Dynamically update the entropy bottleneck buffers related to the CDFs
-        # update_registered_buffers(
-        #     self.entropy_bottleneck,
-        #     "entropy_bottleneck",
-        #     ["_quantized_cdf", "_offset", "_cdf_length"],
-        #     state_dict
-        # )
-        # TODO
-        return super().load_state_dict(state_dict, strict=strict)
-
     def get_reconstruct_loss(self, cached_pred_list, cached_target_list):
         if self.cfg.reconstruct_loss_type == 'BCE':
             loss_func = F.binary_cross_entropy_with_logits
@@ -194,9 +225,13 @@ class PCC(nn.Module):
         for m in self.modules():
             if isinstance(m, (ME.MinkowskiConvolution,
                               ME.MinkowskiGenerativeConvolutionTranspose)):
-                torch.nn.init.uniform_(m.kernel, -0.05, 0.05)
+                torch.nn.init.normal_(m.kernel, 0, 0.08)
                 if m.bias is not None:
                     torch.nn.init.zeros_(m.bias)
+
+        for m in self.modules():
+            if not isinstance(m, PCC) and hasattr(m, 'init_parameters'):
+                m.init_parameters()
 
     def log_pred_res(self, mode, preds=None, targets=None,
                      compressed_strings: List[bytes] = None,

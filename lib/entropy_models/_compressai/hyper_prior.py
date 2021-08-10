@@ -64,7 +64,7 @@ class FactorizedPriorGaussianConditional(nn.Module):
 
             return y_hat, tuple(s1 + b' ' + s2 for s1, s2 in zip(y_strings, z_strings))
 
-    def update(self, scale_table=None, force=True):  # TODO force
+    def update(self, scale_table=None, force=True):
         if scale_table is None:
             scale_table = get_scale_table()
         updated = self.gaussian_conditional.update_scale_table(scale_table, force=force)

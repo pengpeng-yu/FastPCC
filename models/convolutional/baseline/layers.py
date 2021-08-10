@@ -92,6 +92,10 @@ class InceptionResBlock(nn.Module):
         return out
 
 
+blocks_list = [ResBlock, InceptionResBlock]
+blocks_dict = {_.__name__: _ for _ in blocks_list}
+
+
 class Encoder(nn.Module):
     def __init__(self,
                  in_channels,
@@ -104,14 +108,11 @@ class Encoder(nn.Module):
                  use_skip_connection: bool,
                  skip_connection_channels: Tuple[int] = (0, 0, 0)):
         super(Encoder, self).__init__()
-        assert len(intra_channels) - 1 == len(skip_connection_channels)
+        if use_skip_connection:
+            assert len(intra_channels) - 1 == len(skip_connection_channels)
 
         self.use_skip_connection = use_skip_connection
-        if basic_block_type == 'ResNet':
-            basic_block = partial(ResBlock, bn=use_batch_norm, act=act)
-        elif basic_block_type == 'InceptionResNet':
-            basic_block = partial(InceptionResBlock, bn=use_batch_norm, act=act)
-        else: raise NotImplementedError
+        basic_block = partial(blocks_dict[basic_block_type], bn=use_batch_norm, act=act)
 
         self.first_block = ConvBlock(in_channels, intra_channels[0], 3, 1, bn=use_batch_norm, act=act)
         self.blocks = nn.ModuleList()
@@ -119,34 +120,35 @@ class Encoder(nn.Module):
         for idx in range(len(intra_channels) - 1):
             block = [
                 ConvBlock(intra_channels[idx],
-                          intra_channels[idx], 3, 1, bn=use_batch_norm, act=act),
-
-                ConvBlock(intra_channels[idx],
                           intra_channels[idx + 1], 2, 2, bn=use_batch_norm, act=act),
 
-                *[basic_block(intra_channels[idx + 1]) for _ in range(basic_blocks_num)]
-            ]
+                *[basic_block(intra_channels[idx + 1]) for _ in range(basic_blocks_num)],
 
-            if idx == len(intra_channels) - 2:
-                block.append(ConvBlock(intra_channels[idx + 1],
-                                       out_channels, 3, 1, bn=use_batch_norm, act=None))
+                ConvBlock(intra_channels[idx + 1],
+                          intra_channels[idx + 1] if idx != len(intra_channels) - 2 else out_channels,
+                          3, 1, bn=use_batch_norm,
+                          act=act if idx != len(intra_channels) - 2 else None),
+            ]
 
             self.blocks.append(nn.Sequential(*block))
 
         downsample_blocks_num = len(self.blocks)
 
+        # bn is always performed for skip connections
         if self.use_skip_connection:
             self.skip_blocks = nn.ModuleList()
             for idx, (ch, skip_ch) in enumerate(zip(intra_channels[:-1], skip_connection_channels)):
-                skip_block = [
-                    ConvBlock(ch, ch, 3, 1, bn=use_batch_norm, act=act),
-                    ConvBlock(ch, skip_ch,
-                              2 ** (downsample_blocks_num - idx),
-                              2 ** (downsample_blocks_num - idx), bn=use_batch_norm, act=act),
-                    ConvBlock(skip_ch, skip_ch, 3, 1, bn=use_batch_norm, act=None)
-                ]
+                self.skip_blocks.append(
+                    nn.Sequential(
+                        *[nn.Sequential(
+                            ConvBlock(ch if _ == 0 else skip_ch, skip_ch, 2, 2,
+                                      bn=True, act=act),
+                            ConvBlock(skip_ch, skip_ch, 3, 1, bn=True,
+                                      act=act if _ != downsample_blocks_num - idx - 1 else None)
+                        ) for _ in range(downsample_blocks_num - idx)]
+                    )
+                )
 
-                self.skip_blocks.append(nn.Sequential(*skip_block))
         else:
             self.skip_blocks = None
 
@@ -167,14 +169,24 @@ class Encoder(nn.Module):
 
         return x, cached_feature_list, points_num_list
 
+    def init_parameters(self):
+        if self.skip_blocks is not None:
+            for m in self.skip_blocks.modules():
+                if isinstance(m, (ME.MinkowskiConvolution,
+                                  ME.MinkowskiGenerativeConvolutionTranspose)):
+                    torch.nn.init.normal_(m.kernel, 0, 0.25)
+                    if m.bias is not None:
+                        torch.nn.init.zeros_(m.bias)
+
 
 class SequentialKwArgs(nn.Sequential):
-    def __init__(self, *args):
+    def __init__(self, *args, index: int = 0):
         super(SequentialKwArgs, self).__init__(*args)
+        self.index = index
 
     def forward(self, x, **kwargs):
         for idx, module in enumerate(self):
-            if idx == 0: x = module(x, **kwargs)
+            if idx == self.index: x = module(x, **kwargs)
             else: x = module(x)
         return x
 
@@ -182,7 +194,8 @@ class SequentialKwArgs(nn.Sequential):
 class DecoderBlock(nn.Module):
     def __init__(self,
                  in_channels,
-                 out_channels,
+                 upsample_out_channels,
+                 classifier_in_channels,
                  basic_block_type: str,
                  basic_blocks_num: int,
                  use_batch_norm: bool,
@@ -190,27 +203,24 @@ class DecoderBlock(nn.Module):
                  **kwargs):
         super(DecoderBlock, self).__init__()
         self.in_channels = in_channels
-        self.out_channels = out_channels
+        self.upsample_out_channels = upsample_out_channels
+        self.classifier_in_channels = classifier_in_channels
         self.basic_blocks_num = basic_blocks_num
 
-        if basic_block_type == 'ResNet':
-            basic_block = partial(ResBlock, bn=use_batch_norm, act=act)
-        elif basic_block_type == 'InceptionResNet':
-            basic_block = partial(InceptionResBlock, bn=use_batch_norm, act=act)
-        else: raise NotImplementedError
+        basic_block = partial(blocks_dict[basic_block_type], bn=use_batch_norm, act=act)
 
-        upsample_block = SequentialKwArgs(
-            GenConvTransBlock(self.in_channels, self.out_channels, 2, 2, bn=use_batch_norm, act=act),
-            ConvBlock(self.out_channels, self.out_channels, 3, 1, bn=use_batch_norm, act=act),
-            *[basic_block(self.out_channels) for _ in range(self.basic_blocks_num)])
+        upsample_block = nn.Sequential(
+            GenConvTransBlock(self.in_channels, self.upsample_out_channels, 2, 2, bn=use_batch_norm, act=act),
+            ConvBlock(self.upsample_out_channels, self.upsample_out_channels, 3, 1, bn=use_batch_norm, act=act),
+            *[basic_block(self.upsample_out_channels) for _ in range(self.basic_blocks_num)])
 
-        classify_block = ConvBlock(self.out_channels, 1, 3, 1, bn=use_batch_norm,
+        classify_block = ConvBlock(self.classifier_in_channels, 1, 3, 1, bn=use_batch_norm,
                                    act=act if kwargs.get('loss_type', None) == 'Dist' else None)
 
         self.generative_upsample = GenerativeUpsample(upsample_block, classify_block, **kwargs)
 
-    def forward(self, x: GenerativeUpsampleMessage):
-        return self.generative_upsample(x)
+    def forward(self, msg: GenerativeUpsampleMessage):
+        return self.generative_upsample(msg)
 
 
 class Decoder(nn.Module):
@@ -226,12 +236,24 @@ class Decoder(nn.Module):
                  skip_connection_channels: Tuple[int] = (0, 0),
                  **kwargs):
         super(Decoder, self).__init__()
-        assert len(intra_channels) == len(skip_connection_channels)
+        if use_skip_connection:
+            assert len(intra_channels) == len(skip_connection_channels)
+            assert skipped_fea_fusion_method in ['Cat', 'Add']
+            skip_connections_num = len(skip_connection_channels)
+        else:
+            skip_connections_num = 0
         self.use_skip_connection = use_skip_connection
 
         self.blocks = nn.Sequential(*[
-            DecoderBlock(in_channels if idx == 0 else intra_channels[idx - 1], ch,
-                         basic_block_type, basic_blocks_num, use_batch_norm, act,
+            DecoderBlock(in_channels if idx == 0
+                         else (intra_channels[idx - 1]
+                               if not use_skip_connection or skipped_fea_fusion_method == 'Add'
+                               else intra_channels[idx - 1] + skip_connection_channels[skip_connections_num - idx]),
+                         ch,
+                         ch if not use_skip_connection or skipped_fea_fusion_method == 'Add'
+                         else ch + skip_connection_channels[skip_connections_num - idx - 1],
+                         basic_block_type, basic_blocks_num,
+                         use_batch_norm, act,
                          use_cached_feature=use_skip_connection,
                          cached_feature_fusion_method=skipped_fea_fusion_method,
                          **kwargs) for idx, ch in enumerate(intra_channels)])
@@ -239,21 +261,24 @@ class Decoder(nn.Module):
         if use_skip_connection:
             self.skip_blocks = nn.ModuleList()
             for idx, (ch, intra_ch) in enumerate(zip(skip_connection_channels, intra_channels[::-1])):
+                skip_intra_ch = intra_ch if skipped_fea_fusion_method == 'Add' else ch
                 self.skip_blocks.append(
-                    nn.Sequential(
-                        GenConvTransBlock(ch, intra_ch,
+                    SequentialKwArgs(
+                        ConvBlock(ch, ch, 3, 1,
+                                  bn=use_batch_norm, act=act),
+                        GenConvTransBlock(ch, skip_intra_ch,
                                           2 ** (len(skip_connection_channels) - idx),
                                           2 ** (len(skip_connection_channels) - idx),
                                           bn=use_batch_norm, act=act),
-                        ConvBlock(intra_ch, intra_ch, 3, 1,
-                                  bn=use_batch_norm, act=None)
+                        ConvBlock(skip_intra_ch, skip_intra_ch, 3, 1,
+                                  bn=use_batch_norm, act=None),
+                        index=1
                     )
                 )
         else:
             self.skip_blocks = None
 
-    def forward(self, x: GenerativeUpsampleMessage):
+    def forward(self, msg: GenerativeUpsampleMessage):
         if self.use_skip_connection:
-            for idx, skip_block in enumerate(self.skip_blocks):
-                x.cached_fea_list[idx] = skip_block(x.cached_fea_list[idx])
-        return self.blocks(x)
+            msg.cached_fea_module_list.extend(self.skip_blocks)
+        return self.blocks(msg)

@@ -151,10 +151,10 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     # cache
     dataset: torch.utils.data.Dataset = Dataset(cfg.train.dataset, True, logger)
     if hasattr(dataset, 'gen_cache') and dataset.gen_cache is True:
-        datacahe_sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=False) \
+        datacache_sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=False) \
             if global_rank != -1 else None
         datacache_loader = torch.utils.data.DataLoader(dataset, process_batch_size,
-                                                       sampler=datacahe_sampler,
+                                                       sampler=datacache_sampler,
                                                        num_workers=cfg.train.num_workers * 2, drop_last=False,
                                                        collate_fn=lambda batch: None)
         for _ in tqdm(datacache_loader):
@@ -190,7 +190,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                             'weight_decay': cfg.train.weight_decay}])
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
     if aux_parameters:
-        aux_optimizer = AuxOptimizer([{'params': aux_parameters, 'lr': cfg.train.learning_rate,
+        aux_optimizer = AuxOptimizer([{'params': aux_parameters, 'lr': cfg.train.aux_learning_rate,
                                        'weight_decay': cfg.train.aux_weight_decay}])
         aux_scheduler = torch.optim.lr_scheduler.StepLR(aux_optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
     else:
@@ -300,6 +300,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 # tensorboard items
                 if local_rank in (-1, 0):
                     tb_writer.add_scalar('Train/Learning_rate', optimizer.param_groups[0]['lr'], global_step)
+                    tb_writer.add_scalar('Train/Aux_Learning_rate', aux_optimizer.param_groups[0]['lr'], global_step)
                     total_wo_aux = 0.0
                     for item_name, item in loss_dict.items():
                         if item_name == 'loss':
@@ -320,6 +321,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             tb_writer.add_scalar('Train/Epochs', epoch, global_step - 1)
 
         # Save checkpoints
+        model.eval()  # Set training = False before saving, which is necessary for entropy models.
         if local_rank in (-1, 0) and (epoch + 1) % cfg.train.ckpt_frequency == 0:
             ckpt_name = 'epoch_{}.pt'.format(epoch)
             ckpt = {

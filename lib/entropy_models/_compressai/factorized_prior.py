@@ -147,7 +147,6 @@ class FactorizedPrior(EntropyModel):
 
         return likelihood
 
-    # TODO: implement as independent function
     @minkowski_tensor_wrapped('10')
     def forward(self, x: torch.Tensor) \
             -> Tuple[torch.Tensor, Union[Dict[str, torch.Tensor], List[bytes]]]:

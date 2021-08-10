@@ -1,7 +1,7 @@
 model_path: models.convolutional.baseline
 model:
   input_feature_type: 'Occupation'
-  basic_block_type: 'InceptionResNet'
+  basic_block_type: 'InceptionResBlock'
   basic_block_num: 3
   use_batch_norm: False
   activation: 'relu'
@@ -29,6 +29,7 @@ train:
   max_grad_norm: 1.0
 
   learning_rate: 0.0001
+  aux_learning_rate: 0.0001
   epochs: 10
 
   ckpt_frequency: 1

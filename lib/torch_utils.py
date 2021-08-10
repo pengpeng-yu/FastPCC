@@ -292,8 +292,8 @@ def minkowski_tensor_wrapped(inout_mapping_indexes: str = '00', add_batch_dim=Tr
                 ret = list(func(*new_pos_args, **kwargs))
 
                 for in_idx, out_idx in arg_mapping_dict.items():
-                    assert isinstance(ret[out_idx], torch.Tensor)
                     if out_idx != 'None':
+                        assert isinstance(ret[out_idx], torch.Tensor)
                         ret[out_idx] = ME.SparseTensor(
                             ret[out_idx][0] if add_batch_dim else ret[out_idx],
                             coordinate_map_key=arg_coords_keys[in_idx],

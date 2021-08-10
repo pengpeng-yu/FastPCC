@@ -6,6 +6,7 @@ import torch.distributions
 from torch.distributions import Distribution
 
 from .deep_factorized import DeepFactorized
+from . import special_math
 
 
 def _logsum_expbig_minus_expsmall(big, small):
@@ -21,13 +22,12 @@ class UniformNoiseAdapter(Distribution):
     def __init__(self, base: Distribution):
         super(UniformNoiseAdapter, self).__init__(base.batch_shape)
         self.base = base
-        assert hasattr(self.base, 'cdf')
-        assert hasattr(self.base, 'log_cdf')
+        assert hasattr(self.base, 'log_cdf') or hasattr(self.base, 'cdf')
 
     def log_prob(self, y):
         try:
             return self._log_prob_with_logsf_and_logcdf(y)
-        except NotImplementedError:
+        except (NotImplementedError, AttributeError):
             return self._log_prob_with_logcdf(y)
 
     def _log_prob_with_logcdf(self, y):
@@ -62,7 +62,7 @@ class UniformNoiseAdapter(Distribution):
     def prob(self, value):
         try:
             return self._prob_with_sf_and_cdf(value)
-        except NotImplementedError:
+        except (NotImplementedError, AttributeError):
             return self._prob_with_cdf(value)
 
     def _prob_with_cdf(self, y):
@@ -109,6 +109,17 @@ class NoisyDeepFactorized(UniformNoiseAdapter):
                            factors=factors))
 
 
+class Normal(torch.distributions.Normal):
+    def _z(self, x, scale=None):
+        return (x - self.loc) / (self.scale if scale is None else scale)
+
+    def log_cdf(self, x):
+        return special_math.log_ndtr(self._z(x))
+
+    def log_survival_function(self, x):
+        return special_math.log_ndtr(-self._z(x))
+
+
 class NoisyNormal(UniformNoiseAdapter):
     def __init__(self, *args, **kwargs):
-        super().__init__(torch.distributions.Normal(*args, **kwargs))
+        super().__init__(Normal(*args, **kwargs))

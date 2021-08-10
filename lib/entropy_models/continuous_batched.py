@@ -10,6 +10,7 @@ from torch.distributions import Distribution
 from .distributions.deep_factorized import DeepFactorized
 from .distributions.uniform_noise import NoisyDeepFactorized
 from .continuous_base import ContinuousEntropyModelBase
+
 from lib.torch_utils import minkowski_tensor_wrapped
 
 
@@ -21,6 +22,10 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16):
         """
+        Generally, prior object should have parameters on target device when being
+        constructed, since functions of nn.Module like "to()" and "cuda()" have
+        no effect on it.
+
         The innermost `self.coding_ndim` dimensions are treated as one coding unit,
         i.e. are compressed into one string each. Any additional dimensions to the
         left are treated as batch dimensions.
@@ -87,13 +92,15 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         strings = []
         indexes = indexes.reshape(-1).tolist()
         for unit_idx in range(x.shape[0]):
-            strings.append(self.range_encoder.encode_with_indexes(
-                x[unit_idx].reshape(-1).tolist(),
-                indexes,
-                self.prior.cached_cdf_table.tolist(),
-                self.prior.cached_cdf_length.tolist(),
-                self.prior.cached_cdf_offset.tolist()
-            ))
+            strings.append(
+                self.range_encoder.encode_with_indexes(
+                    x[unit_idx].reshape(-1).tolist(),
+                    indexes,
+                    self.prior.cached_cdf_table_list,
+                    self.prior.cached_cdf_length_list,
+                    self.prior.cached_cdf_offset_list
+                )
+            )
         strings = np.array(strings).reshape(batch_shape).tolist()
         return strings, broadcast_shape
 
@@ -107,13 +114,14 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         batch_shape = strings.shape
         strings = strings.reshape(-1)
         for s in strings:
-            symbols.append(self.range_decoder.decode_with_indexes(
-                s.item(),
-                indexes,
-                self.prior.cached_cdf_table.tolist(),
-                self.prior.cached_cdf_length.tolist(),
-                self.prior.cached_cdf_offset.tolist()
-            ))
+            symbols.append(
+                self.range_decoder.decode_with_indexes(
+                    s.item(), indexes,
+                    self.prior.cached_cdf_table_list,
+                    self.prior.cached_cdf_length_list,
+                    self.prior.cached_cdf_offset_list
+                )
+            )
         symbols = torch.tensor(symbols)
         symbols = self.dequantize(symbols)
         symbols = symbols.reshape(batch_shape + broadcast_shape + self.prior.batch_shape)
@@ -124,27 +132,29 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
     def __init__(self,
                  prior_batch_shape: torch.Size,
                  coding_ndim: int,
-                 prior_init_scale=10,
-                 prior_num_filters=(1, 3, 3, 3, 3, 1),
+                 num_filters=(1, 3, 3, 3, 3, 1),
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16):
 
         prior_weights, prior_biases, prior_factors = \
-                DeepFactorized.make_parameters(batch_shape=prior_batch_shape,
-                                               init_scale=prior_init_scale,
-                                               num_filters=prior_num_filters)
+            DeepFactorized.make_parameters(
+                batch_shape=prior_batch_shape,
+                init_scale=init_scale,
+                num_filters=num_filters)
 
         super(ContinuousBatchedEntropyModel, self).__init__(
-            prior=NoisyDeepFactorized(batch_shape=prior_batch_shape,
-                                      weights=prior_weights,
-                                      biases=prior_biases,
-                                      factors=prior_factors),
+            prior=NoisyDeepFactorized(
+                batch_shape=prior_batch_shape,
+                weights=prior_weights,
+                biases=prior_biases,
+                factors=prior_factors),
             coding_ndim=coding_ndim,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision,
         )
 
+        # Keep references to ParameterList objects here to make them a part of state dict.
         self.prior_weights, self.prior_biases, self.prior_factors = \
             prior_weights, prior_biases, prior_factors

@@ -1,22 +1,23 @@
 model_path: models.convolutional.baseline
 model:
-  basic_block_type: 'ResNet'
+  basic_block_type: 'InceptionResBlock'
   basic_block_num: 3
   use_batch_norm: False
   activation: 'leaky_relu(0.2)'
-  use_skip_connection: True
-  encoder_channels: [8, 16, 32, 16]
-  compressed_channels: 16
-  decoder_channels: [32, 16, 1]
-  skip_connection_channels: [1, 16, 32]
+  use_skip_connection: False
+  encoder_channels: [8, 16, 64, 64]
+  compressed_channels: 32
+  decoder_channels: [64, 32, 16]
+  skip_connection_channels: [4, 8, 32]
+  use_hyperprior: True
 
 
 train:
   rundir_name: 'train_convolutional_<autoindex>'
   device: '2,3'
   amp: False
-  more_reproducible: True
-  batch_size: 24
+  more_reproducible: False
+  batch_size: 32
   num_workers: 4
   optimizer: adam
   aux_optimizer: sgd
@@ -26,12 +27,13 @@ train:
   max_grad_norm: 1.0
 
   learning_rate: 0.0005
+  aux_learning_rate: 0.0005
   epochs: 20
 
   ckpt_frequency: 1
   lr_step_size: 4
-  lr_step_gamma: 0.5
-  resume_from_ckpt: ''  # 'runs/train_convolutional_16/ckpts/epoch_<maxindex>.pt'
+  lr_step_gamma: 0.3
+  resume_from_ckpt:  'runs/train_convolutional_-1/ckpts/epoch_<maxindex>.pt'
   resume_items: ['state_dict']
   test_frequency: 4
 
@@ -42,6 +44,7 @@ train:
     with_resolution: True
 
 # use mesh objects to generate voxelized points with high resolution
+# TODO: expand resolution gradually during training. lr 3e-5 for r 256
 #  dataset_path: 'lib.datasets.ShapeNetCorev2'
 #  dataset:
 #    data_format: '.obj'

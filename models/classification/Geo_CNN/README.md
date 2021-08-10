@@ -32,7 +32,7 @@ A Pytorch re-implementation of “Modeling Local Geometric Structure of 3D Point
   - Then let’s start testing: `python geocnn.py`
 
 ## Bibtex
-```python
+```
 @article{DBLP:journals/corr/abs-1811-07782,
   author    = {Shiyi Lan and
               Ruichi Yu and
