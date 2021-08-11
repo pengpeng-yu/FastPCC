@@ -100,13 +100,13 @@ class Encoder(nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 intra_channels: Tuple[int],
+                 intra_channels: Tuple[int, ...],
                  basic_block_type: str,
                  basic_blocks_num: int,
                  use_batch_norm: bool,
                  act: Optional[str],
                  use_skip_connection: bool,
-                 skip_connection_channels: Tuple[int] = (0, 0, 0)):
+                 skip_connection_channels: Tuple[int, ...] = (0, 0, 0)):
         super(Encoder, self).__init__()
         if use_skip_connection:
             assert len(intra_channels) - 1 == len(skip_connection_channels)
@@ -124,9 +124,10 @@ class Encoder(nn.Module):
 
                 *[basic_block(intra_channels[idx + 1]) for _ in range(basic_blocks_num)],
 
+                # bn is always performed for the last conv of encoder
                 ConvBlock(intra_channels[idx + 1],
                           intra_channels[idx + 1] if idx != len(intra_channels) - 2 else out_channels,
-                          3, 1, bn=use_batch_norm,
+                          3, 1, bn=use_batch_norm if idx != len(intra_channels) - 2 else True,
                           act=act if idx != len(intra_channels) - 2 else None),
             ]
 
@@ -134,7 +135,7 @@ class Encoder(nn.Module):
 
         downsample_blocks_num = len(self.blocks)
 
-        # bn is always performed for skip connections
+        # bn is always performed for skip connections of encoder
         if self.use_skip_connection:
             self.skip_blocks = nn.ModuleList()
             for idx, (ch, skip_ch) in enumerate(zip(intra_channels[:-1], skip_connection_channels)):
@@ -226,14 +227,14 @@ class DecoderBlock(nn.Module):
 class Decoder(nn.Module):
     def __init__(self,
                  in_channels,
-                 intra_channels: Tuple[int],
+                 intra_channels: Tuple[int, ...],
                  basic_block_type: str,
                  basic_blocks_num: int,
                  use_batch_norm: bool,
                  act: Optional[str],
                  use_skip_connection: bool,
                  skipped_fea_fusion_method: str,
-                 skip_connection_channels: Tuple[int] = (0, 0),
+                 skip_connection_channels: Tuple[int, ...] = (0, 0),
                  **kwargs):
         super(Decoder, self).__init__()
         if use_skip_connection:

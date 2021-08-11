@@ -2,7 +2,7 @@ import os
 import platform
 import math
 from functools import wraps
-from typing import List, Tuple, Union, Dict, Optional
+from typing import List, Tuple, Union, Dict, Optional, Callable
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -236,75 +236,95 @@ def unbatched_coordinates(coords: torch.Tensor):
     return [coords[coords[:, 0] == batch_idx, 1:] for batch_idx in range(coords[:, 0].max() + 1)]
 
 
-def minkowski_tensor_wrapped(inout_mapping_indexes: str = '00', add_batch_dim=True):
-    arg_mapping_dict = {}  # type: Dict[Union[int, str], int]
-    for m in inout_mapping_indexes.split(' '):
-        if len(m) == 2:
-            in_idx, out_idx = m[0], m[1]
-        else:
-            in_idx, out_idx = m.split('->')
+def minkowski_tensor_wrapped(inout_mapping_dict: Dict[Union[int, str], Optional[int]] = None,
+                             add_batch_dim: bool = True,
+                             extra_preparation: Dict[Union[int, str], Callable] = None):
 
-        try:
-            in_idx = int(in_idx)
-        except ValueError: pass
-
-        try:
-            out_idx = int(out_idx)
-        except ValueError: pass
-
-        arg_mapping_dict[in_idx] = out_idx
-    assert arg_mapping_dict != {}
+    inout_mapping_dict = inout_mapping_dict or {}
+    predefined_extra_preparation = extra_preparation or {}
 
     def func_decorator(func):
         @wraps(func)
-        def wrapped(*args, **kwargs):
-            try:
-                arg_coords_keys = {}
-                arg_coord_mgrs = {}
+        def wrapped_func(*args,
+                         extra_preparation: Dict[Union[int, str], Callable] = None,
+                         **kwargs):
+            if extra_preparation is None:
+                extra_preparation = predefined_extra_preparation
 
-                new_pos_args = list(args)
-                for idx, in_idx in enumerate(arg_mapping_dict):
-                    if isinstance(in_idx, int):
-                        assert isinstance(new_pos_args[in_idx], ME.SparseTensor)
-                        arg_coords_keys[in_idx] = new_pos_args[in_idx].coordinate_map_key
-                        arg_coord_mgrs[in_idx] = new_pos_args[in_idx].coordinate_manager
-                        new_pos_args[in_idx] = new_pos_args[in_idx].F
-                        if add_batch_dim:
-                            new_pos_args[in_idx] = new_pos_args[in_idx][None]
+            arg_coords_keys = {}
+            arg_coord_mgs = {}
 
-                    else:
-                        assert isinstance(kwargs[in_idx], ME.SparseTensor)
-                        arg_coords_keys[in_idx] = kwargs[in_idx].coordinate_map_key
-                        arg_coord_mgrs[in_idx] = kwargs[in_idx].coordinate_manager
-                        kwargs[in_idx] = kwargs[in_idx].F
-                        if add_batch_dim:
-                            kwargs[in_idx] = kwargs[in_idx][None]
+            new_pos_args = list(args)
 
-                new_pos_args = tuple(new_pos_args)
+            for idx, in_idx in enumerate(inout_mapping_dict):
+                if isinstance(in_idx, int):
+                    collection = new_pos_args
+                elif isinstance(in_idx, str):
+                    collection = kwargs
+                else:
+                    raise NotImplementedError
 
-            except AssertionError:  # It seems that wrapping is not needed
-                assert idx == 0
-                # Function call
-                return func(*args, **kwargs)
+                obj = collection[in_idx]
+                if not isinstance(obj, ME.SparseTensor):
+                    assert idx == 0
+                    needs_recover = False
+                    break
+
+                arg_coords_keys[in_idx] = obj.coordinate_map_key
+                arg_coord_mgs[in_idx] = obj.coordinate_manager
+                collection[in_idx] = obj.F
+                if add_batch_dim:
+                    collection[in_idx] = collection[in_idx][None]
 
             else:
-                # Function call
-                ret = list(func(*new_pos_args, **kwargs))
+                needs_recover = True
 
-                for in_idx, out_idx in arg_mapping_dict.items():
-                    if out_idx != 'None':
+            if inout_mapping_dict == {}:
+                needs_recover = False
+
+            for in_idx in extra_preparation:
+                if isinstance(in_idx, int):
+                    collection = new_pos_args
+                elif isinstance(in_idx, str):
+                    collection = kwargs
+                else:
+                    raise NotImplementedError
+
+                if isinstance(collection[in_idx], torch.Tensor):
+                    collection[in_idx] = extra_preparation[in_idx](collection[in_idx])
+
+                elif isinstance(collection[in_idx], ME.SparseTensor):
+                    collection[in_idx] = ME.SparseTensor(
+                        extra_preparation[in_idx](collection[in_idx].F),
+                        coordinate_map_key=collection[in_idx].coordinate_map_key,
+                        coordinate_manager=collection[in_idx].coordinate_manager
+                    )
+
+                else: raise NotImplementedError
+
+            new_pos_args = tuple(new_pos_args)
+
+            ret = func(*new_pos_args, **kwargs)
+
+            if needs_recover:
+                ret = list(ret)
+                for in_idx, out_idx in inout_mapping_dict.items():
+                    if out_idx is not None:
+                        assert isinstance(out_idx, int)
                         assert isinstance(ret[out_idx], torch.Tensor)
                         ret[out_idx] = ME.SparseTensor(
                             ret[out_idx][0] if add_batch_dim else ret[out_idx],
                             coordinate_map_key=arg_coords_keys[in_idx],
-                            coordinate_manager=arg_coord_mgrs[in_idx])
+                            coordinate_manager=arg_coord_mgs[in_idx]
+                        )
 
                 if len(ret) == 1:
                     ret = ret[0]
                 else:
                     ret = tuple(ret)
-                return ret
-        return wrapped
+
+            return ret
+        return wrapped_func
     return func_decorator
 
 

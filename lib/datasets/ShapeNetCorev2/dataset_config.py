@@ -13,7 +13,7 @@ class DatasetConfig(SimpleConfig):
     test_filelist_path: str = 'test_list.txt'
 
     # '.obj' or '.solid.binvox' or '.surface.binvox' or ['.solid.binvox', '.surface.binvox']
-    data_format: Union[str, Tuple[str]] = '.surface.binvox'
+    data_format: Union[str, Tuple[str, ...]] = '.surface.binvox'
 
     mesh_sample_points_num: int = 0
     mesh_sample_point_method: str = 'uniform'

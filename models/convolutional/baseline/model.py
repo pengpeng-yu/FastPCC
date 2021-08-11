@@ -1,5 +1,4 @@
 import os
-import math
 from collections import defaultdict
 from typing import List
 from functools import partial
@@ -16,9 +15,10 @@ from lib.data_utils import PCData
 from lib.metric import mpeg_pc_error
 from lib.loss_function import chamfer_loss
 from lib.sparse_conv_layers import GenerativeUpsampleMessage
-from lib.entropy_models.distributions.uniform_noise import NoisyNormal
 from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyModel
-from lib.entropy_models.hyperprior import NoisyDeepFactorizedHyperPriorEntropyModel
+from lib.entropy_models.hyperprior import \
+    NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel, \
+    NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel
 
 from models.convolutional.baseline.layers import Encoder, Decoder, ConvBlock
 from models.convolutional.baseline.model_config import ModelConfig
@@ -51,46 +51,75 @@ class PCC(nn.Module):
                                else cfg.reconstruct_loss_type,
                                dist_upper_bound=cfg.dist_upper_bound)
 
-        prior_channels = cfg.compressed_channels
-        if cfg.use_skip_connection:
-            prior_channels += sum(cfg.skip_connection_channels)
+        if cfg.hyperprior == 'None':
+            prior_channels = cfg.compressed_channels
+            if cfg.use_skip_connection:
+                prior_channels += sum(cfg.skip_connection_channels)
 
-        if not cfg.use_hyperprior:
             self.entropy_bottleneck = NoisyDeepFactorizedEntropyModel(
-                prior_batch_shape=torch.Size([prior_channels]),
+                batch_shape=torch.Size([prior_channels]),
                 coding_ndim=2,
                 init_scale=2)
 
         else:
-            hyper_encoder = nn.Sequential(
-                *[ConvBlock(cfg.compressed_channels, cfg.compressed_channels,
-                            3, 1,
-                            bn=cfg.use_batch_norm,
-                            act=cfg.activation if idx != 2 else None)
-                  for idx in range(3)]
-            )
-            hyper_decoder = nn.Sequential(
-                *[ConvBlock(cfg.compressed_channels, cfg.compressed_channels,
-                            3, 1,
-                            bn=cfg.use_batch_norm,
-                            act=cfg.activation if idx != 2 else None)
-                  for idx in range(3)]
-            )
-            num_scales = 64
-            scale_min, scale_max = 0.11, 256
-            offset = math.log(scale_min)
-            factor = (math.log(scale_max) - math.log(scale_min)) / (num_scales - 1)
+            if cfg.hyperprior == 'ScaleNoisyNormal':
+                hyper_decoder_out_channels = cfg.compressed_channels
+            elif cfg.hyperprior == 'NoisyDeepFactorized':
+                hyper_decoder_out_channels = cfg.compressed_channels * 9
+            else: raise NotImplementedError
 
-            self.entropy_bottleneck = NoisyDeepFactorizedHyperPriorEntropyModel(
-                hyper_encoder=hyper_encoder,
-                hyper_decoder=hyper_decoder,
-                hyperprior_batch_shape=torch.Size([prior_channels]),
-                coding_ndim=2,
-                prior_fn=NoisyNormal,
-                index_ranges=[64],
-                parameter_fns={'loc': lambda _: 0,
-                               'scale': lambda i: torch.exp(offset + factor * i)},
-            )
+            # BN is always performed for the last conv of hyper encoder and hyper decoder
+            def make_hyper_coder(in_channels, intra_channels, out_channels):
+                return nn.Sequential(
+                    ConvBlock(in_channels,
+                              intra_channels[0],
+                              3, 1, bn=cfg.use_batch_norm, act=cfg.activation),
+
+                    *[ConvBlock(
+                        intra_channels[idx],
+                        intra_channels[idx + 1],
+                        3, 1, bn=cfg.use_batch_norm, act=cfg.activation)
+                        for idx in range(len(intra_channels) - 1)],
+
+                    ConvBlock(intra_channels[-1],
+                              out_channels,
+                              3, 1, bn=True, act=None)
+                )
+
+            hyper_encoder = make_hyper_coder(
+                cfg.compressed_channels,
+                cfg.hyper_encoder_channels,
+                cfg.hyper_compressed_channels)
+
+            hyper_decoder = make_hyper_coder(
+                cfg.hyper_compressed_channels,
+                cfg.hyper_decoder_channels,
+                hyper_decoder_out_channels)
+
+            if cfg.hyperprior == 'ScaleNoisyNormal':
+                self.entropy_bottleneck = \
+                    NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel(
+                        hyper_encoder=hyper_encoder,
+                        hyper_decoder=hyper_decoder,
+                        hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
+                        coding_ndim=2,
+                        num_scales=64,
+                        scale_min=0.1,
+                        scale_max=10
+                    )
+
+            elif cfg.hyperprior == 'NoisyDeepFactorized':
+                self.entropy_bottleneck = \
+                    NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(
+                        hyper_encoder=hyper_encoder,
+                        hyper_decoder=hyper_decoder,
+                        hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
+                        coding_ndim=2,
+                        index_ranges=(4,) * 9,
+                        num_filters=(1, 2, 1),
+                    )
+
+            else: raise NotImplementedError
 
         self.cfg = cfg
         self.log_pred_res('init')
@@ -156,7 +185,7 @@ class PCC(nn.Module):
 
             try:
                 loss_dict['hyper_bits_loss'] = loss_dict['hyper_bits_loss'] * \
-                    (self.cfg.bpp_loss_factor / sparse_pc.shape[0])
+                    (self.cfg.hyper_bpp_loss_factor / sparse_pc.shape[0])
             except KeyError: pass
 
             loss_dict['loss'] = sum(loss_dict.values())

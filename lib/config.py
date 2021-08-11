@@ -17,8 +17,8 @@ class TrainConfig(SimpleConfig):
     num_workers: int = 4
     epochs: int = 100
 
-    optimizer: str = 'sgd'
-    aux_optimizer: str = 'sgd'
+    optimizer: str = 'SGD'
+    aux_optimizer: str = 'SGD'
     learning_rate: float = 0.05
     aux_learning_rate: float = 0.05
     momentum: float = 0.9
@@ -26,11 +26,18 @@ class TrainConfig(SimpleConfig):
     weight_decay: float = 0.0
     aux_weight_decay: float = 0.0
     max_grad_norm: float = 0.0  # 0.0 to close. aux_param excluded.
+
+    scheduler: str = 'Step'  # Step or OneCycle
+    # StepLR
     lr_step_size: int = 25
     lr_step_gamma: float = 0.3
+    # OneCycleLR
+    lr_pct_start: float = 0.3
+    lr_init_div_factor: float = 10.
+    lr_final_div_factor: float = 1000.
 
     resume_from_ckpt: str = ''
-    resume_items: Tuple[str] = ('state_dict',)
+    resume_items: Tuple[str, ...] = ('state_dict',)
     resume_tensorboard: bool = False
 
     log_frequency: int = 10  # (steps) used for both logging and tensorboard

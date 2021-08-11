@@ -14,9 +14,9 @@ from lib.torch_utils import minkowski_tensor_wrapped
 
 class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
     def __init__(self,
-                 prior_fn: Callable[[Any], Distribution],
-                 index_ranges: List[int],
-                 parameter_fns: Dict[str, Callable[[Any], Union[int, float, torch.Tensor]]],
+                 prior_fn: Callable[..., Distribution],
+                 index_ranges: Tuple[int, ...],
+                 parameter_fns: Dict[str, Callable[..., Union[int, float, torch.Tensor]]],
                  coding_ndim: int,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
@@ -27,13 +27,9 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
 
         batch_shape of prior is determined by index_ranges and parameter_fns.
         `indexes` must have the same shape as the bottleneck tensor,
-        with an additional dimension at position `channel_axis`.
+        with an additional dimension at innermost axis if len(index_ranges) > 1.
         The values of the `k`th channel must be in the range
         `[0, index_ranges[k])`.
-
-        If len(index_ranges) > 1,
-        indexes are supposed to have an additional dimension at axis -1,
-        and additional_indexes_channel is supposed to be True.
 
         parameter_fns should be derivable.
 
@@ -71,6 +67,8 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             indexes = [torch.arange(r) for r in self.index_ranges]
             indexes = torch.meshgrid(indexes)
             indexes = torch.stack(indexes, dim=-1)
+
+        indexes = indexes.to(torch.float)
         return self.make_prior(indexes)
 
     def normalize_indexes(self, indexes: torch.Tensor):
@@ -89,7 +87,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         indexes = upper_bound(indexes, bounds)
         return indexes
 
-    @minkowski_tensor_wrapped('1->0 2->None')
+    @minkowski_tensor_wrapped({1: 0, 2: None})
     def forward(self, x: torch.Tensor, indexes: torch.Tensor) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, Dict[str, torch.Tensor], List]]:
@@ -119,15 +117,17 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         """
         Return flat quantized indexes for cached cdf table.
         """
-        indexes = indexes.to(torch.int32)
         if not self.additional_indexes_channel:
+            indexes = indexes.to(torch.int32)
             return indexes
         else:
+            indexes = indexes.round()
             strides = torch.cumprod(
-                torch.tensor([1] + self.index_ranges[:0:-1], device=indexes.device),
-                dim=0)
+                torch.tensor((1, *self.index_ranges[:0:-1]),
+                             device=indexes.device,
+                             dtype=torch.float), dim=0)
             strides = torch.flip(strides, dims=[0])
-            return torch.tensordot(indexes, strides, [[-1], [0]])
+            return torch.tensordot(indexes, strides, [[-1], [0]]).to(torch.int32)
 
     @torch.no_grad()
     def compress(self, x, indexes, quantized: bool = False) -> List:
@@ -204,16 +204,16 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
 
 class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
     def __init__(self,
-                 prior_fn: Callable[[Any], Distribution],
+                 prior_fn: Callable[..., Distribution],
                  num_scales: int,
-                 scale_fn: Dict[str, Callable[[Any], Union[int, float, torch.Tensor]]],
+                 scale_fn: Dict[str, Callable[..., Union[int, float, torch.Tensor]]],
                  coding_ndim: int,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16):
         super(LocationScaleIndexedEntropyModel, self).__init__(
             prior_fn=prior_fn,
-            index_ranges=[num_scales],
+            index_ranges=(num_scales,),
             parameter_fns={'loc': lambda _: 0, 'scale': scale_fn},
             coding_ndim=coding_ndim,
             init_scale=init_scale,
@@ -221,7 +221,7 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
             range_coder_precision=range_coder_precision
         )
 
-    @minkowski_tensor_wrapped('1->0 2->None')
+    @minkowski_tensor_wrapped({1: 0, 2: None})
     def forward(self, x: torch.Tensor, scale_indexes: torch.Tensor, loc=None) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, Dict[str, torch.Tensor], List]]:

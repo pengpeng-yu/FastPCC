@@ -33,6 +33,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         The innermost dimensions of input tensor are supposed to be the same
         as self.prior_shape.
         """
+        assert coding_ndim >= prior.batch_ndim
         super(ContinuousBatchedEntropyModel, self).__init__(
             prior=prior,
             coding_ndim=coding_ndim,
@@ -48,7 +49,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                                  *[1] * len(self.prior.batch_shape))
         return indexes
 
-    @minkowski_tensor_wrapped('10')
+    @minkowski_tensor_wrapped({1: 0})
     def forward(self, x) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, Dict[str, torch.Tensor], List]]:
@@ -65,6 +66,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         else:
             quantized_x = self.quantize(x)
             log_probs = self.prior.log_prob(quantized_x)
+            # TODO: check self.prior.log_prob(self.perturb(x)).sum() / (-math.log(2))
 
             strings, broadcast_shape = self.compress(quantized_x, quantized=True)
             decompressed = self.decompress(strings, broadcast_shape)
@@ -130,7 +132,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
 
 class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
     def __init__(self,
-                 prior_batch_shape: torch.Size,
+                 batch_shape: torch.Size,
                  coding_ndim: int,
                  num_filters=(1, 3, 3, 3, 3, 1),
                  init_scale: int = 10,
@@ -139,13 +141,13 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
 
         prior_weights, prior_biases, prior_factors = \
             DeepFactorized.make_parameters(
-                batch_shape=prior_batch_shape,
+                batch_numel=batch_shape.numel(),
                 init_scale=init_scale,
                 num_filters=num_filters)
 
         super(ContinuousBatchedEntropyModel, self).__init__(
             prior=NoisyDeepFactorized(
-                batch_shape=prior_batch_shape,
+                batch_shape=batch_shape,
                 weights=prior_weights,
                 biases=prior_biases,
                 factors=prior_factors),

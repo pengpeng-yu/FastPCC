@@ -13,7 +13,7 @@ class FactorizedPrior(EntropyModel):
     def __init__(self, channels: int, chnl_dim: int,
                  tail_mass: float = 1e-9,
                  init_scale: float = 10,
-                 filters: Tuple[int] = (3, 3, 3, 3),
+                 filters: Tuple[int, ...] = (3, 3, 3, 3),
                  likelihood_bound: float = 1e-9,
                  entropy_coder: str = 'ans',
                  entropy_coder_precision: int = 16):
@@ -147,7 +147,7 @@ class FactorizedPrior(EntropyModel):
 
         return likelihood
 
-    @minkowski_tensor_wrapped('10')
+    @minkowski_tensor_wrapped({1: 0})
     def forward(self, x: torch.Tensor) \
             -> Tuple[torch.Tensor, Union[Dict[str, torch.Tensor], List[bytes]]]:
         """

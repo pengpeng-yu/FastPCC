@@ -6,7 +6,7 @@ train:
   device: '3'
   batch_size: 16
   num_workers: 4
-  optimizer: adam
+  optimizer: Adam
   momentum: 0.9
   weight_decay: 0.0001
   max_grad_norm: 1.0

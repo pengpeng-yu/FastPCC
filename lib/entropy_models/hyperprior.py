@@ -1,4 +1,5 @@
-from typing import List, Union, Dict, Any, Callable
+from typing import List, Tuple, Union, Dict, Any, Callable
+import math
 
 import torch
 import torch.nn as nn
@@ -6,6 +7,9 @@ from torch.distributions import Distribution
 
 from .continuous_batched import NoisyDeepFactorizedEntropyModel
 from .continuous_indexed import ContinuousIndexedEntropyModel
+from .distributions.uniform_noise import NoisyNormal, NoisyDeepFactorized
+
+from lib.torch_utils import minkowski_tensor_wrapped
 
 
 class NoisyDeepFactorizedHyperPriorEntropyModel(nn.Module):
@@ -16,11 +20,11 @@ class NoisyDeepFactorizedHyperPriorEntropyModel(nn.Module):
                  hyperprior_batch_shape: torch.Size,
                  coding_ndim: int,
 
-                 prior_fn: Callable[[Any], Distribution],
-                 index_ranges: List[int],
+                 prior_fn: Callable[..., Distribution],
+                 index_ranges: Tuple[int, ...],
                  parameter_fns: Dict[str, Callable[[torch.Tensor], Any]],
 
-                 hyperprior_num_filters=(1, 3, 3, 3, 3, 1),
+                 hyperprior_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
                  hyperprior_init_scale: int = 10,
                  hyperprior_tail_mass: float = 2 ** -8,
 
@@ -34,7 +38,7 @@ class NoisyDeepFactorizedHyperPriorEntropyModel(nn.Module):
         self.hyper_decoder = hyper_decoder
 
         self.hyperprior_entropy_model = NoisyDeepFactorizedEntropyModel(
-            prior_batch_shape=hyperprior_batch_shape,
+            batch_shape=hyperprior_batch_shape,
             coding_ndim=coding_ndim,
             num_filters=hyperprior_num_filters,
             init_scale=hyperprior_init_scale,
@@ -52,11 +56,14 @@ class NoisyDeepFactorizedHyperPriorEntropyModel(nn.Module):
             range_coder_precision=range_coder_precision
         )
 
+    def prior_entropy_model_forward(self, y, indexes):
+        return self.prior_entropy_model(y, indexes)
+
     def forward(self, y):
         z = self.hyper_encoder(y)
         z_tilde, hyperprior_loss_dict, *hyperprior_strings = self.hyperprior_entropy_model(z)
         indexes = self.hyper_decoder(z_tilde)
-        y_tilde, prior_loss_dict, *strings = self.prior_entropy_model(y, indexes)
+        y_tilde, prior_loss_dict, *strings = self.prior_entropy_model_forward(y, indexes)
 
         loss_dict = prior_loss_dict
         loss_dict['hyper_bits_loss'] = hyperprior_loss_dict['bits_loss']
@@ -71,3 +78,121 @@ class NoisyDeepFactorizedHyperPriorEntropyModel(nn.Module):
             return y_tilde, loss_dict
         else:
             return y_tilde, loss_dict, strings
+
+
+class NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel(NoisyDeepFactorizedHyperPriorEntropyModel):
+    def __init__(self,
+                 hyper_encoder: nn.Module,
+                 hyper_decoder: nn.Module,
+
+                 hyperprior_batch_shape: torch.Size,
+                 coding_ndim: int,
+
+                 num_scales: int = 64,
+                 scale_min: float = 0.11,
+                 scale_max: float = 256,
+
+                 hyperprior_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
+                 hyperprior_init_scale: int = 10,
+                 hyperprior_tail_mass: float = 2 ** -8,
+
+                 init_scale: int = 10,
+                 tail_mass: float = 2 ** -8,
+                 range_coder_precision: int = 16,
+                 ):
+        offset = math.log(scale_min)
+        factor = (math.log(scale_max) - math.log(scale_min)) / (num_scales - 1)
+
+        super(NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel, self).__init__(
+            hyper_encoder=hyper_encoder,
+            hyper_decoder=hyper_decoder,
+            hyperprior_batch_shape=hyperprior_batch_shape,
+            coding_ndim=coding_ndim,
+            prior_fn=NoisyNormal,
+            index_ranges=(num_scales,),
+            parameter_fns={'loc': lambda _: 0,
+                           'scale': lambda i: torch.exp(offset + factor * i)},
+            hyperprior_num_filters=hyperprior_num_filters,
+            hyperprior_init_scale=hyperprior_init_scale,
+            hyperprior_tail_mass=hyperprior_tail_mass,
+            init_scale=init_scale,
+            tail_mass=tail_mass,
+            range_coder_precision=range_coder_precision
+        )
+
+    @minkowski_tensor_wrapped(extra_preparation={1: abs})
+    def forward(self, y):
+        return super(NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel, self).forward(y)
+
+
+class NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(NoisyDeepFactorizedHyperPriorEntropyModel):
+    def __init__(self,
+                 hyper_encoder: nn.Module,
+                 hyper_decoder: nn.Module,
+
+                 hyperprior_batch_shape: torch.Size,
+                 coding_ndim: int,
+
+                 hyperprior_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
+                 hyperprior_init_scale: int = 10,
+                 hyperprior_tail_mass: float = 2 ** -8,
+
+                 index_ranges: Tuple[int, ...] = (4,) * 9,
+                 num_filters: Tuple[int, ...] = (1, 2, 1),
+                 init_scale: int = 10,
+                 tail_mass: float = 2 ** -8,
+                 range_coder_precision: int = 16,
+                 ):
+        assert len(num_filters) >= 3 and num_filters[0] == num_filters[-1] == 1
+
+        weights_param_numel = [num_filters[i] * num_filters[i+1] for i in range(len(num_filters) - 1)]
+        weights_param_cum_numel = torch.cumsum(torch.tensor([0, *weights_param_numel]), dim=0)
+
+        biases_param_numel = num_filters[1:]
+        biases_param_cum_numel = \
+            torch.cumsum(torch.tensor([0, *biases_param_numel]), dim=0) + weights_param_cum_numel[-1]
+
+        factors_param_numel = num_filters[1:-1]
+        factors_param_cum_numel = \
+            torch.cumsum(torch.tensor([0, *factors_param_numel]), dim=0) + biases_param_cum_numel[-1]
+
+        assert len(index_ranges) == factors_param_cum_numel[-1]
+
+        # TODO
+        parameter_fns = {
+            'batch_shape': lambda i: i.shape[:-1],
+            'weights': lambda i: [i[..., weights_param_cum_numel[_]: weights_param_cum_numel[_ + 1]].view
+                                  (-1, num_filters[_ + 1], num_filters[_]) / 3 - 0.5
+                                  for _ in range(len(weights_param_numel))],
+
+            'biases': lambda i: [i[..., biases_param_cum_numel[_]: biases_param_cum_numel[_ + 1]].view
+                                 (-1, biases_param_numel[_], 1) / 3 - 0.5
+                                 for _ in range(len(biases_param_numel))],
+
+            'factors': lambda i: [i[..., factors_param_cum_numel[_]: factors_param_cum_numel[_ + 1]].view
+                                  (-1, factors_param_numel[_], 1) / 3 - 0.5
+                                  for _ in range(len(factors_param_numel))],
+        }
+
+        self.indexes_view_fn = lambda x: x.view(*x.shape[:-1],
+                                                x.shape[-1] // len(index_ranges),
+                                                len(index_ranges))
+
+        super(NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel, self).__init__(
+            hyper_encoder=hyper_encoder,
+            hyper_decoder=hyper_decoder,
+            hyperprior_batch_shape=hyperprior_batch_shape,
+            coding_ndim=coding_ndim,
+            prior_fn=NoisyDeepFactorized,
+            index_ranges=index_ranges,
+            parameter_fns=parameter_fns,
+            hyperprior_num_filters=hyperprior_num_filters,
+            hyperprior_init_scale=hyperprior_init_scale,
+            hyperprior_tail_mass=hyperprior_tail_mass,
+            init_scale=init_scale,
+            tail_mass=tail_mass,
+            range_coder_precision=range_coder_precision
+        )
+
+    def prior_entropy_model_forward(self, y, indexes):
+        return self.prior_entropy_model(y, indexes, extra_preparation={2: self.indexes_view_fn})

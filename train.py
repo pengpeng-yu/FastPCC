@@ -6,6 +6,7 @@ import time
 import pathlib
 from tqdm import tqdm
 from functools import partial
+from typing import Dict, Union
 
 import numpy as np
 import torch
@@ -171,16 +172,17 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                                              cfg.train.shuffle if dataset_sampler is None else None,
                                              sampler=dataset_sampler, num_workers=cfg.train.num_workers, drop_last=True,
                                              pin_memory=True, collate_fn=dataset.collate_fn)
+    steps_one_epoch = len(dataloader)
 
     # Initialize optimizer and scheduler
-    if cfg.train.optimizer == 'adam':
+    if cfg.train.optimizer == 'Adam':
         Optimizer = partial(torch.optim.Adam, betas=(cfg.train.momentum, 0.999))
-    elif cfg.train.optimizer == 'sgd':
+    elif cfg.train.optimizer == 'SGD':
         Optimizer = partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=cfg.train.momentum != 0.0)
     else: raise NotImplementedError
-    if cfg.train.aux_optimizer == 'adam':
+    if cfg.train.aux_optimizer == 'Adam':
         AuxOptimizer = partial(torch.optim.Adam, betas=(cfg.train.aux_momentum, 0.999))
-    elif cfg.train.aux_optimizer == 'sgd':
+    elif cfg.train.aux_optimizer == 'SGD':
         AuxOptimizer = partial(torch.optim.SGD, momentum=cfg.train.aux_momentum, nesterov=cfg.train.aux_momentum != 0.0)
     else: raise NotImplementedError
 
@@ -188,11 +190,42 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     aux_parameters = [p for n, p in model.named_parameters() if n.endswith("aux_param")]
     optimizer = Optimizer([{'params': parameters, 'lr': cfg.train.learning_rate,
                             'weight_decay': cfg.train.weight_decay}])
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
+
+    if cfg.train.scheduler == 'Step':
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
+
+    elif cfg.train.scheduler == 'OneCycle':
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, cfg.train.learning_rate,
+            total_steps=steps_one_epoch * cfg.train.epochs,
+            pct_start=cfg.train.lr_pct_start,
+            div_factor=cfg.train.lr_init_div_factor,
+            base_momentum=cfg.train.momentum - 0.05,
+            max_momentum=cfg.train.momentum + 0.05,
+            final_div_factor=cfg.train.lr_final_div_factor)
+
+    else: raise NotImplementedError
+
     if aux_parameters:
         aux_optimizer = AuxOptimizer([{'params': aux_parameters, 'lr': cfg.train.aux_learning_rate,
                                        'weight_decay': cfg.train.aux_weight_decay}])
-        aux_scheduler = torch.optim.lr_scheduler.StepLR(aux_optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
+        if cfg.train.scheduler == 'Step':
+            aux_scheduler = torch.optim.lr_scheduler.StepLR(
+                aux_optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
+
+        elif cfg.train.scheduler == 'OneCycle':
+            aux_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                aux_optimizer, cfg.train.aux_learning_rate,
+                total_steps=steps_one_epoch * cfg.train.epochs,
+                pct_start=cfg.train.lr_pct_start,
+                div_factor=cfg.train.lr_init_div_factor,
+                base_momentum=cfg.train.aux_momentum - 0.05,
+                max_momentum=cfg.train.aux_momentum + 0.05,
+                final_div_factor=cfg.train.lr_final_div_factor)
+
+        else: raise NotImplementedError
+
     else:
         aux_optimizer = aux_scheduler = None
 
@@ -231,7 +264,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
     # Training loop
     logger.info('start training...')
-    steps_one_epoch = len(dataloader)
     total_steps = (cfg.train.epochs - start_epoch) * steps_one_epoch
     global_step = steps_one_epoch * start_epoch
     ave_time_onestep = None
@@ -258,7 +290,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
             if cfg.train.amp:
                 with amp.autocast():
-                    loss_dict = model(batch_data)
+                    loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
                     loss = loss_dict['loss']
 
                 scaler.scale(loss).backward()
@@ -269,7 +301,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                     scaler.step(aux_optimizer)
                 scaler.update()
             else:
-                loss_dict = model(batch_data)
+                loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
                 loss = loss_dict['loss']
                 loss.backward()
                 if cfg.train.max_grad_norm != 0:
@@ -308,14 +340,19 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                         else:
                             item_category = item_name.rsplit("_", 1)[-1].capitalize()
                             tb_writer.add_scalar(f'Train/{item_category}/{item_name}', item, global_step)
-                            if item_category == 'Loss' and item_name != 'aux_loss':
+                            if item_category == 'Loss' and not item_name.endswith('aux_loss'):
                                 total_wo_aux += loss_dict[item_name]
                     tb_writer.add_scalar('Train/Loss/total_wo_aux', total_wo_aux, global_step)
 
             global_step += 1
 
-        scheduler.step()
-        if aux_scheduler is not None: aux_scheduler.step()
+            if cfg.train.scheduler == 'OneCycle':
+                scheduler.step()
+                if aux_scheduler is not None: aux_scheduler.step()
+
+        if cfg.train.scheduler == 'Step':
+            scheduler.step()
+            if aux_scheduler is not None: aux_scheduler.step()
 
         if local_rank in (-1, 0):
             tb_writer.add_scalar('Train/Epochs', epoch, global_step - 1)

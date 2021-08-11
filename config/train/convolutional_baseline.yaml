@@ -5,11 +5,16 @@ model:
   use_batch_norm: False
   activation: 'leaky_relu(0.2)'
   use_skip_connection: False
-  encoder_channels: [8, 16, 64, 64]
-  compressed_channels: 32
-  decoder_channels: [64, 32, 16]
+  encoder_channels: [8, 16, 64, 32, 16]
+  compressed_channels: 4
+  decoder_channels: [64, 32, 16, 16]
   skip_connection_channels: [4, 8, 32]
-  use_hyperprior: True
+  bpp_loss_factor: 0.2
+  hyperprior: ScaleNoisyNormal
+  hyper_bpp_loss_factor: 0.2
+  hyper_encoder_channels: [16, 16, 16, 16]
+  hyper_decoder_channels: [16, 16, 16, 16]
+  hyper_compressed_channels: 16
 
 
 train:
@@ -18,22 +23,27 @@ train:
   amp: False
   more_reproducible: False
   batch_size: 32
-  num_workers: 4
-  optimizer: adam
-  aux_optimizer: sgd
+  num_workers: 2
+  optimizer: Adam
+  aux_optimizer: SGD
   momentum: 0.9
   aux_momentum: 0.9
   weight_decay: 0.0001
   max_grad_norm: 1.0
 
   learning_rate: 0.0005
-  aux_learning_rate: 0.0005
+  aux_learning_rate: 0.005
   epochs: 20
 
-  ckpt_frequency: 1
+  scheduler: Step
   lr_step_size: 4
   lr_step_gamma: 0.3
-  resume_from_ckpt:  'runs/train_convolutional_-1/ckpts/epoch_<maxindex>.pt'
+#  lr_init_div_factor: 10.0
+#  lr_final_div_factor: 1000.0
+#  lr_pct_start: 0.05
+
+  ckpt_frequency: 1
+  resume_from_ckpt: ''  # 'runs/train_convolutional_23/ckpts/epoch_<maxindex>.pt'
   resume_items: ['state_dict']
   test_frequency: 4
 

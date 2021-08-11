@@ -21,8 +21,8 @@ train:
   more_reproducible: True
   batch_size: 24
   num_workers: 4
-  optimizer: adam
-  aux_optimizer: sgd
+  optimizer: Adam
+  aux_optimizer: SGD
   momentum: 0.9
   aux_momentum: 0.9
   weight_decay: 0.0001

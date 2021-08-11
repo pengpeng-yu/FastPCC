@@ -11,9 +11,9 @@ from torch.distributions import Distribution
 class DeepFactorized(Distribution):
     def __init__(self,
                  batch_shape: torch.Size,
-                 weights: Union[Sequence[torch.Tensor], nn.ParameterList] = None,
-                 biases: Union[Sequence[torch.Tensor], nn.ParameterList] = None,
-                 factors: Union[Sequence[torch.Tensor], nn.ParameterList] = None):
+                 weights: Union[List[torch.Tensor], nn.ParameterList] = None,
+                 biases: Union[List[torch.Tensor], nn.ParameterList] = None,
+                 factors: Union[List[torch.Tensor], nn.ParameterList] = None):
         super(DeepFactorized, self).__init__(batch_shape)
         self.weights = weights
         self.biases = biases
@@ -52,10 +52,9 @@ class DeepFactorized(Distribution):
         return F.logsigmoid(-self.logits_cdf(value))
 
     @staticmethod
-    def make_parameters(batch_shape: torch.Size, init_scale=10, num_filters=(1, 3, 3, 3, 3, 1)) \
+    def make_parameters(batch_numel: int, init_scale=10, num_filters=(1, 3, 3, 3, 3, 1)) \
             -> Tuple[nn.ParameterList, nn.ParameterList, nn.ParameterList]:
         assert num_filters[0] == 1 and num_filters[-1] == 1
-        channels = batch_shape.numel()
         scale = init_scale ** (1 / (len(num_filters) + 1))
         weights = nn.ParameterList()
         biases = nn.ParameterList()
@@ -63,16 +62,16 @@ class DeepFactorized(Distribution):
         for i in range(len(num_filters) - 1):
             init = np.log(np.expm1(1 / scale / num_filters[i + 1]))
             weights.append(nn.Parameter(
-                torch.full((channels, num_filters[i + 1], num_filters[i]),
+                torch.full((batch_numel, num_filters[i + 1], num_filters[i]),
                            fill_value=init)))
 
             biases.append(nn.Parameter(
-                torch.empty((channels, num_filters[i + 1], 1))))
+                torch.empty((batch_numel, num_filters[i + 1], 1))))
             nn.init.uniform_(biases[-1], -0.5, 0.5)
 
             if i < len(num_filters) - 2:
                 factors.append(nn.Parameter(
-                    torch.zeros((channels, num_filters[i + 1], 1))))
+                    torch.zeros((batch_numel, num_filters[i + 1], 1))))
 
-        # len(weights) == len(biases) == len(factors) + 1 == len(num_filters) - 1
+        # assert len(weights) == len(biases) == len(factors) + 1 == len(num_filters) - 1
         return weights, biases, factors

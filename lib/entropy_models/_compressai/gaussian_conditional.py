@@ -112,7 +112,7 @@ class GaussianConditional(EntropyModel):
 
         return likelihood
 
-    @minkowski_tensor_wrapped('10')
+    @minkowski_tensor_wrapped({1: 0})
     def forward(self,
                 x: torch.Tensor,
                 scales: torch.Tensor,
@@ -210,7 +210,7 @@ class _GaussianConditional(EntropyModel):
 
         return likelihood
 
-    @minkowski_tensor_wrapped('10')
+    @minkowski_tensor_wrapped({1: 0})
     def forward(self,
                 x: torch.Tensor,
                 scales: torch.Tensor,

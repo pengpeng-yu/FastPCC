@@ -237,14 +237,14 @@ class DistributionQuantizedCDFTable(nn.Module):
 
             # Collapse batch dimensions of distribution.
             pmf = pmf.reshape(max_length, -1).T
-            overflow = (1 - pmf.sum(dim=1)).clamp(max=0)
+            overflow = (1 - pmf.sum(dim=1)).clamp_(min=0)
             pmf_length = pmf_length.reshape(-1)
 
-            cdf = batched_pmf_to_quantized_cdf(pmf, overflow,
+            cdf = batched_pmf_to_quantized_cdf(pmf, overflow,  # TODO: check
                                                pmf_length, max_length,
                                                self.cdf_precision)
             cdf_length = pmf_length + 2
-            cdf_offset = minima
+            cdf_offset = minima.reshape(-1)
 
             self.cached_cdf_table = cdf
             self.cached_cdf_length[...] = cdf_length
@@ -355,6 +355,11 @@ class DistributionQuantizedCDFTable(nn.Module):
                 elif isinstance(var, torch.Tensor):
                     obj.__dict__[var_name] = fn(var)
 
+                elif isinstance(var, List):
+                    for i, v in enumerate(var):
+                        if isinstance(v, torch.Tensor):
+                            var[i] = fn(v)
+
                 elif isinstance(var, Distribution):
                     distribution_param_apply(var)
 
@@ -373,7 +378,7 @@ class ContinuousEntropyModelBase(nn.Module):
         super(ContinuousEntropyModelBase, self).__init__()
         # "self.prior" is supposed to be able to generate
         # flat quantized CDF table used by range coder.
-        self.prior: nn.Module = DistributionQuantizedCDFTable(
+        self.prior: DistributionQuantizedCDFTable = DistributionQuantizedCDFTable(
             base=prior,
             tail_mass=tail_mass,
             init_scale=init_scale,
@@ -384,7 +389,6 @@ class ContinuousEntropyModelBase(nn.Module):
         self.range_encoder = ans.RansEncoder()
         self.range_decoder = ans.RansDecoder()
 
-        assert self.coding_ndim >= self.prior.batch_ndim
         if self.range_coder_precision != 16:
             raise NotImplementedError
 

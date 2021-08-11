@@ -1,4 +1,4 @@
-from typing import Sequence, Union
+from typing import List, Union
 
 import torch
 import torch.nn as nn
@@ -99,9 +99,9 @@ class UniformNoiseAdapter(Distribution):
 class NoisyDeepFactorized(UniformNoiseAdapter):
     def __init__(self,
                  batch_shape: torch.Size,
-                 weights: Union[Sequence[torch.Tensor], nn.ParameterList] = None,
-                 biases: Union[Sequence[torch.Tensor], nn.ParameterList] = None,
-                 factors: Union[Sequence[torch.Tensor], nn.ParameterList] = None):
+                 weights: Union[List[torch.Tensor], nn.ParameterList] = None,
+                 biases: Union[List[torch.Tensor], nn.ParameterList] = None,
+                 factors: Union[List[torch.Tensor], nn.ParameterList] = None):
         super(NoisyDeepFactorized, self).__init__(
             DeepFactorized(batch_shape=batch_shape,
                            weights=weights,

@@ -35,11 +35,15 @@ class SimpleConfig:
     def check_type(self):
         """
         Recursively check existence and value type of attributes. Only called by check().
+
         Only
         basic_types(bool, int, float, str)
-        List[basic_type], Tuple[basic_type]
-        Union[basic_type, List[basic_type]], Union[basic_type, Tuple[basic_type]]
+        List[basic_type], Tuple[basic_type, ...]
+        Union[basic_type, List[basic_type]], Union[basic_type, Tuple[basic_type, ...]]
         are supported.
+
+        List[basic_type] and Tuple[basic_type, ...] are both
+        interpreted as Union[List[basic_type], Tuple[basic_type, ...]]
         """
         basic_types = [bool, int, float, str]
 
@@ -56,7 +60,7 @@ class SimpleConfig:
             if value_type in basic_types:
                 assert value_anno_type in (value_type,
                                            Union[value_type, List[value_type]],
-                                           Union[value_type, Tuple[value_type]]),\
+                                           Union[value_type, Tuple[value_type, ...]]),\
                     f'actual type {value_type} of attribute {key} is ' \
                     f'inconsistent with its annotation type {value_anno_type}'
 
@@ -69,9 +73,9 @@ class SimpleConfig:
                     f'items in list/tuple {key} are not exactly the same'
 
                 assert value_anno_type in (List[element_type],
-                                           Tuple[element_type],
+                                           Tuple[element_type, ...],
                                            Union[element_type, List[element_type]],
-                                           Union[element_type, Tuple[element_type]]),\
+                                           Union[element_type, Tuple[element_type, ...]]),\
                     f'actual type {value_type} of attribute {key} ' \
                     f'is inconsistent with its annotation type {value_anno_type}'
 

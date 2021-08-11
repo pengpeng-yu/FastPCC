@@ -13,12 +13,16 @@ class ModelConfig(SimpleConfig):
     activation: str = 'relu'
     use_skip_connection: bool = False
     skipped_fea_fusion_method: str = 'Cat'  # Add or Cat
-    encoder_channels: Tuple[int] = (16, 32, 64, 32)
+    encoder_channels: Tuple[int, ...] = (16, 32, 64, 32)
     compressed_channels: int = 8
-    decoder_channels: Tuple[int] = (64, 32, 16)
-    skip_connection_channels: Tuple[int] = (16, 32, 64)
+    decoder_channels: Tuple[int, ...] = (64, 32, 16)
+    skip_connection_channels: Tuple[int, ...] = (16, 32, 64)
 
-    use_hyperprior: bool = False
+    hyperprior: str = 'None'
+    hyper_compressed_channels: int = 8
+    hyper_bpp_loss_factor: float = 0.2
+    hyper_encoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
+    hyper_decoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
 
     reconstruct_loss_type: str = 'BCE'  # BCE or Dist or Focal
     dist_upper_bound = 2.0
@@ -30,4 +34,4 @@ class ModelConfig(SimpleConfig):
     # only for test phase:
     chamfer_dist_test_phase: bool = False
     mpeg_pcc_error_command: str = 'pc_error_d'
-    mpeg_pcc_error_threads: int = 16
+    mpeg_pcc_error_threads: int = 8

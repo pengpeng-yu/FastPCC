@@ -4,7 +4,7 @@ train:
   device: '2,3'
   batch_size: 8
   num_workers: 4
-  optimizer: 'sgd'
+  optimizer: 'SGD'
   momentum: 0.9
   epochs: 100
   ckpt_frequency: 5
