@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torchvision.ops import sigmoid_focal_loss
 import MinkowskiEngine as ME
 
-from lib.torch_utils import minkowski_tensor_split
+from lib.torch_utils import minkowski_tensor_split, MLPBlock
 from lib.data_utils import PCData
 from lib.metric import mpeg_pc_error
 from lib.loss_function import chamfer_loss
@@ -62,12 +62,6 @@ class PCC(nn.Module):
                 init_scale=2)
 
         else:
-            if cfg.hyperprior == 'ScaleNoisyNormal':
-                hyper_decoder_out_channels = cfg.compressed_channels
-            elif cfg.hyperprior == 'NoisyDeepFactorized':
-                hyper_decoder_out_channels = cfg.compressed_channels * 9
-            else: raise NotImplementedError
-
             # BN is always performed for the last conv of hyper encoder and hyper decoder
             def make_hyper_coder(in_channels, intra_channels, out_channels):
                 return nn.Sequential(
@@ -86,6 +80,8 @@ class PCC(nn.Module):
                               3, 1, bn=True, act=None)
                 )
 
+            hyper_decoder_out_channels = cfg.compressed_channels * len(cfg.prior_indexes_range)
+
             hyper_encoder = make_hyper_coder(
                 cfg.compressed_channels,
                 cfg.hyper_encoder_channels,
@@ -97,26 +93,38 @@ class PCC(nn.Module):
                 hyper_decoder_out_channels)
 
             if cfg.hyperprior == 'ScaleNoisyNormal':
+                assert len(cfg.prior_indexes_range) == 1
                 self.entropy_bottleneck = \
                     NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel(
                         hyper_encoder=hyper_encoder,
                         hyper_decoder=hyper_decoder,
                         hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
                         coding_ndim=2,
-                        num_scales=64,
-                        scale_min=0.1,
-                        scale_max=10
+                        num_scales=cfg.prior_indexes_range[0],
+                        scale_min=0.11,
+                        scale_max=64
                     )
 
             elif cfg.hyperprior == 'NoisyDeepFactorized':
+                # No bn is performed.
+                def parameter_fns_transform_fn(in_channels, out_channels):
+                    return nn.Sequential(
+                        MLPBlock(in_channels, out_channels,
+                                 bn=None, act=cfg.activation),
+                        nn.Linear(out_channels, out_channels,
+                                  bias=True)
+                    )
+
                 self.entropy_bottleneck = \
                     NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(
                         hyper_encoder=hyper_encoder,
                         hyper_decoder=hyper_decoder,
                         hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
                         coding_ndim=2,
-                        index_ranges=(4,) * 9,
-                        num_filters=(1, 2, 1),
+                        index_ranges=cfg.prior_indexes_range,
+                        parameter_fns_type='transform',
+                        parameter_fns_transform_fn=parameter_fns_transform_fn,
+                        num_filters=(1, 3, 3, 3, 1),
                     )
 
             else: raise NotImplementedError

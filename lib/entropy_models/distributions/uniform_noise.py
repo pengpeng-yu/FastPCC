@@ -123,3 +123,15 @@ class Normal(torch.distributions.Normal):
 class NoisyNormal(UniformNoiseAdapter):
     def __init__(self, *args, **kwargs):
         super().__init__(Normal(*args, **kwargs))
+
+
+class NoisyMixtureSameFamily(torch.distributions.MixtureSameFamily):
+    def __init__(self, mixture_distribution, components_distribution):
+        super().__init__(
+            mixture_distribution=mixture_distribution,
+            component_distribution=UniformNoiseAdapter(components_distribution),
+        )
+        self.base = torch.distributions.MixtureSameFamily(
+            mixture_distribution=mixture_distribution,
+            component_distribution=components_distribution
+        )

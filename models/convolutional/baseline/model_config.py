@@ -23,6 +23,7 @@ class ModelConfig(SimpleConfig):
     hyper_bpp_loss_factor: float = 0.2
     hyper_encoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
     hyper_decoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
+    prior_indexes_range: Tuple[int, ...] = (64, )
 
     reconstruct_loss_type: str = 'BCE'  # BCE or Dist or Focal
     dist_upper_bound = 2.0

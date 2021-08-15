@@ -46,6 +46,9 @@ def upper_bound(x: torch.Tensor, bound: Union[int, float, torch.Tensor]) \
 
 @torch.no_grad()
 def quantization_offset(distribution):
+    if isinstance(distribution, torch.distributions.MixtureSameFamily):  # TODO
+        pass
+
     try:
         offset = distribution.mean()
         return offset - torch.round(offset)

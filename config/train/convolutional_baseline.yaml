@@ -4,17 +4,18 @@ model:
   basic_block_num: 3
   use_batch_norm: False
   activation: 'leaky_relu(0.2)'
+  encoder_channels: [8, 16, 64, 32]
+  compressed_channels: 8
+  decoder_channels: [64, 32, 16]
   use_skip_connection: False
-  encoder_channels: [8, 16, 64, 32, 16]
-  compressed_channels: 4
-  decoder_channels: [64, 32, 16, 16]
   skip_connection_channels: [4, 8, 32]
   bpp_loss_factor: 0.2
-  hyperprior: ScaleNoisyNormal
+  hyperprior: NoisyDeepFactorized
   hyper_bpp_loss_factor: 0.2
   hyper_encoder_channels: [16, 16, 16, 16]
   hyper_decoder_channels: [16, 16, 16, 16]
   hyper_compressed_channels: 16
+  prior_indexes_range: [16, 16]
 
 
 train:

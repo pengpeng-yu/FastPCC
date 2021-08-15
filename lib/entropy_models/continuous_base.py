@@ -233,7 +233,10 @@ class DistributionQuantizedCDFTable(nn.Module):
                                       *[1] * len(self.base.batch_shape))
             samples = samples + pmf_start[None, ...]  # broadcast
 
-            pmf = self.base.prob(samples)
+            if hasattr(self.base, 'prob'):
+                pmf = self.base.prob(samples)
+            else:
+                pmf = torch.exp(self.base.log_prob(samples))
 
             # Collapse batch dimensions of distribution.
             pmf = pmf.reshape(max_length, -1).T
@@ -269,8 +272,8 @@ class DistributionQuantizedCDFTable(nn.Module):
         to use precomputed cdf table latter.
         """
         if state_dict[prefix + 'requires_updating_cdf_table']:
-            # Delete invalid values in state dict and rebuild them
-            # via build_quantized_cdf_table() if necessary.
+            # Delete invalid values in state dict.
+            # Those values are supposed to be rebuilt via "model.eval()".
             # Warning of "IncompatibleKeys(missing_keys=[
             # 'entropy_bottleneck.prior.cached_cdf_table',
             # 'entropy_bottleneck.prior.cached_cdf_length',
@@ -279,9 +282,9 @@ class DistributionQuantizedCDFTable(nn.Module):
             del state_dict[prefix + 'cached_cdf_table']
             del state_dict[prefix + 'cached_cdf_length']
             del state_dict[prefix + 'cached_cdf_offset']
-            if self.requires_updating_cdf_table:
-                self.build_quantized_cdf_table()
-            state_dict[prefix + 'requires_updating_cdf_table'][:] = False
+            print('Warning: cached cdf table in state dict requires updating.\n'
+                  'You need to call model.eval() to build it after loading state dict '
+                  'before any inference.')
 
             super(DistributionQuantizedCDFTable, self)._load_from_state_dict(
                 state_dict, prefix, local_metadata, strict,

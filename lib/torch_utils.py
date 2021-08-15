@@ -121,23 +121,22 @@ class MLPBlock(nn.Module):
 
     def forward(self, x):
         ori_x = x
+        ori_shape = x.shape
+        if len(ori_shape) < 3:
+            raise NotImplementedError
 
         if self.version == 'linear':
-
-            ori_shape = x.shape
-            if len(ori_shape) != 3:
+            if len(ori_shape) > 3:
                 x = x.view(ori_shape[0], -1, ori_shape[-1])
-
             x = self.mlp(x)
+
             if isinstance(self.bn, nn.BatchNorm1d):
                 x = x.permute(0, 2, 1)
                 x = self.bn(x)
                 x = x.permute(0, 2, 1)
-            elif self.bn is not None:
-                x = self.bn(x)
+            elif self.bn is not None: x = self.bn(x)
 
-            if self.act is not None:
-                x = self.act(x)
+            if self.act is not None: x = self.act(x)
 
             if len(ori_shape) != 3:
                 x = x.view(*ori_shape[:-1], self.out_channels)
@@ -151,11 +150,10 @@ class MLPBlock(nn.Module):
             return x
 
         elif self.version == 'conv':
-            ori_shape = x.shape
-            if len(ori_shape) != 3:
+            if len(ori_shape) > 3:
                 x = x.view(ori_shape[0], ori_shape[1], -1)
-
             x = self.mlp(x)
+
             if self.bn is not None: x = self.bn(x)
             if self.act is not None: x = self.act(x)
 

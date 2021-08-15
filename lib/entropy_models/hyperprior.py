@@ -138,45 +138,78 @@ class NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(NoisyDeepFact
                  hyperprior_tail_mass: float = 2 ** -8,
 
                  index_ranges: Tuple[int, ...] = (4,) * 9,
+                 parameter_fns_type: str = 'split',
+                 parameter_fns_transform_fn: Callable = None,
                  num_filters: Tuple[int, ...] = (1, 2, 1),
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16,
                  ):
         assert len(num_filters) >= 3 and num_filters[0] == num_filters[-1] == 1
+        assert parameter_fns_type in ('split', 'transform')
+        if not len(index_ranges) > 1:
+            raise NotImplementedError
+        index_channels = len(index_ranges)
 
         weights_param_numel = [num_filters[i] * num_filters[i+1] for i in range(len(num_filters) - 1)]
-        weights_param_cum_numel = torch.cumsum(torch.tensor([0, *weights_param_numel]), dim=0)
-
         biases_param_numel = num_filters[1:]
-        biases_param_cum_numel = \
-            torch.cumsum(torch.tensor([0, *biases_param_numel]), dim=0) + weights_param_cum_numel[-1]
-
         factors_param_numel = num_filters[1:-1]
-        factors_param_cum_numel = \
-            torch.cumsum(torch.tensor([0, *factors_param_numel]), dim=0) + biases_param_cum_numel[-1]
 
-        assert len(index_ranges) == factors_param_cum_numel[-1]
+        if parameter_fns_type == 'split':
 
-        # TODO
-        parameter_fns = {
-            'batch_shape': lambda i: i.shape[:-1],
-            'weights': lambda i: [i[..., weights_param_cum_numel[_]: weights_param_cum_numel[_ + 1]].view
-                                  (-1, num_filters[_ + 1], num_filters[_]) / 3 - 0.5
-                                  for _ in range(len(weights_param_numel))],
+            weights_param_cum_numel = torch.cumsum(torch.tensor([0, *weights_param_numel]), dim=0)
+            biases_param_cum_numel = \
+                torch.cumsum(torch.tensor([0, *biases_param_numel]), dim=0) + weights_param_cum_numel[-1]
+            factors_param_cum_numel = \
+                torch.cumsum(torch.tensor([0, *factors_param_numel]), dim=0) + biases_param_cum_numel[-1]
 
-            'biases': lambda i: [i[..., biases_param_cum_numel[_]: biases_param_cum_numel[_ + 1]].view
-                                 (-1, biases_param_numel[_], 1) / 3 - 0.5
-                                 for _ in range(len(biases_param_numel))],
+            assert index_channels == factors_param_cum_numel[-1]
 
-            'factors': lambda i: [i[..., factors_param_cum_numel[_]: factors_param_cum_numel[_ + 1]].view
-                                  (-1, factors_param_numel[_], 1) / 3 - 0.5
-                                  for _ in range(len(factors_param_numel))],
-        }
+            parameter_fns = {
+                'batch_shape': lambda i: i.shape[:-1],
+                'weights': lambda i: [i[..., weights_param_cum_numel[_]: weights_param_cum_numel[_ + 1]].view
+                                      (-1, num_filters[_ + 1], num_filters[_]) / 3 - 0.5
+                                      for _ in range(len(weights_param_numel))],
 
-        self.indexes_view_fn = lambda x: x.view(*x.shape[:-1],
-                                                x.shape[-1] // len(index_ranges),
-                                                len(index_ranges))
+                'biases': lambda i: [i[..., biases_param_cum_numel[_]: biases_param_cum_numel[_ + 1]].view
+                                     (-1, biases_param_numel[_], 1) / 3 - 0.5
+                                     for _ in range(len(biases_param_numel))],
+
+                'factors': lambda i: [i[..., factors_param_cum_numel[_]: factors_param_cum_numel[_ + 1]].view
+                                      (-1, factors_param_numel[_], 1) / 3 - 0.5
+                                      for _ in range(len(factors_param_numel))],
+            }
+
+        elif parameter_fns_type == 'transform':
+
+            prior_indexes_weights_mlp = nn.ModuleList(
+                [parameter_fns_transform_fn(index_channels, out_channels)
+                 for out_channels in weights_param_numel])
+            prior_indexes_biases_mlp = nn.ModuleList(
+                [parameter_fns_transform_fn(index_channels, out_channels)
+                 for out_channels in biases_param_numel])
+            prior_indexes_factors_mlp = nn.ModuleList(
+                [parameter_fns_transform_fn(index_channels, out_channels)
+                 for out_channels in factors_param_numel])
+
+            parameter_fns = {
+                'batch_shape': lambda i: i.shape[:-1],
+                'weights': lambda i: [transform(i).view(-1, num_filters[_ + 1], num_filters[_])
+                                      for _, transform in enumerate(prior_indexes_weights_mlp)],
+
+                'biases': lambda i: [transform(i).view(-1, biases_param_numel[_], 1)
+                                     for _, transform in enumerate(prior_indexes_biases_mlp)],
+
+                'factors': lambda i: [transform(i).view(-1, factors_param_numel[_], 1)
+                                      for _, transform in enumerate(prior_indexes_factors_mlp)],
+            }
+
+        else: raise NotImplementedError
+
+        self.indexes_view_fn = lambda x: x.view(
+            *x.shape[:-1],
+            x.shape[-1] // index_channels,
+            index_channels)
 
         super(NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel, self).__init__(
             hyper_encoder=hyper_encoder,
@@ -193,6 +226,11 @@ class NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(NoisyDeepFact
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
         )
+
+        if parameter_fns_type == 'transform':
+            # noinspection PyUnboundLocalVariable
+            self.prior_indexes_weights_mlp, self.prior_indexes_biases_mlp, self.prior_indexes_factors_mlp = \
+                prior_indexes_weights_mlp, prior_indexes_biases_mlp, prior_indexes_factors_mlp
 
     def prior_entropy_model_forward(self, y, indexes):
         return self.prior_entropy_model(y, indexes, extra_preparation={2: self.indexes_view_fn})

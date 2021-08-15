@@ -37,9 +37,9 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         a learnable param.
         """
         if len(index_ranges) == 1:
-            self.additional_indexes_channel = False
+            self.additional_indexes_dim = False
         else:
-            self.additional_indexes_channel = True
+            self.additional_indexes_dim = True
 
         self.prior_fn = prior_fn
         self.parameter_fns = parameter_fns
@@ -57,11 +57,12 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         parameters = {k: f(indexes) for k, f in self.parameter_fns.items()}
         return self.prior_fn(**parameters)
 
+    @torch.no_grad()
     def make_range_coding_prior(self) -> Distribution:
         """
         Make shared priors for generating cdf table.
         """
-        if not self.additional_indexes_channel:
+        if not self.additional_indexes_dim:
             indexes = torch.arange(self.index_ranges[0])
         else:
             indexes = [torch.arange(r) for r in self.index_ranges]
@@ -76,7 +77,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         Return indexes within bounds.
         """
         indexes = lower_bound(indexes, 0)
-        if not self.additional_indexes_channel:
+        if not self.additional_indexes_dim:
             bounds = torch.tensor([self.index_ranges[0] - 1],
                                   dtype=torch.int32, device=indexes.device)
         else:
@@ -115,13 +116,12 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
     @torch.no_grad()
     def flatten_indexes(self, indexes):
         """
-        Return flat quantized indexes for cached cdf table.
+        Return flat int32 indexes for cached cdf table.
         """
-        if not self.additional_indexes_channel:
+        if not self.additional_indexes_dim:
             indexes = indexes.to(torch.int32)
             return indexes
         else:
-            indexes = indexes.round()
             strides = torch.cumprod(
                 torch.tensor((1, *self.index_ranges[:0:-1]),
                              device=indexes.device,
@@ -136,7 +136,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         prior_batch_shape == self.index_ranges
         prior_event_shape == torch.Size([])
 
-        if additional_indexes_channel is True:
+        if additional_indexes_dim is True:
             indexes.shape == x.shape + (len(self.index_ranges),)
         else: indexes.shape == x.shape
 
