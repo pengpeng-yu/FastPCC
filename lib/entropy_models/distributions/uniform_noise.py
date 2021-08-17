@@ -19,6 +19,8 @@ def _logsum_expbig_minus_expsmall(big, small):
 
 
 class UniformNoiseAdapter(Distribution):
+    arg_constraints = {}
+
     def __init__(self, base: Distribution):
         super(UniformNoiseAdapter, self).__init__(base.batch_shape)
         self.base = base

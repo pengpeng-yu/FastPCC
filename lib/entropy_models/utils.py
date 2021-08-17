@@ -2,6 +2,7 @@ from typing import Union
 
 import torch
 import torch.autograd
+from torch.distributions import Distribution
 
 
 class LowerBoundFunction(torch.autograd.Function):
@@ -45,12 +46,14 @@ def upper_bound(x: torch.Tensor, bound: Union[int, float, torch.Tensor]) \
 
 
 @torch.no_grad()
-def quantization_offset(distribution):
+def quantization_offset(distribution: Distribution):
     if isinstance(distribution, torch.distributions.MixtureSameFamily):  # TODO
         pass
 
-    try:
-        offset = distribution.mean()
-        return offset - torch.round(offset)
-    except NotImplementedError:
-        return 0
+    else:
+        assert isinstance(distribution, Distribution)
+        try:
+            offset = distribution.mean()
+            return offset - torch.round(offset)
+        except NotImplementedError:
+            return 0

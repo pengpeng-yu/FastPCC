@@ -125,6 +125,7 @@ class PCC(nn.Module):
                         parameter_fns_type='transform',
                         parameter_fns_transform_fn=parameter_fns_transform_fn,
                         num_filters=(1, 3, 3, 3, 1),
+                        quantize_indexes=True
                     )
 
             else: raise NotImplementedError
@@ -222,7 +223,7 @@ class PCC(nn.Module):
             # the last one is supposed to be the final output of decoder
             pc_reconstructed = decoder_message.cached_pred_list[-1].decomposed_coordinates
 
-            items_dict = self.log_pred_res(
+            ret = self.log_pred_res(
                 'log', preds=pc_reconstructed,
                 targets=sparse_pc.decomposed_coordinates,
                 compressed_strings=compressed_strings,
@@ -231,7 +232,7 @@ class PCC(nn.Module):
                 bits_preds=[loss_dict['bits_loss'].cpu().item()]
             )
 
-            return items_dict
+            return ret
 
     def get_reconstruct_loss(self, cached_pred_list, cached_target_list):
         if self.cfg.reconstruct_loss_type == 'BCE':

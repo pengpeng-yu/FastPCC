@@ -9,6 +9,8 @@ from torch.distributions import Distribution
 
 
 class DeepFactorized(Distribution):
+    arg_constraints = {}
+
     def __init__(self,
                  batch_shape: torch.Size,
                  weights: Union[List[torch.Tensor], nn.ParameterList] = None,

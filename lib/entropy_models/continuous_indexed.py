@@ -18,6 +18,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                  index_ranges: Tuple[int, ...],
                  parameter_fns: Dict[str, Callable[..., Union[int, float, torch.Tensor]]],
                  coding_ndim: int,
+                 quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16):
@@ -44,21 +45,33 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         self.prior_fn = prior_fn
         self.parameter_fns = parameter_fns
         self.index_ranges = index_ranges
+        self.quantize_indexes = quantize_indexes
+        range_coding_prior_indexes = self.make_range_coding_prior()
+        with torch.no_grad():
+            prior = self.make_prior(range_coding_prior_indexes)
 
         super(ContinuousIndexedEntropyModel, self).__init__(
-            prior=self.make_range_coding_prior(),
+            prior=prior,
             coding_ndim=coding_ndim,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
         )
 
-    def make_prior(self, indexes):
+        self.register_buffer('range_coding_prior_indexes',
+                             range_coding_prior_indexes, persistent=False)
+
+    def make_prior(self, indexes) -> Distribution:
+        if self.quantize_indexes:
+            if indexes.requires_grad:
+                assert self.training
+                indexes = indexes.detach().round() - indexes.detach() + indexes
+            else:
+                indexes = indexes.round()
         parameters = {k: f(indexes) for k, f in self.parameter_fns.items()}
         return self.prior_fn(**parameters)
 
-    @torch.no_grad()
-    def make_range_coding_prior(self) -> Distribution:
+    def make_range_coding_prior(self) -> torch.Tensor:
         """
         Make shared priors for generating cdf table.
         """
@@ -70,7 +83,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             indexes = torch.stack(indexes, dim=-1)
 
         indexes = indexes.to(torch.float)
-        return self.make_prior(indexes)
+        return indexes
 
     def normalize_indexes(self, indexes: torch.Tensor):
         """
@@ -99,6 +112,8 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         indexes = self.normalize_indexes(indexes)
         prior = self.make_prior(indexes)
         if self.training:
+            with torch.no_grad():
+                self.prior.update_base(self.make_prior(self.range_coding_prior_indexes))
             x_perturbed = self.perturb(x)
             log_probs = prior.log_prob(x_perturbed)
             return x_perturbed, {'bits_loss': log_probs.sum() / (-math.log(2)),
@@ -107,7 +122,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             quantized_x = self.quantize(x, offset=quantization_offset(prior))
             log_probs = prior.log_prob(quantized_x)
 
-            strings = self.compress(quantized_x, indexes=indexes, quantized=True)
+            strings = self.compress(quantized_x, indexes, is_x_quantized=True)
             decompressed = self.decompress(strings, indexes=indexes)
             decompressed = decompressed.to(quantized_x.device)
 
@@ -118,6 +133,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         """
         Return flat int32 indexes for cached cdf table.
         """
+        indexes = indexes.round()
         if not self.additional_indexes_dim:
             indexes = indexes.to(torch.int32)
             return indexes
@@ -125,12 +141,12 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             strides = torch.cumprod(
                 torch.tensor((1, *self.index_ranges[:0:-1]),
                              device=indexes.device,
-                             dtype=torch.float), dim=0)
+                             dtype=torch.float), dim=0, dtype=torch.float)
             strides = torch.flip(strides, dims=[0])
             return torch.tensordot(indexes, strides, [[-1], [0]]).to(torch.int32)
 
     @torch.no_grad()
-    def compress(self, x, indexes, quantized: bool = False) -> List:
+    def compress(self, x, indexes, is_x_quantized: bool = False) -> List:
         """
         x.shape == batch_shape + coding_unit_shape
         prior_batch_shape == self.index_ranges
@@ -153,7 +169,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
 
         # collapse batch dimensions
         flat_indexes = flat_indexes.reshape(-1, *coding_unit_shape)
-        if not quantized:
+        if not is_x_quantized:
             x = self.quantize(x, offset=quantization_offset(self.make_prior(indexes)))
         x = x.reshape(-1, *coding_unit_shape)
 
@@ -208,6 +224,7 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
                  num_scales: int,
                  scale_fn: Dict[str, Callable[..., Union[int, float, torch.Tensor]]],
                  coding_ndim: int,
+                 quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16):
@@ -216,6 +233,7 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
             index_ranges=(num_scales,),
             parameter_fns={'loc': lambda _: 0, 'scale': scale_fn},
             coding_ndim=coding_ndim,
+            quantize_indexes=quantize_indexes,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
@@ -234,11 +252,11 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
         return (values, *ret)
 
     @torch.no_grad()
-    def compress(self, x, indexes, quantized: bool = False, loc=None) -> List:
+    def compress(self, x, indexes, is_x_quantized: bool = False, loc=None) -> List:
         if loc is not None:
             x -= loc
         return super(LocationScaleIndexedEntropyModel, self).compress(
-            x, indexes=indexes, quantized=quantized)
+            x, indexes=indexes, is_x_quantized=is_x_quantized)
 
     @torch.no_grad()
     def decompress(self, strings, indexes, loc=None):

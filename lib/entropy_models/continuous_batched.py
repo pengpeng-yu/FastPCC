@@ -66,16 +66,15 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         else:
             quantized_x = self.quantize(x)
             log_probs = self.prior.log_prob(quantized_x)
-            # TODO: check self.prior.log_prob(self.perturb(x)).sum() / (-math.log(2))
 
-            strings, broadcast_shape = self.compress(quantized_x, quantized=True)
+            strings, broadcast_shape = self.compress(quantized_x, is_x_quantized=True)  # TODO: save broadcast_shape
             decompressed = self.decompress(strings, broadcast_shape)
             decompressed = decompressed.to(quantized_x.device)
 
             return decompressed, {'bits_loss': log_probs.sum() / (-math.log(2))}, strings
 
     @torch.no_grad()
-    def compress(self, x: torch.Tensor, quantized: bool = False) \
+    def compress(self, x: torch.Tensor, is_x_quantized: bool = False) \
             -> Tuple[List, torch.Size]:
         """
         x.shape = batch_shape + coding_unit_shape
@@ -87,7 +86,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         coding_unit_shape = input_shape[-self.coding_ndim:]
         broadcast_shape = coding_unit_shape[:-len(self.prior.batch_shape)]
 
-        if not quantized: x = self.quantize(x)
+        if not is_x_quantized: x = self.quantize(x)
         x = x.reshape(-1, *coding_unit_shape)  # collapse batch dimensions
         indexes = self.build_indexes(broadcast_shape)  # shape: coding_unit_shape
 

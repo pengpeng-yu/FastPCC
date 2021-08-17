@@ -1,6 +1,5 @@
 from typing import List, Tuple, Dict, Union, Callable
 import math
-from functools import partial
 
 import torch
 import torch.nn as nn
@@ -80,6 +79,12 @@ class DistributionQuantizedCDFTable(nn.Module):
         if not self.base_cdf_available:
             self.estimate_tail()
 
+    def update_base(self, new_base: Distribution):
+        assert type(new_base) is type(self.base)
+        assert new_base.batch_shape == self.base.batch_shape
+        assert new_base.event_shape == self.base.event_shape
+        self.base = new_base
+
     def estimate_tail(self) -> None:
         self.e_input_values = []  # type: List[torch.Tensor]
         self.e_functions = []  # type: List[Callable[[torch.Tensor], torch.Tensor]]
@@ -92,13 +97,15 @@ class DistributionQuantizedCDFTable(nn.Module):
         else:
             icdf_available = True
 
-        # lower tail estimation
+        # Lower tail estimation.
         if icdf_available:
-            self.lower_tail_fn = partial(self.base.icdf, self.tail_mass / 2)
+            self.lower_tail_fn = lambda: self.base.icdf(self.tail_mass / 2)
             self.lower_tail_aux_param = None
+
         elif hasattr(self.base, 'lower_tail'):
-            self.lower_tail_fn = partial(self.base.lower_tail, self.tail_mass)
+            self.lower_tail_fn = lambda: self.base.lower_tail(self.tail_mass)
             self.lower_tail_aux_param = None
+
         else:
             self.lower_tail_fn = None
             self.lower_tail_aux_param = nn.Parameter(
@@ -106,24 +113,32 @@ class DistributionQuantizedCDFTable(nn.Module):
                            fill_value=-self.init_scale,
                            dtype=torch.float))
             self.e_input_values.append(self.lower_tail_aux_param)
+
             if hasattr(self.base, 'logits_cdf_for_estimation'):
-                self.e_functions.append(self.base.logits_cdf_for_estimation)
+                self.e_functions.append(
+                    lambda *args, **kwargs: self.base.logits_cdf_for_estimation(*args, **kwargs)
+                )
                 self.e_target_values.append(
                     math.log(self.tail_mass / 2 / (1 - self.tail_mass / 2))
                 )
-            elif hasattr(self.base, 'log_cdf_for_estimation'):
-                self.e_functions.append(self.base.log_cdf_for_estimation)
-                self.e_target_values.append(math.log(self.tail_mass / 2))
-            else:
-                raise NotImplementedError
 
-        # upper tail estimation
+            elif hasattr(self.base, 'log_cdf_for_estimation'):
+                self.e_functions.append(
+                    lambda *args, **kwargs: self.base.log_cdf_for_estimation(*args, **kwargs)
+                )
+                self.e_target_values.append(math.log(self.tail_mass / 2))
+
+            else: raise NotImplementedError
+
+        # Upper tail estimation.
         if icdf_available:
-            self.upper_tail_fn = partial(self.base.icdf, 1 - self.tail_mass / 2)
+            self.upper_tail_fn = lambda: self.base.icdf(1 - self.tail_mass / 2)
             self.upper_tail_aux_param = None
+
         elif hasattr(self.base, 'upper_tail'):
-            self.upper_tail_fn = partial(self.base.upper_tail, self.tail_mass)
+            self.upper_tail_fn = lambda: self.base.upper_tail(self.tail_mass)
             self.upper_tail_aux_param = None
+
         else:
             self.upper_tail_fn = None
             self.upper_tail_aux_param = nn.Parameter(
@@ -131,16 +146,22 @@ class DistributionQuantizedCDFTable(nn.Module):
                            fill_value=self.init_scale,
                            dtype=torch.float))
             self.e_input_values.append(self.upper_tail_aux_param)
+
             if hasattr(self.base, 'logits_cdf_for_estimation'):
-                self.e_functions.append(self.base.logits_cdf_for_estimation)
+                self.e_functions.append(
+                    lambda *args, **kwargs: self.base.logits_cdf_for_estimation(*args, **kwargs)
+                )
                 self.e_target_values.append(
                     -math.log(self.tail_mass / 2 / (1 - self.tail_mass / 2))
                 )
+
             elif hasattr(self.base, 'log_survival_function_for_estimation'):
-                self.e_functions.append(self.base.log_survival_function_for_estimation)
+                self.e_functions.append(
+                    lambda *args, **kwargs: self.base.log_survival_function_for_estimation(*args, **kwargs)
+                )
                 self.e_target_values.append(math.log(self.tail_mass / 2))
-            else:
-                raise NotImplementedError
+
+            else: raise NotImplementedError
 
     def lower_tail(self):
         if self.lower_tail_aux_param is not None:
@@ -404,13 +425,13 @@ class ContinuousEntropyModelBase(nn.Module):
 
     @torch.no_grad()
     def quantize(self, x: torch.Tensor, offset=None) -> torch.Tensor:
-        if offset is None: offset = quantization_offset(self.prior)
+        if offset is None: offset = quantization_offset(self.prior.base)
         x -= offset
         return torch.round(x).to(torch.int32)
 
     @torch.no_grad()
     def dequantize(self, x: torch.Tensor, offset=None) -> torch.Tensor:
-        if offset is None: offset = quantization_offset(self.prior)
+        if offset is None: offset = quantization_offset(self.prior.base)
         if isinstance(offset, torch.Tensor) and x.device != offset.device:
             x = x.to(offset.device)
         x += offset

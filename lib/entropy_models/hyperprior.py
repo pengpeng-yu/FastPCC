@@ -28,6 +28,7 @@ class NoisyDeepFactorizedHyperPriorEntropyModel(nn.Module):
                  hyperprior_init_scale: int = 10,
                  hyperprior_tail_mass: float = 2 ** -8,
 
+                 quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16,
@@ -51,6 +52,7 @@ class NoisyDeepFactorizedHyperPriorEntropyModel(nn.Module):
             index_ranges=index_ranges,
             parameter_fns=parameter_fns,
             coding_ndim=coding_ndim,
+            quantize_indexes=quantize_indexes,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
@@ -96,6 +98,7 @@ class NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel(NoisyDeepFactori
                  hyperprior_init_scale: int = 10,
                  hyperprior_tail_mass: float = 2 ** -8,
 
+                 quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16,
@@ -115,6 +118,7 @@ class NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel(NoisyDeepFactori
             hyperprior_num_filters=hyperprior_num_filters,
             hyperprior_init_scale=hyperprior_init_scale,
             hyperprior_tail_mass=hyperprior_tail_mass,
+            quantize_indexes=quantize_indexes,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
@@ -141,6 +145,7 @@ class NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(NoisyDeepFact
                  parameter_fns_type: str = 'split',
                  parameter_fns_transform_fn: Callable = None,
                  num_filters: Tuple[int, ...] = (1, 2, 1),
+                 quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16,
@@ -222,6 +227,7 @@ class NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(NoisyDeepFact
             hyperprior_num_filters=hyperprior_num_filters,
             hyperprior_init_scale=hyperprior_init_scale,
             hyperprior_tail_mass=hyperprior_tail_mass,
+            quantize_indexes=quantize_indexes,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
