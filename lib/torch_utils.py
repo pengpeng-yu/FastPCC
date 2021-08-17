@@ -126,6 +126,7 @@ class MLPBlock(nn.Module):
             raise NotImplementedError
 
         if self.version == 'linear':
+            assert ori_shape[-1] == self.mlp.in_features
             if len(ori_shape) > 3:
                 x = x.view(ori_shape[0], -1, ori_shape[-1])
             x = self.mlp(x)

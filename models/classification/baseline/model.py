@@ -19,24 +19,25 @@ class Model(nn.Module):
             RotationInvariantDistFea(cfg.neighbor_num, cfg.anchor_points, retain_xyz_dists=True)
 
         # the first layer has no features, thus its in_channels == 0 and mlp_shortcut == None
-        self.layers = nn.Sequential(LFA(0, self.neighbor_fea_generator, 8, 8),
-                                    LFA(8, self.neighbor_fea_generator, 8, 16),
-                                    TransitionDownWithDistFea(self.neighbor_fea_generator,
-                                                              16, 16, 32, 'uniform', 0.25),
+        self.layers = nn.Sequential(
+            LFA(0, self.neighbor_fea_generator, 8, 8),
+            LFA(8, self.neighbor_fea_generator, 8, 16),
+            TransitionDownWithDistFea(self.neighbor_fea_generator,
+                                      16, 16, 32, 'uniform', 0.25),
 
-                                    LFA(32, self.neighbor_fea_generator, 32, 32),
-                                    LFA(32, self.neighbor_fea_generator, 32, 64),
-                                    TransitionDownWithDistFea(self.neighbor_fea_generator,
-                                                              64, 64, 128, 'uniform', 0.25),
+            LFA(32, self.neighbor_fea_generator, 32, 32),
+            LFA(32, self.neighbor_fea_generator, 32, 64),
+            TransitionDownWithDistFea(self.neighbor_fea_generator,
+                                      64, 64, 128, 'uniform', 0.25),
 
-                                    LFA(128, self.neighbor_fea_generator, 64, 128),
-                                    LFA(128, self.neighbor_fea_generator, 64, 128),
-                                    TransitionDownWithDistFea(self.neighbor_fea_generator,
-                                                              128, 128, 128, 'uniform', 0.25),
+            LFA(128, self.neighbor_fea_generator, 64, 128),
+            LFA(128, self.neighbor_fea_generator, 64, 128),
+            TransitionDownWithDistFea(self.neighbor_fea_generator,
+                                      128, 128, 128, 'uniform', 0.25),
 
-                                    LFA(128, self.neighbor_fea_generator, 128, 256),
-                                    LFA(256, self.neighbor_fea_generator, 128, 256),
-                                    )
+            LFA(128, self.neighbor_fea_generator, 128, 256),
+            LFA(256, self.neighbor_fea_generator, 128, 256),
+        )
 
         self.head = nn.Sequential(nn.Linear(self.layers[-1].out_channels, 256, bias=True),
                                   nn.LeakyReLU(0.2, inplace=True),
@@ -95,8 +96,12 @@ class Model(nn.Module):
 
 def main_t():
     from scipy.spatial.transform import Rotation as R
-    from thop import profile
-    from thop import clever_format
+    try:
+        from thop import profile
+        from thop import clever_format
+        thop = True
+    except ModuleNotFoundError:
+        thop = False
 
     cfg = Config()
     device = 0
@@ -107,9 +112,10 @@ def main_t():
     xyz = torch.stack([xyz, torch.tensor(R.random().apply(xyz.numpy()).astype(np.float32))], dim=0)
     target = torch.randint(0, 40, (2,))
 
-    macs, params = profile(model, inputs=((xyz, target),))
-    macs, params = clever_format([macs, params], "%.3f")
-    print(f'macs: {macs}, params: {params}')
+    if thop is True:
+        macs, params = profile(model, inputs=((xyz, target),))
+        macs, params = clever_format([macs, params], "%.3f")
+        print(f'macs: {macs}, params: {params}')
 
     for module_name, module in model.named_modules():
         if isinstance(module, TransitionDownWithDistFea):

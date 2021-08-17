@@ -60,9 +60,9 @@ def index_points_dists(dists, idx1, idx2):
     """
     batch_size, n, m = dists.shape
     idx_shape = idx1.shape
-    new_dists = torch.gather(dists, dim=1, index=idx1.view(batch_size, -1, 1).expand(-1, -1, m))
-    new_dists = torch.gather(new_dists, dim=2, index=idx2.view(batch_size, -1, 1))
-    new_dists = new_dists.view(idx_shape)
+    new_dists = torch.gather(dists, dim=1, index=idx1.reshape(batch_size, -1, 1).expand(-1, -1, m))
+    new_dists = torch.gather(new_dists, dim=2, index=idx2.reshape(batch_size, -1, 1))
+    new_dists = new_dists.reshape(idx_shape)
     return new_dists
 
 
@@ -100,6 +100,7 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
     """
     # indices could be different with original version if there are more samples than nsample in one ball
     values, indices, _ = knn_points(new_xyz, xyz, nsample, return_sorted=False)
+    # noinspection PyTypeChecker
     group_idx = torch.where(values < radius ** 2, indices, indices[:, :, :1])
 
     # # ori:
