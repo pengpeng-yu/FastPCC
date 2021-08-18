@@ -12,8 +12,7 @@ import MinkowskiEngine as ME
 
 from lib.torch_utils import minkowski_tensor_split, MLPBlock
 from lib.data_utils import PCData
-from lib.metric import mpeg_pc_error
-from lib.loss_function import chamfer_loss
+from lib.evaluator import PCGCEvaluator
 from lib.sparse_conv_layers import GenerativeUpsampleMessage
 from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyModel
 from lib.entropy_models.hyperprior import \
@@ -28,6 +27,8 @@ class PCC(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super(PCC, self).__init__()
         ME.set_sparse_tensor_operation_mode(ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
+
+        self.evaluator = PCGCEvaluator(cfg.mpeg_pcc_error_command, cfg.mpeg_pcc_error_threads)
         self.encoder = Encoder(1 if cfg.input_feature_type == 'Occupation' else 3,
                                cfg.compressed_channels,
                                cfg.encoder_channels,
@@ -131,7 +132,6 @@ class PCC(nn.Module):
             else: raise NotImplementedError
 
         self.cfg = cfg
-        self.log_pred_res('init')
         self.init_parameters()
 
     def forward(self, pc_data: PCData):
@@ -168,7 +168,6 @@ class PCC(nn.Module):
             # feature = ME.cat(feature, *cached_feature_list)
             raise NotImplementedError
 
-        # bottleneck, decoder and loss during training
         if self.training:
             fea_tilde, loss_dict = self.entropy_bottleneck(feature)
 
@@ -200,18 +199,20 @@ class PCC(nn.Module):
             loss_dict['loss'] = sum(loss_dict.values())
             for key in loss_dict:
                 if key != 'loss':
-                    loss_dict[key] = loss_dict[key].detach().cpu().item()
+                    loss_dict[key] = loss_dict[key].detach().item()
 
             return loss_dict
 
-        # bottleneck, decoder and metric during testing
+        # Only supports batch size == 1.
         elif not self.training:
+
             fea_reconstructed, loss_dict, compressed_strings = self.entropy_bottleneck(feature)
 
             if self.cfg.use_skip_connection:
-                fea_reconstructed, *cached_feature_list = minkowski_tensor_split(
-                    fea_reconstructed, [self.cfg.compressed_channels,
-                                        *self.cfg.skip_connection_channels])
+                # fea_reconstructed, *cached_feature_list = minkowski_tensor_split(
+                #     fea_reconstructed, [self.cfg.compressed_channels,
+                #                         *self.cfg.skip_connection_channels])
+                raise NotImplementedError
 
             decoder_message = self.decoder(
                 GenerativeUpsampleMessage(
@@ -221,15 +222,17 @@ class PCC(nn.Module):
                     cached_fea_list=cached_feature_list))
 
             # the last one is supposed to be the final output of decoder
-            pc_reconstructed = decoder_message.cached_pred_list[-1].decomposed_coordinates
+            pc_reconstructed = decoder_message.cached_pred_list[-1]
 
-            ret = self.log_pred_res(
-                'log', preds=pc_reconstructed,
+            ret = self.evaluator.log_batch(
+                preds=pc_reconstructed.decomposed_coordinates,
                 targets=sparse_pc.decomposed_coordinates,
                 compressed_strings=compressed_strings,
-                fea_points_num=feature.shape[0],
+                bits_preds=[loss_dict['bits_loss'].item() +
+                            loss_dict.get('hyper_bits_loss', torch.tensor([0])).item()],
+                feature_points_numbers=[_.shape[0] for _ in feature.decomposed_coordinates],
                 pc_data=pc_data,
-                bits_preds=[loss_dict['bits_loss'].cpu().item()]
+                compute_chamfer_loss=self.cfg.chamfer_dist_test_phase
             )
 
             return ret
@@ -271,108 +274,13 @@ class PCC(nn.Module):
             if not isinstance(m, PCC) and hasattr(m, 'init_parameters'):
                 m.init_parameters()
 
-    def log_pred_res(self, mode, preds=None, targets=None,
-                     compressed_strings: List[bytes] = None,
-                     fea_points_num: int = None,
-                     pc_data: PCData = None,
-                     bits_preds: List[float] = None):
-        if mode == 'init' or mode == 'reset':
-            self.total_reconstruct_loss = 0.0
-            self.total_bpp = 0.0
-            self.samples_num = 0
-            self.total_metric_values = defaultdict(float)
-            self.total_bpp_pred = 0.0
-
-        elif mode == 'log':
-            assert not self.training
-            assert isinstance(preds, list) and isinstance(targets, list)
-
-            if len(preds) != 1: raise NotImplementedError
-
-            for pred, target, file_path, ori_resolution, resolution, bits_pred \
-                    in zip(preds, targets, pc_data.file_path,
-                           pc_data.ori_resolution, pc_data.resolution, bits_preds):
-                com_string = compressed_strings[0]
-
-                if self.cfg.chamfer_dist_test_phase is True:
-                    self.total_reconstruct_loss += chamfer_loss(
-                        pred.unsqueeze(0).type(torch.float) / resolution,
-                        target.unsqueeze(0).type(torch.float) / resolution).item()
-
-                bpp = len(com_string) * 8 / target.shape[0]
-                self.total_bpp += bpp
-
-                self.total_bpp_pred += bits_pred / target.shape[0]
-
-                if hasattr(pc_data, 'results_dir'):
-                    out_file_path = os.path.join(pc_data.results_dir, os.path.splitext(file_path)[0])
-                    os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
-                    compressed_path = out_file_path + '.txt'
-                    fileinfo_path = out_file_path + '_info.txt'
-                    reconstructed_path = out_file_path + '_recon.ply'
-
-                    if not file_path.endswith('.ply') or ori_resolution != resolution:
-                        file_path = out_file_path + '.ply'
-                        o3d.io.write_point_cloud(
-                            file_path,
-                            o3d.geometry.PointCloud(
-                                o3d.utility.Vector3dVector(
-                                    target.cpu())), write_ascii=True)
-
-                    with open(compressed_path, 'wb') as f:
-                        f.write(com_string)
-
-                    fileinfo = f'fea_points_num: {fea_points_num}\n' \
-                               f'\n' \
-                               f'input_points_num: {target.shape[0]}\n' \
-                               f'output_points_num: {pred.shape[0]}\n' \
-                               f'compressed_bytes: {len(com_string)}\n' \
-                               f'bpp: {bpp}\n' \
-                               f'\n'
-
-                    o3d.io.write_point_cloud(
-                        reconstructed_path,
-                        o3d.geometry.PointCloud(
-                            o3d.utility.Vector3dVector(
-                                pred.detach().clone().cpu())), write_ascii=True)
-
-                    mpeg_pc_error_dict = mpeg_pc_error(
-                        os.path.abspath(file_path),
-                        os.path.abspath(reconstructed_path),
-                        resolution=resolution, normal=False,
-                        command=self.cfg.mpeg_pcc_error_command,
-                        threads=self.cfg.mpeg_pcc_error_threads)
-                    assert mpeg_pc_error_dict != {}, \
-                        f'Error when call mpeg pc error software with ' \
-                        f'infile1={os.path.abspath(file_path)} ' \
-                        f'infile2={os.path.abspath(reconstructed_path)}'
-
-                    for key, value in mpeg_pc_error_dict.items():
-                        self.total_metric_values[key] += value
-                        fileinfo += f'{key}: {value} \n'
-
-                    with open(fileinfo_path, 'w') as f:
-                        f.write(fileinfo)
-
-            self.samples_num += len(targets)
-
-            return True
-
-        elif mode == 'show':
-            metric_dict = {'samples_num': self.samples_num,
-                           'mean_bpp': (self.total_bpp / self.samples_num),
-                           'mean_bpp_pred': (self.total_bpp_pred / self.samples_num)}
-
-            for key, value in self.total_metric_values.items():
-                metric_dict[key] = value / self.samples_num
-
-            if self.cfg.chamfer_dist_test_phase > 0:
-                metric_dict['mean_reconstruct_loss'] = self.total_reconstruct_loss / self.samples_num
-
-            return metric_dict
-
-        else:
-            raise NotImplementedError
+    def train(self, mode: bool = True):
+        """
+        Use model.train() to reset evaluator.
+        """
+        if mode is True:
+            self.evaluator.reset()
+        return super(PCC, self).train(mode=mode)
 
 
 def main_debug():

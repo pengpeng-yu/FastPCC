@@ -12,12 +12,12 @@ except ImportError: pass
 
 class PCData:
     def __init__(self, xyz: torch.Tensor,
-                 colors: Optional[torch.Tensor] = None,
-                 normals: Optional[torch.Tensor] = None,
-                 class_idx: Optional[Union[int, torch.Tensor]] = None,
-                 ori_resolution: Optional[Union[int, List[int]]] = None,
-                 resolution: Optional[Union[int, List[int]]] = None,
-                 file_path: Optional[Union[str, List[str]]] = None):
+                 colors: torch.Tensor = None,
+                 normals: torch.Tensor = None,
+                 class_idx: Union[int, torch.Tensor] = None,
+                 ori_resolution: Union[int, List[int]] = None,
+                 resolution: Union[int, List[int]] = None,
+                 file_path: Union[str, List[str]] = None):
         super(PCData, self).__init__()
         self.xyz = xyz
         self.colors = colors

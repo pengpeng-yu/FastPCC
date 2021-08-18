@@ -74,7 +74,8 @@ class NoisyDeepFactorizedHyperPriorEntropyModel(nn.Module):
             loss_dict['hyper_aux_loss'] = hyperprior_loss_dict['aux_loss']
             assert hyperprior_strings == strings == []
         else:
-            strings = strings[0] + hyperprior_strings[0]  # TODO: split
+            # TODO: split
+            strings = [i + j for i, j in zip(hyperprior_strings[0], strings[0])]
 
         if self.training:
             return y_tilde, loss_dict

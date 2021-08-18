@@ -104,13 +104,6 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
 
     logger.info(f'start testing using device {device}')
 
-    try:
-        if torch_utils.is_parallel(model):
-            model.module.log_pred_res('reset')
-        else:
-            model.log_pred_res('reset')
-    except AttributeError: pass
-
     steps_one_epoch = len(dataloader)
     for step_idx, batch_data in enumerate(dataloader):
         if isinstance(batch_data, torch.Tensor):
@@ -135,9 +128,9 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
 
     try:
         if torch_utils.is_parallel(model):
-            metric_results = model.module.log_pred_res('show')
+            metric_results = model.module.evaluator.show()
         else:
-            metric_results = model.log_pred_res('show')
+            metric_results = model.evaluator.show()
     except AttributeError:
         metric_results = {}
 
