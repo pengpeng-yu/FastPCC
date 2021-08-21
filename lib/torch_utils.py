@@ -110,7 +110,7 @@ class MLPBlock(nn.Module):
                 inplace=True)
         else: raise NotImplementedError
 
-        if self.bn is None and self.act is None:
+        if self.bn is None and self.act is None and version == 'linear':
             print('Warning: You are using a MLPBlock without activation nor batchnorm, '
                   'which is identical to a nn.Linear(bias=True) object')
 
@@ -128,7 +128,7 @@ class MLPBlock(nn.Module):
         if self.version == 'linear':
             assert ori_shape[-1] == self.mlp.in_features
             if len(ori_shape) > 3:
-                x = x.view(ori_shape[0], -1, ori_shape[-1])
+                x = x.contiguous().view(ori_shape[0], -1, ori_shape[-1])
             x = self.mlp(x)
 
             if isinstance(self.bn, nn.BatchNorm1d):
@@ -170,9 +170,9 @@ class MLPBlock(nn.Module):
             return x
 
     def __repr__(self):
-        return f'MLPBlock(in_channels={self.in_channels}, out_channels={self.out_channels}, ' \
-               f'activation={self.act}, bn={self.bn}, version={self.version}, ' \
-               f'skip_connection={self.skip_connection}'
+        return f'MLPBlock(in_ch={self.in_channels}, out_ch={self.out_channels}, ' \
+               f'act={self.act}, bn={self.bn}, version={self.version}, ' \
+               f'skip={self.skip_connection}'
 
 
 class BatchNorm1dChnlLast(nn.Module):

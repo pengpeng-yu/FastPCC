@@ -144,7 +144,7 @@ class NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(NoisyDeepFact
 
                  index_ranges: Tuple[int, ...] = (4,) * 9,
                  parameter_fns_type: str = 'split',
-                 parameter_fns_transform_fn: Callable = None,
+                 parameter_fns_factory: Callable[..., nn.Module] = None,
                  num_filters: Tuple[int, ...] = (1, 2, 1),
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
@@ -188,26 +188,29 @@ class NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(NoisyDeepFact
 
         elif parameter_fns_type == 'transform':
 
-            prior_indexes_weights_mlp = nn.ModuleList(
-                [parameter_fns_transform_fn(index_channels, out_channels)
-                 for out_channels in weights_param_numel])
-            prior_indexes_biases_mlp = nn.ModuleList(
-                [parameter_fns_transform_fn(index_channels, out_channels)
-                 for out_channels in biases_param_numel])
-            prior_indexes_factors_mlp = nn.ModuleList(
-                [parameter_fns_transform_fn(index_channels, out_channels)
-                 for out_channels in factors_param_numel])
+            prior_indexes_weights_transforms = nn.ModuleList(
+                [parameter_fns_factory(index_channels, out_channels)
+                 for out_channels in weights_param_numel]
+            )
+            prior_indexes_biases_transforms = nn.ModuleList(
+                [parameter_fns_factory(index_channels, out_channels)
+                 for out_channels in biases_param_numel]
+            )
+            prior_indexes_factors_transforms = nn.ModuleList(
+                [parameter_fns_factory(index_channels, out_channels)
+                 for out_channels in factors_param_numel]
+            )
 
             parameter_fns = {
                 'batch_shape': lambda i: i.shape[:-1],
                 'weights': lambda i: [transform(i).view(-1, num_filters[_ + 1], num_filters[_])
-                                      for _, transform in enumerate(prior_indexes_weights_mlp)],
+                                      for _, transform in enumerate(prior_indexes_weights_transforms)],
 
                 'biases': lambda i: [transform(i).view(-1, biases_param_numel[_], 1)
-                                     for _, transform in enumerate(prior_indexes_biases_mlp)],
+                                     for _, transform in enumerate(prior_indexes_biases_transforms)],
 
                 'factors': lambda i: [transform(i).view(-1, factors_param_numel[_], 1)
-                                      for _, transform in enumerate(prior_indexes_factors_mlp)],
+                                      for _, transform in enumerate(prior_indexes_factors_transforms)],
             }
 
         else: raise NotImplementedError
@@ -236,8 +239,12 @@ class NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(NoisyDeepFact
 
         if parameter_fns_type == 'transform':
             # noinspection PyUnboundLocalVariable
-            self.prior_indexes_weights_mlp, self.prior_indexes_biases_mlp, self.prior_indexes_factors_mlp = \
-                prior_indexes_weights_mlp, prior_indexes_biases_mlp, prior_indexes_factors_mlp
+            self.prior_indexes_weights_transforms, \
+                self.prior_indexes_biases_transforms, \
+                self.prior_indexes_factors_transforms = \
+                prior_indexes_weights_transforms, \
+                prior_indexes_biases_transforms, \
+                prior_indexes_factors_transforms
 
     def prior_entropy_model_forward(self, y, indexes):
         return self.prior_entropy_model(y, indexes, extra_preparation={2: self.indexes_view_fn})

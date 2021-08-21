@@ -1,9 +1,5 @@
-import os
-from collections import defaultdict
-from typing import List
 from functools import partial
 
-import open3d as o3d
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,7 +15,7 @@ from lib.entropy_models.hyperprior import \
     NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel, \
     NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel
 
-from models.convolutional.baseline.layers import Encoder, Decoder, ConvBlock
+from models.convolutional.baseline.layers import Encoder, Decoder, ConvBlock, BLOCKS_DICT
 from models.convolutional.baseline.model_config import ModelConfig
 
 
@@ -66,15 +62,20 @@ class PCC(nn.Module):
             # BN is always performed for the last conv of hyper encoder and hyper decoder
             def make_hyper_coder(in_channels, intra_channels, out_channels):
                 return nn.Sequential(
-                    ConvBlock(in_channels,
-                              intra_channels[0],
-                              3, 1, bn=cfg.use_batch_norm, act=cfg.activation),
+                    *[nn.Sequential(
 
-                    *[ConvBlock(
-                        intra_channels[idx],
-                        intra_channels[idx + 1],
-                        3, 1, bn=cfg.use_batch_norm, act=cfg.activation)
-                        for idx in range(len(intra_channels) - 1)],
+                        ConvBlock(
+                            intra_channels[idx - 1] if idx != 0 else in_channels,
+                            intra_channels[idx],
+                            3, 1, bn=cfg.use_batch_norm, act=cfg.activation
+                        ),
+
+                        *[BLOCKS_DICT[cfg.basic_block_type](
+                            intra_channels[idx],
+                            bn=cfg.use_batch_norm, act=cfg.activation
+                        ) for _ in range(cfg.basic_block_num)]
+
+                    ) for idx in range(len(intra_channels))],
 
                     ConvBlock(intra_channels[-1],
                               out_channels,
@@ -91,7 +92,8 @@ class PCC(nn.Module):
             hyper_decoder = make_hyper_coder(
                 cfg.hyper_compressed_channels,
                 cfg.hyper_decoder_channels,
-                hyper_decoder_out_channels)
+                hyper_decoder_out_channels,
+            )
 
             if cfg.hyperprior == 'ScaleNoisyNormal':
                 assert len(cfg.prior_indexes_range) == 1
@@ -108,7 +110,7 @@ class PCC(nn.Module):
 
             elif cfg.hyperprior == 'NoisyDeepFactorized':
                 # No bn is performed.
-                def parameter_fns_transform_fn(in_channels, out_channels):
+                def parameter_fns_factory(in_channels, out_channels):
                     return nn.Sequential(
                         MLPBlock(in_channels, out_channels,
                                  bn=None, act=cfg.activation),
@@ -124,7 +126,7 @@ class PCC(nn.Module):
                         coding_ndim=2,
                         index_ranges=cfg.prior_indexes_range,
                         parameter_fns_type='transform',
-                        parameter_fns_transform_fn=parameter_fns_transform_fn,
+                        parameter_fns_factory=parameter_fns_factory,
                         num_filters=(1, 3, 3, 3, 1),
                         quantize_indexes=True
                     )
@@ -205,7 +207,6 @@ class PCC(nn.Module):
 
         # Only supports batch size == 1.
         elif not self.training:
-
             fea_reconstructed, loss_dict, compressed_strings = self.entropy_bottleneck(feature)
 
             if self.cfg.use_skip_connection:

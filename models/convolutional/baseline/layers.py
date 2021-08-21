@@ -44,6 +44,11 @@ class BaseConvBlock(nn.Module):
             x = self.act(x)
         return x
 
+    def __repr__(self):
+        return f'{str(self.conv).replace("Minkowski", "ME", 1)}, ' \
+               f'bn={self.bn is not None}, ' \
+               f'act={str(self.act).replace("Minkowski", "ME", 1).rstrip("()")}'
+
 
 class ConvBlock(BaseConvBlock):
     def __init__(self, *args, **kwargs):
@@ -58,6 +63,10 @@ class GenConvTransBlock(BaseConvBlock):
 class ResBlock(nn.Module):
     def __init__(self, channels, bn: bool, act: Optional[str]):
         super(ResBlock, self).__init__()
+        self.channels = channels
+        self.bn = bn
+        self.act = act
+
         self.conv0 = ConvBlock(channels, channels, 3, 1, bn=bn, act=act)
         self.conv1 = ConvBlock(channels, channels, 3, 1, bn=bn, act=None)
 
@@ -66,34 +75,40 @@ class ResBlock(nn.Module):
         out += x
         return out
 
+    def __repr__(self):
+        return f'MEResBlock(channels={self.channels}, ' \
+               f'bn={self.bn}, act={self.act})'
+
 
 class InceptionResBlock(nn.Module):
-    def __init__(self, channels, bn: bool, act: Optional[str], out_channels=None):
+    def __init__(self, channels, bn: bool, act: Optional[str]):
         super(InceptionResBlock, self).__init__()
-        if out_channels is None: out_channels = channels
+        self.channels = channels
+        self.bn = bn
+        self.act = act
+
         self.path_0 = nn.Sequential(
-            ConvBlock(channels, out_channels // 4, 3, 1, bn=bn, act=act),
-            ConvBlock(out_channels // 4, out_channels // 2, 3, 1, bn=bn, act=None))
+            ConvBlock(channels, channels // 4, 3, 1, bn=bn, act=act),
+            ConvBlock(channels // 4, channels // 2, 3, 1, bn=bn, act=None))
 
         self.path_1 = nn.Sequential(
-            ConvBlock(channels, out_channels // 4, 1, 1, bn=bn, act=act),
-            ConvBlock(out_channels // 4, out_channels // 4, 3, 1, bn=bn, act=act),
-            ConvBlock(out_channels // 4, out_channels // 2, 1, 1, bn=bn, act=None))
-
-        if out_channels != channels:
-            self.skip = ConvBlock(channels, out_channels, 3, 1, bn=bn, act=None)
-        else:
-            self.skip = None
+            ConvBlock(channels, channels // 4, 1, 1, bn=bn, act=act),
+            ConvBlock(channels // 4, channels // 4, 3, 1, bn=bn, act=act),
+            ConvBlock(channels // 4, channels // 2, 1, 1, bn=bn, act=None))
 
     def forward(self, x):
         out0 = self.path_0(x)
         out1 = self.path_1(x)
-        out = ME.cat(out0, out1) + (self.skip(x) if self.skip is not None else x)
+        out = ME.cat(out0, out1) + x
         return out
 
+    def __repr__(self):
+        return f'MEInceptionResBlock(channels={self.channels}, ' \
+               f'bn={self.bn}, act={self.act})'
 
-blocks_list = [ResBlock, InceptionResBlock]
-blocks_dict = {_.__name__: _ for _ in blocks_list}
+
+BLOCKS_LIST = [ResBlock, InceptionResBlock]
+BLOCKS_DICT = {_.__name__: _ for _ in BLOCKS_LIST}
 
 
 class Encoder(nn.Module):
@@ -112,7 +127,7 @@ class Encoder(nn.Module):
             assert len(intra_channels) - 1 == len(skip_connection_channels)
 
         self.use_skip_connection = use_skip_connection
-        basic_block = partial(blocks_dict[basic_block_type], bn=use_batch_norm, act=act)
+        basic_block = partial(BLOCKS_DICT[basic_block_type], bn=use_batch_norm, act=act)
 
         self.first_block = ConvBlock(in_channels, intra_channels[0], 3, 1, bn=use_batch_norm, act=act)
         self.blocks = nn.ModuleList()
@@ -208,7 +223,7 @@ class DecoderBlock(nn.Module):
         self.classifier_in_channels = classifier_in_channels
         self.basic_blocks_num = basic_blocks_num
 
-        basic_block = partial(blocks_dict[basic_block_type], bn=use_batch_norm, act=act)
+        basic_block = partial(BLOCKS_DICT[basic_block_type], bn=use_batch_norm, act=act)
 
         upsample_block = nn.Sequential(
             GenConvTransBlock(self.in_channels, self.upsample_out_channels, 2, 2, bn=use_batch_norm, act=act),
@@ -222,6 +237,9 @@ class DecoderBlock(nn.Module):
 
     def forward(self, msg: GenerativeUpsampleMessage):
         return self.generative_upsample(msg)
+
+    def __repr__(self):
+        return str(self.generative_upsample)
 
 
 class Decoder(nn.Module):

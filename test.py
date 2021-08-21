@@ -113,7 +113,8 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
                          + [results_dir]
         elif isinstance(batch_data, dict):
             batch_data = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
-                          for k, v in batch_data.items()}.update({'results_dir': results_dir})
+                          for k, v in batch_data.items()}
+            batch_data.update({'results_dir': results_dir})
         elif isinstance(batch_data, PCData):
             batch_data.to(device=device, non_blocking=True)
             batch_data.results_dir = results_dir
