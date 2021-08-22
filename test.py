@@ -13,7 +13,7 @@ import torch.utils.data
 from lib import torch_utils
 from lib.config import Config
 from lib import utils
-from lib.data_utils import PCData
+from lib.data_utils import SampleData
 
 
 def main():
@@ -51,6 +51,8 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         raise ImportError(*e.args)
 
     results_dir = os.path.join(run_dir, 'results') if cfg.test.save_results else None
+    if results_dir is not None:
+        os.makedirs(results_dir, exist_ok=True)
 
     # cache
     dataset: torch.utils.data.Dataset = Dataset(cfg.test.dataset, False, logger)
@@ -115,7 +117,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
             batch_data = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                           for k, v in batch_data.items()}
             batch_data.update({'results_dir': results_dir})
-        elif isinstance(batch_data, PCData):
+        elif isinstance(batch_data, SampleData):
             batch_data.to(device=device, non_blocking=True)
             batch_data.results_dir = results_dir
         else:
@@ -129,20 +131,17 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
 
     try:
         if torch_utils.is_parallel(model):
-            metric_results = model.module.evaluator.show()
+            metric_results = model.module.evaluator.show(results_dir)
         else:
-            metric_results = model.evaluator.show()
+            metric_results = model.evaluator.show(results_dir)
     except AttributeError:
         metric_results = {}
 
-    return_obj = {item_name: item for item_name, item in metric_results.items()
-                  if isinstance(item, int) or isinstance(item, float)}
-
-    with open(os.path.join(run_dir, 'test_metric.txt'), 'w') as f:
-        f.write('\n'.join([f'{key}: {value}' for key, value in return_obj.items()]))
+    ret = {item_name: item for item_name, item in metric_results.items()
+           if isinstance(item, int) or isinstance(item, float)}
 
     logger.info(f'test end')
-    return return_obj
+    return ret
 
 
 if __name__ == '__main__':

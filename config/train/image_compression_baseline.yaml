@@ -1,0 +1,52 @@
+model_path: models.image_compression.baseline
+
+
+train:
+  rundir_name: 'train_image_compression_<autoindex>'
+  device: '0,1'
+  amp: False
+  more_reproducible: True
+  batch_size: 8
+  num_workers: 2
+  optimizer: Adam
+  momentum: 0.9
+  weight_decay: 0.0001
+
+  learning_rate: 0.0001
+  epochs: 10
+
+  ckpt_frequency: 1
+  lr_step_size: 2
+  lr_step_gamma: 0.5
+  resume_from_ckpt: 'runs/train_image_compression_0/ckpts/epoch_<maxindex>.pt'
+  resume_items: ['state_dict']
+  test_frequency: 1
+
+  dataset_path: 'lib.datasets.ImageFolder'
+  dataset:
+    root: 'datasets/coco2017/images'
+    filelist_path: 'train2017_list.txt'
+    file_path_pattern: 'test2017/*.jpg'
+
+    normalization_scaler: 255
+    channels_order: 'BGR'
+    target_shapes: [640, 640, 1024, 1024, 1280, 1280]
+    resize_strategy: 'Expand'
+
+
+test:
+  device: '1'
+  batch_size: 1
+  num_workers: 2
+  save_results: True
+  log_frequency: 1
+  dataset_path: 'lib.datasets.ImageFolder'
+  dataset:
+    root: 'datasets/Kodak'
+    filelist_path: 'list.txt'
+    file_path_pattern: '*.png'
+
+    normalization_scaler: 255
+    channels_order: 'BGR'
+    target_shapes: [64, 64]
+    resize_strategy: 'Adapt'

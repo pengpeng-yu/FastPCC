@@ -1,8 +1,10 @@
+import math
 import os
 from collections import defaultdict
 from typing import Tuple, List, Optional, Union
 
 import numpy as np
+import cv2
 import open3d as o3d
 import torch
 try:
@@ -10,7 +12,74 @@ try:
 except ImportError: pass
 
 
-class PCData:
+class SampleData:
+    def __init__(self):
+        self.results_dir = None
+
+    def to(self, device, non_blocking=False):
+        for key, value in self.__dict__.items():
+            if isinstance(value, torch.Tensor):
+                self.__dict__[key] = value.to(device, non_blocking=non_blocking)
+
+
+class IMData(SampleData):
+    def __init__(self, im, file_path, valid_range=None):
+        super(IMData, self).__init__()
+        self.im = im
+        self.file_path = file_path
+        self.valid_range = valid_range
+
+
+def im_data_collate_fn(data_list: List[IMData],
+                       target_shapes: Union[Tuple[int, ...], List[int]],
+                       resize_strategy: str,
+                       channel_last_to_channel_first: bool) -> IMData:
+
+    shape_idx = np.random.randint(0, len(target_shapes) // 2) * 2
+    target_shape = (target_shapes[shape_idx],
+                    target_shapes[shape_idx + 1])
+
+    data_dict = defaultdict(list)
+    for data in data_list:
+        for key, value in data.__dict__.items():
+            if key == 'im':
+                if resize_strategy == 'Expand':
+                    im, valid_range = im_resize_with_crop(value, target_shape)
+
+                elif resize_strategy == 'Shrink':
+                    im, valid_range = im_resize_with_pad(value, target_shape)
+
+                elif resize_strategy == 'Retain':
+                    im, valid_range = im_pad(value, target_shape=target_shape)
+
+                elif resize_strategy == 'Adapt':
+                    im, valid_range = im_pad(value, base_length=target_shape)
+
+                else:
+                    raise NotImplementedError
+
+                data_dict[key].append(im)
+                data_dict['valid_range'].append(valid_range)
+
+            elif value is not None:
+                data_dict[key].append(value)
+
+    batched_data_dict = {}
+    for key, value in data_dict.items():
+        if key == 'im':
+            if channel_last_to_channel_first is True:
+                batched_data_dict[key] = \
+                    torch.from_numpy(np.stack(value)).permute(0, 3, 1, 2).contiguous()
+            else:
+                batched_data_dict[key] = torch.from_numpy(np.stack(value))
+
+        else:
+            batched_data_dict[key] = value
+
+    return IMData(**batched_data_dict)
+
+
+class PCData(SampleData):
     def __init__(self, xyz: torch.Tensor,
                  colors: torch.Tensor = None,
                  normals: torch.Tensor = None,
@@ -27,43 +96,106 @@ class PCData:
         self.file_path = file_path
         self.class_idx = class_idx
 
-    def to(self, device, non_blocking=False):
-        for key, value in self.__dict__.items():
-            if isinstance(value, torch.Tensor):
-                self.__dict__[key] = value.to(device, non_blocking=non_blocking)
 
-
-def pc_data_collate_fn(pc_data_list: List[PCData],
+def pc_data_collate_fn(data_list: List[PCData],
                        sparse_collate: bool) -> PCData:
-    pc_data_dict = defaultdict(list)
-    for pc_data in pc_data_list:
-        for key, value in pc_data.__dict__.items():
+    data_dict = defaultdict(list)
+    for data in data_list:
+        for key, value in data.__dict__.items():
             if value is not None:
-                pc_data_dict[key].append(value)
-            else:
-                pc_data_dict[key] = [None]
+                data_dict[key].append(value)
 
-    batched_pc_data_dict = {}
-    for key, value in pc_data_dict.items():
-        if value[0] is None:
-            batched_pc_data_dict[key] = None
-
-        elif key in ('xyz', 'colors', 'normals'):
+    batched_data_dict = {}
+    for key, value in data_dict.items():
+        if key in ('xyz', 'colors', 'normals'):
             if not sparse_collate:
-                batched_pc_data_dict[key] = torch.stack(value, dim=0)
+                batched_data_dict[key] = torch.stack(value, dim=0)
             else:
                 if key == 'xyz':
-                    batched_pc_data_dict[key] = ME.utils.batched_coordinates(value)
+                    batched_data_dict[key] = ME.utils.batched_coordinates(value)
                 else:
-                    batched_pc_data_dict[key] = torch.cat(value, dim=0)
+                    batched_data_dict[key] = torch.cat(value, dim=0)
 
         elif key in ('class_idx',):
-            batched_pc_data_dict[key] = torch.tensor(value)
+            batched_data_dict[key] = torch.tensor(value)
 
         else:
-            batched_pc_data_dict[key] = value
+            batched_data_dict[key] = value
 
-    return PCData(**batched_pc_data_dict)
+    return PCData(**batched_data_dict)
+
+
+def im_resize_with_crop(
+        im: np.ndarray,
+        target_shape: Union[Tuple[int, int], List[int]]
+) -> Tuple[np.ndarray, np.ndarray]:
+    assert len(target_shape) == 2
+
+    shape_factor = (target_shape[0] / im.shape[0],
+                    target_shape[1] / im.shape[1])
+
+    shape_scaler = max(shape_factor)
+    im: np.ndarray = cv2.resize(im, (0, 0), fx=shape_scaler, fy=shape_scaler)
+    boundary = np.array([im.shape[0] - target_shape[0],
+                         im.shape[1] - target_shape[1]])
+    origin: np.ndarray = np.random.randint(0, boundary + 1)
+
+    im = im[origin[0]: origin[0] + target_shape[0],
+            origin[1]: origin[1] + target_shape[1]]
+    valid_range = np.array([[0, im.shape[0]],
+                            [0, im.shape[1]]], dtype=np.int)
+    return im, valid_range
+
+
+def im_resize_with_pad(
+        im: np.ndarray,
+        target_shape: Union[Tuple[int, int], List[int]]
+) -> Tuple[np.ndarray, np.ndarray]:
+    assert len(target_shape) == 2
+
+    shape_factor = (target_shape[0] / im.shape[0],
+                    target_shape[1] / im.shape[1])
+
+    shape_scaler = min(shape_factor)
+    im = cv2.resize(im, (0, 0), fx=shape_scaler, fy=shape_scaler)
+    holder = np.zeros_like(im, shape=(*target_shape, 3))
+    boundary = np.array([target_shape[0] - im.shape[0],
+                         target_shape[1] - im.shape[1]])
+    origin = np.random.randint(0, boundary + 1)
+
+    valid_range = np.array(
+        [[origin[0], origin[0] + im.shape[0]],
+         [origin[1], origin[1] + im.shape[1]]],
+        dtype=np.int
+    )
+
+    holder[valid_range[0][0]: valid_range[0][1],
+           valid_range[1][0]: valid_range[1][1]] = im
+
+    return holder, valid_range
+
+
+def im_pad(
+        im: np.ndarray,
+        target_shape: Union[Tuple[int, int], List[int]] = None,
+        base_length: Union[Tuple[int, int], List[int]] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+
+    if target_shape is None:
+        assert len(base_length) == 2
+        target_shape = (math.ceil(im.shape[0] / base_length[0]) * base_length[0],
+                        math.ceil(im.shape[1] / base_length[1]) * base_length[1])
+    else:
+        assert len(target_shape) == 2
+        assert target_shape[0] >= im.shape[0] and \
+               target_shape[1] >= im.shape[1]
+
+    holder = np.zeros_like(im, shape=(*target_shape, 3))
+    holder[: im.shape[0], : im.shape[1]] = im
+    valid_range = np.array([[0, im.shape[0]],
+                            [0, im.shape[1]]], dtype=np.int)
+
+    return holder, valid_range
 
 
 class OFFIO:

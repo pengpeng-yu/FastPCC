@@ -1,13 +1,15 @@
+import json
 from collections import defaultdict
 from typing import Tuple, List, Union
 import os
 
+import cv2
 import open3d as o3d
 import torch
 
 from lib.data_utils import PCData
 from lib.loss_function import chamfer_loss
-from lib.metric import mpeg_pc_error
+from lib.metric import mpeg_pc_error, batch_image_psnr
 
 
 class Evaluator:
@@ -20,7 +22,7 @@ class Evaluator:
     def log_batch(self, *args, **kwargs):
         raise NotImplementedError
 
-    def show(self):
+    def show(self, results_dir: str):
         raise NotImplementedError
 
 
@@ -153,7 +155,7 @@ class PCGCEvaluator(Evaluator):
 
         return True
 
-    def show(self):
+    def show(self, results_dir: str):
         metric_dict = {'samples_num': self.samples_num,
                        'mean_bpp': (self.total_bpp / self.samples_num),
                        'mean_bpp_pred': (self.total_bpp_pred / self.samples_num)}
@@ -164,8 +166,77 @@ class PCGCEvaluator(Evaluator):
         if self.total_chamfer_loss != 0:
             metric_dict['mean_reconstruct_loss'] = self.total_chamfer_loss / self.samples_num
 
+        if results_dir is not None:
+            with open(os.path.join(results_dir, 'test_metric.txt'), 'w') as f:
+                f.write(str(metric_dict))
+
         return metric_dict
 
 
+class ImageCompressionEvaluator(Evaluator):
+    def __init__(self):
+        super(ImageCompressionEvaluator, self).__init__()
 
+    def reset(self):
+        self.file_path_to_info = {}
 
+    def log_batch(self,
+                  batch_im_recon,
+                  batch_im, bits_preds,
+                  compressed_strings,
+                  file_paths,
+                  valid_ranges,
+                  results_dir):
+        if not batch_im_recon.shape[0] == 1:
+            raise NotImplementedError
+
+        assert len(batch_im_recon) == len(bits_preds) == len(compressed_strings) == len(file_paths)
+
+        valid_range = valid_ranges[0]
+        batch_psnr = batch_image_psnr(
+            batch_im_recon[:, :, valid_range[0][0]: valid_range[0][1],
+                           valid_range[1][0]: valid_range[1][1]],
+            batch_im[:, :, valid_range[0][0]: valid_range[0][1],
+                     valid_range[1][0]: valid_range[1][1]],
+            max_val=255
+        )
+
+        batch_im = batch_im.to(torch.uint8).cpu().permute(0, 2, 3, 1).numpy()
+
+        for idx in range(len(batch_psnr)):
+            psnr = batch_psnr[idx].item()
+
+            if results_dir is not None:
+                out_file_path = os.path.join(results_dir, file_paths[idx])
+                os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
+                cv2.imwrite(out_file_path, batch_im[idx])
+
+            pixels_num = batch_im.shape[2] * batch_im.shape[3]
+            self.file_path_to_info[file_paths[idx]] = \
+                {
+                    'psnr': psnr,
+                    'bpp_pred': bits_preds[idx] / pixels_num,
+                    'bpp': len(compressed_strings[idx]) * 8 / pixels_num
+                }
+
+        return True
+
+    def show(self, results_dir: str):
+        if results_dir is not None:
+            with open(os.path.join(results_dir, 'test_metric.txt'), 'w') as f:
+                f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
+
+        mean_values = defaultdict(float)
+        sample_num = len(self.file_path_to_info)
+        for _, info in self.file_path_to_info.items():
+            for key, value in info.items():
+                mean_values[key] += value
+
+        for key in mean_values:
+            mean_values[key] /= sample_num
+
+        if results_dir is not None:
+            with open(os.path.join(results_dir, 'mean.txt'), 'w') as f:
+                f.write(json.dumps(mean_values, indent=2, sort_keys=False))
+
+        return mean_values
