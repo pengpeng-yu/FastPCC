@@ -96,7 +96,6 @@ class Config(SimpleConfig):
 
     def __post_init__(self):
         self.local_auto_import()
-        self.check()
 
     def check_local_value(self):
         if hasattr(self.model, 'input_points_num') and hasattr(self.train.dataset, 'input_points_num'):

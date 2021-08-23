@@ -38,6 +38,7 @@ def main():
     # Initialize config, run dir, logger
     cfg = Config()
     cfg.merge_with_dotlist(sys.argv[1:])
+    cfg.check()
 
     from loguru import logger
     logger.remove()

@@ -12,7 +12,7 @@ class SimpleConfig:
 
     def check(self):
         """
-        Called by a series of merge_xxx func to check all the attributes. You can also call it in __init__().
+        You are supposed to call this function after building a config object to check attributes.
         """
         self.check_type()
         self.check_value()
@@ -87,6 +87,11 @@ class SimpleConfig:
                 raise AssertionError(f'unexpected type {value_type} of attribute {key}')
 
     def local_auto_import(self, keys=None):
+        """
+        Called by merge_setattr().
+        You can manually call this function to import SimpleConfig class automatically
+        without using merge_setattr().
+        """
         if keys is None: keys = self.__dict__
         elif isinstance(keys, str):
             keys = [keys]
@@ -108,6 +113,7 @@ class SimpleConfig:
 
     def merge_with_dotdict(self, dotdict: Dict):
         """
+        Fundamental function for merging configs.
         dotdict: {'a': 2, 'b.a': 'string', '-b.b.a_a': [1,2,3], '--b.b.b-b': ['1', '2']}
         Value will not be formatted.
         """
@@ -130,16 +136,23 @@ class SimpleConfig:
                     raise AssertionError(f'attribute "{first_key}" is not a subclass of SimpleConfig')
                 self.__dict__[first_key].merge_with_dotdict({res_keys: value})
 
-        self.check()
         return True
+
+    def merge_with_dotdict_list(self, dotdict_list: List[Dict]):
+        ret = True
+        for dotdict in dotdict_list:
+            ret &= self.merge_with_dotdict(dotdict)
+        return ret
 
     def merge_with_dotlist(self, dotlist: List[str]):
         """
-        yaml file path supported.
+        YAML file paths are supported.
+        Repeated keys are allowed.
         dotlist: ['a==2', 'b.a=string', '-b.b.a_a=[1,2,3]', '--b.b.b-b==["1","2"]']
         Value will be formatted.
+        dotdict: {'a': 2, 'b.a': 'string', '-b.b.a_a': [1,2,3], '--b.b.b-b': ['1', '2']}
         """
-        dotdict = {}
+        dotdict_list = []
         for arg in dotlist:
             arg = arg.replace('==', '=')
             try:
@@ -148,19 +161,25 @@ class SimpleConfig:
             except ValueError:
                 try:
                     yaml_dict = yaml.safe_load(open(arg))
-                    dotdict.update(self.dict_to_dotdict(yaml_dict))
+                    dotdict_list.append(self.dict_to_dotdict(yaml_dict))
                 except Exception as e:
-                    raise ValueError(f'unexpected arg format: "{arg}"')
+                    raise ValueError(f'unexpected arg: "{arg}"')
 
             else:
                 if var[0] == '[' and var[-1] == ']':
-                    dotdict[keys_seq] = [self.format_str(i) for i in var[1:-1].split(',')]
+                    dotdict_list.append(
+                        {keys_seq: [self.format_str(i) for i in var[1:-1].split(',')]}
+                    )
                 elif var[0] == '(' and var[-1] == ')':
-                    dotdict[keys_seq] = (self.format_str(i) for i in var[1:-1].split(','))
+                    dotdict_list.append(
+                        {keys_seq: (self.format_str(i) for i in var[1:-1].split(','))}
+                    )
                 else:
-                    dotdict[keys_seq] = self.format_str(var)
+                    dotdict_list.append(
+                        {keys_seq: self.format_str(var)}
+                    )
 
-        return self.merge_with_dotdict(dotdict)
+        return self.merge_with_dotdict_list(dotdict_list)
 
     def merge_with_dict(self, dict_obj: Dict):
         """

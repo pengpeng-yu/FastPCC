@@ -20,6 +20,7 @@ def main():
     # Initialize config
     cfg = Config()
     cfg.merge_with_dotlist(sys.argv[1:])
+    cfg.check()
 
     os.makedirs('runs', exist_ok=True)
     run_dir = pathlib.Path(utils.autoindex_obj(os.path.join('runs', cfg.test.rundir_name)))
@@ -137,11 +138,11 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
     except AttributeError:
         metric_results = {}
 
-    ret = {item_name: item for item_name, item in metric_results.items()
-           if isinstance(item, int) or isinstance(item, float)}
+    for value in metric_results.values():
+        assert isinstance(value, int) or isinstance(value, float)
 
     logger.info(f'test end')
-    return ret
+    return metric_results
 
 
 if __name__ == '__main__':
