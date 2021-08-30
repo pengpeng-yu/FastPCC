@@ -129,7 +129,12 @@ class Encoder(nn.Module):
         self.use_skip_connection = use_skip_connection
         basic_block = partial(BLOCKS_DICT[basic_block_type], bn=use_batch_norm, act=act)
 
-        self.first_block = ConvBlock(in_channels, intra_channels[0], 3, 1, bn=use_batch_norm, act=act)
+        if intra_channels[0] != 0:
+            self.first_block = ConvBlock(in_channels, intra_channels[0], 3, 1, bn=use_batch_norm, act=act)
+        else:
+            self.first_block = None
+            intra_channels = (in_channels, *intra_channels[1:])
+
         self.blocks = nn.ModuleList()
 
         for idx in range(len(intra_channels) - 1):
@@ -172,7 +177,8 @@ class Encoder(nn.Module):
         points_num_list = [[_.shape[0] for _ in x.decomposed_coordinates]]
         cached_feature_list = []
 
-        x = self.first_block(x)
+        if self.first_block is not None:
+            x = self.first_block(x)
 
         for idx, block in enumerate(self.blocks):
             if self.use_skip_connection:

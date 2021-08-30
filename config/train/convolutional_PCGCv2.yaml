@@ -21,15 +21,12 @@ train:
   more_reproducible: True
   batch_size: 24
   num_workers: 4
-  optimizer: Adam
-  aux_optimizer: SGD
+  optimizer: [Adam, Adam, SGD]
   momentum: 0.9
-  aux_momentum: 0.9
   weight_decay: 0.0001
   max_grad_norm: 1.0
 
-  learning_rate: 0.0001
-  aux_learning_rate: 0.0001
+  learning_rate: [0.0001, 0.0001, 0.0001]
   epochs: 10
 
   ckpt_frequency: 1
@@ -39,8 +36,8 @@ train:
   resume_items: ['state_dict']
   test_frequency: 4
 
-  dataset_path: 'lib.datasets.PCGCv2Data'
-#  dataset_path: 'lib.datasets.ShapeNetCorev2'
+#  dataset_path: 'lib.datasets.PCGCv2Data'
+  dataset_path: 'lib.datasets.ShapeNetCorev2'
 
   dataset:
     random_rotation: True

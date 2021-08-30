@@ -31,6 +31,7 @@ class ModelConfig(SimpleConfig):
     adaptive_pruning_num_scaler: float = 1.0
     bpp_loss_factor: float = 0.2
     reconstruct_loss_factor: float = 1.0
+    bpp_target: float = 0.0
 
     # only for test phase:
     chamfer_dist_test_phase: bool = False

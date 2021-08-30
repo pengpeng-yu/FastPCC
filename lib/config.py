@@ -1,9 +1,10 @@
-import os
-import yaml
-
 from lib.simple_config import SimpleConfig
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, Union
+
+int_or_seq = Union[int, Tuple[int, ...]]
+float_or_seq = Union[float, Tuple[float, ...]]
+str_or_seq = Union[str, Tuple[str, ...]]
 
 
 @dataclass
@@ -17,24 +18,20 @@ class TrainConfig(SimpleConfig):
     num_workers: int = 4
     epochs: int = 100
 
-    optimizer: str = 'SGD'
-    aux_optimizer: str = 'SGD'
-    learning_rate: float = 0.05
-    aux_learning_rate: float = 0.05
-    momentum: float = 0.9
-    aux_momentum: float = 0.9
-    weight_decay: float = 0.0
-    aux_weight_decay: float = 0.0
-    max_grad_norm: float = 0.0  # 0.0 to close. aux_param excluded.
+    optimizer: str_or_seq = ('SGD', 'SGD')
+    learning_rate: float_or_seq = 0.05
+    momentum: float_or_seq = 0.9
+    weight_decay: float_or_seq = 0.0
+    max_grad_norm: float_or_seq = 0.0
 
-    scheduler: str = 'Step'  # Step or OneCycle
+    scheduler: str_or_seq = 'Step'  # Step or OneCycle
     # StepLR
-    lr_step_size: int = 25
-    lr_step_gamma: float = 0.3
+    lr_step_size: int_or_seq = 25
+    lr_step_gamma: float_or_seq = 0.3
     # OneCycleLR
-    lr_pct_start: float = 0.3
-    lr_init_div_factor: float = 10.
-    lr_final_div_factor: float = 1000.
+    lr_pct_start: float_or_seq = 0.3
+    lr_init_div_factor: float_or_seq = 10.
+    lr_final_div_factor: float_or_seq = 1000.
 
     resume_from_ckpt: str = ''
     resume_items: Tuple[str, ...] = ('state_dict',)
@@ -59,12 +56,37 @@ class TrainConfig(SimpleConfig):
     def check_local_value(self):
         if 'scheduler_state_dict' in self.resume_items:
             assert 'start_epoch' in self.resume_items
+
         all_resume_items = ('start_epoch', 'state_dict', 'optimizer_state_dict', 'scheduler_state_dict')
         for item in self.resume_items:
             assert item in all_resume_items
+
         if self.resume_tensorboard:
             assert self.resume_from_ckpt != ''
+
         assert self.ckpt_frequency > 0
+
+        if isinstance(self.optimizer, str):
+            self.optimizer = (self.optimizer,)
+
+        for key in ['learning_rate',
+                    'momentum',
+                    'weight_decay',
+                    'max_grad_norm',
+                    'scheduler',
+                    'lr_step_size',
+                    'lr_step_gamma',
+                    'lr_pct_start',
+                    'lr_init_div_factor',
+                    'lr_final_div_factor']:
+            if isinstance(getattr(self, key), tuple) or \
+                    isinstance(getattr(self, key), list):
+                assert len(getattr(self, key)) == len(self.optimizer), \
+                    f'length of cfg.{key} is not consistent with length of cfg.optimizer\n' \
+                    f'cfg.{key}: {getattr(self, key)}\n' \
+                    f'self.optimizer: {self.optimizer}\n'
+            else:
+                setattr(self, key, (getattr(self, key),) * len(self.optimizer))
 
 
 @dataclass

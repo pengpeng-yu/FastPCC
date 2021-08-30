@@ -1,4 +1,5 @@
 from functools import partial
+from typing import List, Callable
 
 import torch
 import torch.nn as nn
@@ -6,9 +7,9 @@ import torch.nn.functional as F
 from torchvision.ops import sigmoid_focal_loss
 import MinkowskiEngine as ME
 
-from lib.torch_utils import minkowski_tensor_split, MLPBlock
+from lib.torch_utils import MLPBlock
 from lib.data_utils import PCData
-from lib.evaluator import PCGCEvaluator
+from lib.evaluators import PCGCEvaluator
 from lib.sparse_conv_layers import GenerativeUpsampleMessage
 from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyModel
 from lib.entropy_models.hyperprior import \
@@ -20,11 +21,21 @@ from models.convolutional.baseline.model_config import ModelConfig
 
 
 class PCC(nn.Module):
+    params_divisions: List[Callable[[str], bool]] = [
+        lambda s: 'entropy_bottleneck.' not in s and not s.endswith("aux_param"),
+        lambda s: 'entropy_bottleneck.' in s and not s.endswith("aux_param"),
+        lambda s: s.endswith("aux_param")
+    ]
+
     def __init__(self, cfg: ModelConfig):
         super(PCC, self).__init__()
         ME.set_sparse_tensor_operation_mode(ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
 
-        self.evaluator = PCGCEvaluator(cfg.mpeg_pcc_error_command, cfg.mpeg_pcc_error_threads)
+        self.evaluator = PCGCEvaluator(
+            cfg.mpeg_pcc_error_command,
+            cfg.mpeg_pcc_error_threads,
+            cfg.chamfer_dist_test_phase
+        )
         self.encoder = Encoder(1 if cfg.input_feature_type == 'Occupation' else 3,
                                cfg.compressed_channels,
                                cfg.encoder_channels,
@@ -193,15 +204,36 @@ class PCC(nn.Module):
             loss_dict['bits_loss'] = loss_dict['bits_loss'] * \
                 (self.cfg.bpp_loss_factor / sparse_pc.shape[0])
 
-            try:
+            if 'hyper_bits_loss' in loss_dict:
                 loss_dict['hyper_bits_loss'] = loss_dict['hyper_bits_loss'] * \
                     (self.cfg.hyper_bpp_loss_factor / sparse_pc.shape[0])
-            except KeyError: pass
+
+            excluded_loss = {}
+            if self.cfg.bpp_target != 0:
+                raise NotImplementedError
+            #     assert self.cfg.bpp_loss_factor == self.cfg.hyper_bpp_loss_factor == 1
+            #     total_bpp_loss = loss_dict['bits_loss']
+            #     excluded_loss['bits_loss'] = loss_dict['bits_loss'].detach().item()
+            #
+            #     if 'hyper_bits_loss' in loss_dict:
+            #         total_bpp_loss += loss_dict['hyper_bits_loss']
+            #         excluded_loss['hyper_bits_loss'] = loss_dict['hyper_bits_loss'].detach().item()
+            #
+            #     loss_dict['bpp_target_loss'] = F.l1_loss(
+            #         total_bpp_loss,
+            #         torch.tensor(self.cfg.bpp_target,
+            #                      dtype=total_bpp_loss.dtype,
+            #                      device=total_bpp_loss.device)
+            #     )
+            #
+            #     del loss_dict['bits_loss'], loss_dict['hyper_bits_loss']
 
             loss_dict['loss'] = sum(loss_dict.values())
             for key in loss_dict:
                 if key != 'loss':
                     loss_dict[key] = loss_dict[key].detach().item()
+
+            loss_dict.update(excluded_loss)
 
             return loss_dict
 
@@ -232,8 +264,7 @@ class PCC(nn.Module):
                 bits_preds=[loss_dict['bits_loss'].item() +
                             loss_dict.get('hyper_bits_loss', torch.tensor([0])).item()],
                 feature_points_numbers=[_.shape[0] for _ in feature.decomposed_coordinates],
-                pc_data=pc_data,
-                compute_chamfer_loss=self.cfg.chamfer_dist_test_phase
+                pc_data=pc_data
             )
 
             return ret

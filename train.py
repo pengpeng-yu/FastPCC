@@ -6,7 +6,7 @@ import time
 import pathlib
 from tqdm import tqdm
 from functools import partial
-from typing import Dict, Union
+from typing import Dict, Union, List, Callable
 
 import numpy as np
 import torch
@@ -125,7 +125,18 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         Model = importlib.import_module(cfg.model_path).Model
     except Exception as e:
         raise ImportError(*e.args)
+
+    params_divisions: List[Callable[[str], bool]] = [
+        lambda s: not s.endswith("aux_param"),
+        lambda s: s.endswith("aux_param")
+    ]
+    if hasattr(Model, 'params_divisions'):
+        params_divisions = Model.params_divisions
+    assert params_divisions != []
+    assert len(params_divisions) == len(cfg.train.optimizer)
+
     model = Model(cfg.model)
+
     if device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() == 1 and False:  # disabled
         model = model.to(device)
         logger.info('using single GPU')
@@ -175,66 +186,82 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                                              pin_memory=True, collate_fn=dataset.collate_fn)
     steps_one_epoch = len(dataloader)
 
-    # Initialize optimizer and scheduler
-    if cfg.train.optimizer == 'Adam':
-        Optimizer = partial(torch.optim.Adam, betas=(cfg.train.momentum, 0.999))
-    elif cfg.train.optimizer == 'SGD':
-        Optimizer = partial(torch.optim.SGD, momentum=cfg.train.momentum, nesterov=cfg.train.momentum != 0.0)
-    else: raise NotImplementedError
-    if cfg.train.aux_optimizer == 'Adam':
-        AuxOptimizer = partial(torch.optim.Adam, betas=(cfg.train.aux_momentum, 0.999))
-    elif cfg.train.aux_optimizer == 'SGD':
-        AuxOptimizer = partial(torch.optim.SGD, momentum=cfg.train.aux_momentum, nesterov=cfg.train.aux_momentum != 0.0)
-    else: raise NotImplementedError
+    # Initialize optimizers and schedulers
+    params_list: List[List[torch.nn.Parameter]] = [[] for _ in range(len(params_divisions))]
 
-    parameters = [p for n, p in model.named_parameters() if not n.endswith("aux_param")]
-    aux_parameters = [p for n, p in model.named_parameters() if n.endswith("aux_param")]
-    optimizer = Optimizer([{'params': parameters, 'lr': cfg.train.learning_rate,
-                            'weight_decay': cfg.train.weight_decay}])
+    for param_name, param in model.named_parameters():
+        find_division = False
+        last_division_idx = -1
 
-    if cfg.train.scheduler == 'Step':
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
+        for idx, division_fn in enumerate(params_divisions):
+            if division_fn(param_name) is True:
+                if find_division is True:
+                    logger.warning(f'Parameter "{param_name}" is contained in both '
+                                   f'division {last_division_idx} and '
+                                   f'division {idx}. Is this intentional?')
+                find_division = True
+                last_division_idx = idx
+                params_list[idx].append(param)
 
-    elif cfg.train.scheduler == 'OneCycle':
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer, cfg.train.learning_rate,
-            total_steps=steps_one_epoch * cfg.train.epochs,
-            pct_start=cfg.train.lr_pct_start,
-            div_factor=cfg.train.lr_init_div_factor,
-            base_momentum=cfg.train.momentum - 0.05,
-            max_momentum=cfg.train.momentum + 0.05,
-            final_div_factor=cfg.train.lr_final_div_factor)
+        if find_division is False:
+            logger.warning(f'Parameter "{param_name}" is not found in any division. '
+                           f'Is this intentional?')
 
-    else: raise NotImplementedError
+    optimizer_list = []
+    scheduler_list = []
 
-    if aux_parameters:
-        aux_optimizer = AuxOptimizer([{'params': aux_parameters, 'lr': cfg.train.aux_learning_rate,
-                                       'weight_decay': cfg.train.aux_weight_decay}])
-        if cfg.train.scheduler == 'Step':
-            aux_scheduler = torch.optim.lr_scheduler.StepLR(
-                aux_optimizer, cfg.train.lr_step_size, cfg.train.lr_step_gamma)
+    def get_optimizer_class(name: str, momentum: float):
+        if name == 'Adam':
+            return partial(torch.optim.Adam, betas=(momentum, 0.999))
+        elif name == 'SGD':
+            return partial(torch.optim.SGD, momentum=momentum, nesterov=momentum != 0.0)
+        else:
+            raise NotImplementedError
 
-        elif cfg.train.scheduler == 'OneCycle':
-            aux_scheduler = torch.optim.lr_scheduler.OneCycleLR(
-                aux_optimizer, cfg.train.aux_learning_rate,
+    for idx, params in enumerate(params_list):
+        if params is None:
+            logger.warning(f'The {idx}th division of parameters defined in Model: {Model} '
+                           f'is empty. Is this intentional?')
+            optimizer_list.append(None)
+            scheduler_list.append(None)
+            continue
+
+        optimizer = get_optimizer_class(cfg.train.optimizer[idx], cfg.train.momentum[idx])(
+                params=params,
+                lr=cfg.train.learning_rate[idx],
+                weight_decay=cfg.train.weight_decay[idx]
+            )
+
+        if cfg.train.scheduler[idx] == 'Step':
+            scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer,
+                step_size=cfg.train.lr_step_size[idx],
+                gamma=cfg.train.lr_step_gamma[idx])
+
+        elif cfg.train.scheduler[idx] == 'OneCycle':
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=cfg.train.learning_rate[idx],
                 total_steps=steps_one_epoch * cfg.train.epochs,
-                pct_start=cfg.train.lr_pct_start,
-                div_factor=cfg.train.lr_init_div_factor,
-                base_momentum=cfg.train.aux_momentum - 0.05,
-                max_momentum=cfg.train.aux_momentum + 0.05,
-                final_div_factor=cfg.train.lr_final_div_factor)
+                pct_start=cfg.train.lr_pct_start[idx],
+                div_factor=cfg.train.lr_init_div_factor[idx],
+                base_momentum=cfg.train.momentum[idx] - 0.05,
+                max_momentum=cfg.train.momentum[idx] + 0.05,
+                final_div_factor=cfg.train.lr_final_div_factor[idx])
 
         else: raise NotImplementedError
 
-    else:
-        aux_optimizer = aux_scheduler = None
+        optimizer_list.append(optimizer)
+        scheduler_list.append(scheduler)
+
+    assert not all([optimizer is None for optimizer in optimizer_list])
 
     # Resume checkpoint
     start_epoch = 0
     if cfg.train.resume_from_ckpt != '':
         ckpt_path = utils.autoindex_obj(cfg.train.resume_from_ckpt)
         ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
+
         if 'state_dict' in cfg.train.resume_items:
             try:
                 if torch_utils.is_parallel(model):
@@ -248,16 +275,21 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 logger.warning(incompatible_keys)
 
         if 'start_epoch' in cfg.train.resume_items:
-            start_epoch = ckpt['scheduler_state_dict']['last_epoch']
-            scheduler.last_epoch = int(start_epoch)
+            for idx, scheduler in enumerate(scheduler_list):
+                scheduler.last_epoch = int(
+                    ckpt['scheduler_state_dict'][idx]['last_epoch']
+                )
             logger.info('start training from epoch {}'.format(start_epoch))
 
         if 'scheduler_state_dict' in cfg.train.resume_items:
-            scheduler.load_state_dict(ckpt['scheduler_state_dict'])
+            for idx, scheduler in enumerate(scheduler_list):
+                scheduler.load_state_dict(ckpt['scheduler_state_dict'][idx])
             logger.warning('resuming scheduler_state_dict, '
                            'hyperparameters of scheduler defined in yaml file will be overridden')
+
         if 'optimizer_state_dict' in cfg.train.resume_items:
-            optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+            for idx, optimizer in enumerate(optimizer_list):
+                optimizer.load_state_dict(ckpt['optimizer_state_dict'][idx])
             logger.warning('resuming optimizer_state_dict, '
                            'hyperparameters of optimizer defined in yaml file will be overridden')
 
@@ -295,24 +327,35 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                     loss = loss_dict['loss']
 
                 scaler.scale(loss).backward()
-                if cfg.train.max_grad_norm != 0:
-                    torch.nn.utils.clip_grad_norm_(parameters, cfg.train.max_grad_norm)
-                scaler.step(optimizer)
-                if aux_optimizer is not None:
-                    scaler.step(aux_optimizer)
+
+                for idx, optimizer in enumerate(optimizer_list):
+                    if optimizer is not None:
+                        if cfg.train.max_grad_norm[idx] != 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                optimizer.param_groups[0]['params'],
+                                cfg.train.max_grad_norm[idx]
+                            )
+                        scaler.step(optimizer)
+
                 scaler.update()
+
             else:
                 loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
                 loss = loss_dict['loss']
                 loss.backward()
-                if cfg.train.max_grad_norm != 0:
-                    torch.nn.utils.clip_grad_norm_(parameters, cfg.train.max_grad_norm)
-                optimizer.step()
-                if aux_optimizer is not None:
-                    aux_optimizer.step()
 
-            optimizer.zero_grad()
-            if aux_optimizer is not None: aux_optimizer.zero_grad()
+                for idx, optimizer in enumerate(optimizer_list):
+                    if optimizer is not None:
+                        if cfg.train.max_grad_norm[idx] != 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                optimizer.param_groups[0]['params'],
+                                cfg.train.max_grad_norm[idx]
+                            )
+                        optimizer.step()
+
+            for idx, optimizer in enumerate(optimizer_list):
+                if optimizer is not None:
+                    optimizer.zero_grad()
 
             # logging
             time_this_step = time.time() - start_time
@@ -332,28 +375,31 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
                 # tensorboard items
                 if local_rank in (-1, 0):
-                    tb_writer.add_scalar('Train/Learning_rate', optimizer.param_groups[0]['lr'], global_step)
-                    tb_writer.add_scalar('Train/Aux_Learning_rate', aux_optimizer.param_groups[0]['lr'], global_step)
+                    for idx, optimizer in enumerate(optimizer_list):
+                        tb_writer.add_scalar(
+                            f'Train/Learning_rate_{idx}',
+                            optimizer.param_groups[0]['lr'], global_step
+                        )
+
                     total_wo_aux = 0.0
                     for item_name, item in loss_dict.items():
-                        if item_name == 'loss':
-                            pass
-                        else:
+                        if item_name != 'loss':
                             item_category = item_name.rsplit("_", 1)[-1].capitalize()
                             tb_writer.add_scalar(f'Train/{item_category}/{item_name}', item, global_step)
                             if item_category == 'Loss' and not item_name.endswith('aux_loss'):
                                 total_wo_aux += loss_dict[item_name]
+
                     tb_writer.add_scalar('Train/Loss/total_wo_aux', total_wo_aux, global_step)
 
             global_step += 1
 
-            if cfg.train.scheduler == 'OneCycle':
-                scheduler.step()
-                if aux_scheduler is not None: aux_scheduler.step()
+            for idx, scheduler in enumerate(scheduler_list):
+                if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
+                    scheduler.step()
 
-        if cfg.train.scheduler == 'Step':
-            scheduler.step()
-            if aux_scheduler is not None: aux_scheduler.step()
+        for idx, scheduler in enumerate(scheduler_list):
+            if isinstance(scheduler, torch.optim.lr_scheduler.StepLR):
+                scheduler.step()
 
         if local_rank in (-1, 0):
             tb_writer.add_scalar('Train/Epochs', epoch, global_step - 1)
@@ -363,9 +409,14 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         if local_rank in (-1, 0) and (epoch + 1) % cfg.train.ckpt_frequency == 0:
             ckpt_name = 'epoch_{}.pt'.format(epoch)
             ckpt = {
-                'state_dict': model.module.state_dict() if torch_utils.is_parallel(model) else model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict()
+                'state_dict':
+                    model.module.state_dict() if torch_utils.is_parallel(model) else model.state_dict(),
+                'optimizer_state_dict': [
+                    optimizer.state_dict() if optimizer is not None else None
+                    for optimizer in optimizer_list],
+                'scheduler_state_dict': [
+                    scheduler.state_dict() if scheduler is not None else None
+                    for scheduler in scheduler_list]
             }
             torch.save(ckpt, ckpts_dir / ckpt_name)
             del ckpt

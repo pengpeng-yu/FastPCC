@@ -8,7 +8,7 @@ train:
   more_reproducible: True
   batch_size: 8
   num_workers: 2
-  optimizer: Adam
+  optimizer: [Adam, SGD]
   momentum: 0.9
   weight_decay: 0.0001
 
@@ -18,7 +18,7 @@ train:
   ckpt_frequency: 1
   lr_step_size: 2
   lr_step_gamma: 0.5
-  resume_from_ckpt: 'runs/train_image_compression_0/ckpts/epoch_<maxindex>.pt'
+  resume_from_ckpt: ''  # 'runs/train_image_compression_0/ckpts/epoch_<maxindex>.pt'
   resume_items: ['state_dict']
   test_frequency: 1
 

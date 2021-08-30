@@ -1,3 +1,5 @@
+from typing import List, Callable
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -10,6 +12,10 @@ from models.classification.baseline import Config
 
 
 class Model(nn.Module):
+    params_divisions: List[Callable[[str], bool]] = [
+        lambda s: True
+    ]
+
     def __init__(self, cfg: Config):
         super(Model, self).__init__()
         self.cfg = cfg
