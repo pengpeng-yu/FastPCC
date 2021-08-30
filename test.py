@@ -4,9 +4,7 @@ import pathlib
 import importlib
 from tqdm import tqdm
 from copy import deepcopy
-import open3d as o3d
 
-import numpy as np
 import torch
 import torch.utils.data
 

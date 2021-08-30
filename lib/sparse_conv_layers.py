@@ -5,7 +5,7 @@ import torch.nn as nn
 from pytorch3d.ops import knn_points
 import MinkowskiEngine as ME
 
-from lib.metric import precision_recall
+from lib.metrics.misc import precision_recall
 
 MConv = ME.MinkowskiConvolution
 MReLU = ME.MinkowskiReLU

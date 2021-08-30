@@ -1,15 +1,17 @@
 import json
 from collections import defaultdict
-from typing import Tuple, List, Union
+from typing import Tuple, List, Union, Dict
 import os
 
 import cv2
+import numpy as np
 import open3d as o3d
 import torch
 
 from lib.data_utils import PCData
-from lib.loss_function import chamfer_loss
-from lib.metric import mpeg_pc_error, batch_image_psnr
+from lib.loss_functions import chamfer_loss
+from lib.metrics.misc import batch_image_psnr
+from lib.metrics.pc_error_wapper import mpeg_pc_error
 
 
 class Evaluator:
@@ -27,26 +29,48 @@ class Evaluator:
 
 
 class PCGCEvaluator(Evaluator):
-    def __init__(self, mpeg_pcc_error_command: str, mpeg_pcc_error_threads: int):
+    def __init__(self,
+                 mpeg_pcc_error_command: str,
+                 mpeg_pcc_error_threads: int,
+                 compute_chamfer_loss: bool = False):
         super(PCGCEvaluator, self).__init__()
         self.mpeg_pcc_error_command = mpeg_pcc_error_command
         self.mpeg_pcc_error_threads = mpeg_pcc_error_threads
+        self.compute_chamfer_loss = compute_chamfer_loss
 
     def reset(self):
-        self.total_chamfer_loss = 0.0
-        self.total_bpp = 0.0
-        self.samples_num = 0
-        self.total_metric_values = defaultdict(float)
-        self.total_bpp_pred = 0.0
+        self.file_path_to_info: Dict[str, Dict[str, Union[int, float]]] = {}
 
+    @staticmethod
+    def o3d_write_coords(xyz: Union[torch.Tensor, np.ndarray],
+                         file_path: str,
+                         write_ascii: bool = True,
+                         make_dirs: bool = False) -> None:
+        if make_dirs:
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        if isinstance(xyz, torch.Tensor):
+            xyz = xyz.cpu().numpy()
+
+        assert xyz.shape[1] == 3 and xyz.dtype in (np.int32, np.int64)
+
+        assert o3d.io.write_point_cloud(
+            file_path,
+            o3d.geometry.PointCloud(
+                o3d.utility.Vector3dVector(
+                    xyz
+                )
+            ), write_ascii=write_ascii
+        )
+
+    @torch.no_grad()
     def log_batch(self,
                   preds: Union[List[torch.Tensor], torch.Tensor],
                   targets: Union[List[torch.Tensor], torch.Tensor],
                   compressed_strings: List[bytes],
                   bits_preds: List[float],
                   feature_points_numbers: List[int],
-                  pc_data: PCData,
-                  compute_chamfer_loss: bool = False):
+                  pc_data: PCData):
         """
         "preds" and "targets" are supposed to be list contains unnormalized discrete
         coordinates with resolution specified in pc_data.resolution.
@@ -59,15 +83,18 @@ class PCGCEvaluator(Evaluator):
                len(bits_preds) == \
                len(feature_points_numbers)
 
-        if compute_chamfer_loss:
+        if self.compute_chamfer_loss:
             assert batch_size == len(pc_data.resolution)
 
-        if hasattr(pc_data, 'results_dir'):
+        if pc_data.results_dir is not None:
             assert batch_size == \
                    len(pc_data.resolution) == \
                    len(pc_data.file_path)
 
         for idx in range(batch_size):
+            file_info_dict = {}
+
+            file_path = pc_data.file_path[idx]
             pred = preds[idx]
             target = targets[idx]
             assert pred.ndim == target.ndim == 2
@@ -76,61 +103,46 @@ class PCGCEvaluator(Evaluator):
             compressed_string = compressed_strings[idx]
             resolution = pc_data.resolution[idx]
 
-            if compute_chamfer_loss:
-                self.total_chamfer_loss += chamfer_loss(
+            if self.compute_chamfer_loss:
+                file_info_dict['chamfer_loss'] = chamfer_loss(
                     pred[None].to(torch.float) / resolution,
                     target[None].to(torch.float) / resolution
                 ).item()
 
             bpp = len(compressed_string) * 8 / target.shape[0]
-            self.total_bpp += bpp
+            bpp_pred = bits_preds[idx] / target.shape[0]
 
-            self.total_bpp_pred += bits_preds[idx] / target.shape[0]
-
-            if hasattr(pc_data, 'results_dir'):
-                file_path = pc_data.file_path[idx]
-
+            if pc_data.results_dir is not None:
                 out_file_path = os.path.join(
                     pc_data.results_dir, os.path.splitext(file_path)[0]
                 )
 
                 os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
                 compressed_path = out_file_path + '.txt'
-                fileinfo_path = out_file_path + '_info.txt'
                 reconstructed_path = out_file_path + '_recon.ply'
 
                 with open(compressed_path, 'wb') as f:
                     f.write(compressed_string)
 
-                fileinfo = f'fea_points_num: {feature_points_numbers[idx]}\n' \
-                           f'\n' \
-                           f'input_points_num: {target.shape[0]}\n' \
-                           f'output_points_num: {pred.shape[0]}\n' \
-                           f'compressed_bytes: {len(compressed_string)}\n' \
-                           f'bpp: {bpp}\n'
-
-                o3d.io.write_point_cloud(
-                    reconstructed_path,
-                    o3d.geometry.PointCloud(
-                        o3d.utility.Vector3dVector(
-                            pred.detach().clone().cpu()
-                        )
-                    ), write_ascii=True
+                file_info_dict.update(
+                    {
+                        'fea_points_num': feature_points_numbers[idx],
+                        'input_points_num': target.shape[0],
+                        'output_points_num': pred.shape[0],
+                        'compressed_bytes': len(compressed_string),
+                        'bpp': bpp,
+                        'bpp_pred': bpp_pred
+                    }
                 )
+
+                self.o3d_write_coords(pred, reconstructed_path)
 
                 if self.mpeg_pcc_error_command != '':
                     if not file_path.endswith('.ply') or \
                             pc_data.ori_resolution is None or \
                             pc_data.ori_resolution[idx] != resolution:
                         file_path = out_file_path + '.ply'
-                        o3d.io.write_point_cloud(
-                            file_path,
-                            o3d.geometry.PointCloud(
-                                o3d.utility.Vector3dVector(
-                                    target.cpu()
-                                )
-                            ), write_ascii=True
-                        )
+                        self.o3d_write_coords(target, file_path)
 
                     mpeg_pc_error_dict = mpeg_pc_error(
                         os.path.abspath(file_path),
@@ -144,33 +156,43 @@ class PCGCEvaluator(Evaluator):
                         f'infile1={os.path.abspath(file_path)} ' \
                         f'infile2={os.path.abspath(reconstructed_path)}'
 
-                    for key, value in mpeg_pc_error_dict.items():
-                        self.total_metric_values[key] += value
-                        fileinfo += f'{key}: {value} \n'
+                    file_info_dict.update(mpeg_pc_error_dict)
 
-                with open(fileinfo_path, 'w') as f:
-                    f.write(fileinfo)
-
-        self.samples_num += batch_size
+            assert file_path not in self.file_path_to_info
+            self.file_path_to_info[file_path] = file_info_dict
 
         return True
 
-    def show(self, results_dir: str):
-        metric_dict = {'samples_num': self.samples_num,
-                       'mean_bpp': (self.total_bpp / self.samples_num),
-                       'mean_bpp_pred': (self.total_bpp_pred / self.samples_num)}
+    def show(self, results_dir: str) -> Dict[str, Union[int, float]]:
+        if results_dir is not None:
+            with open(os.path.join(results_dir, 'metric.txt'), 'w') as f:
+                f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
 
-        for key, value in self.total_metric_values.items():
-            metric_dict[key] = value / self.samples_num
+        mean_dict = defaultdict(float)
 
-        if self.total_chamfer_loss != 0:
-            metric_dict['mean_reconstruct_loss'] = self.total_chamfer_loss / self.samples_num
+        exclusion = ['fea_points_num',
+                     'input_points_num',
+                     'output_points_num']
+
+        if not self.compute_chamfer_loss:
+            exclusion.append('chamfer_loss')
+
+        for _, info in self.file_path_to_info.items():
+            for key, value in info.items():
+                if key not in exclusion:
+                    mean_dict[key + '(mean)'] += value
+
+        samples_num = len(self.file_path_to_info)
+        for key in mean_dict:
+            mean_dict[key] /= samples_num
+
+        mean_dict['samples_num'] = samples_num
 
         if results_dir is not None:
-            with open(os.path.join(results_dir, 'test_metric.txt'), 'w') as f:
-                f.write(str(metric_dict))
+            with open(os.path.join(results_dir, 'mean_metric.txt'), 'w') as f:
+                f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
 
-        return metric_dict
+        return mean_dict
 
 
 class ImageCompressionEvaluator(Evaluator):
@@ -201,7 +223,8 @@ class ImageCompressionEvaluator(Evaluator):
             max_val=255
         )
 
-        batch_im = batch_im.to(torch.uint8).cpu().permute(0, 2, 3, 1).numpy()
+        batch_im_recon = batch_im_recon.to(torch.uint8).cpu().permute(0, 2, 3, 1).numpy()
+        pixels_num = batch_im_recon.shape[1] * batch_im_recon.shape[2]
 
         for idx in range(len(batch_psnr)):
             psnr = batch_psnr[idx].item()
@@ -209,9 +232,8 @@ class ImageCompressionEvaluator(Evaluator):
             if results_dir is not None:
                 out_file_path = os.path.join(results_dir, file_paths[idx])
                 os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
-                cv2.imwrite(out_file_path, batch_im[idx])
+                cv2.imwrite(out_file_path, batch_im_recon[idx])
 
-            pixels_num = batch_im.shape[2] * batch_im.shape[3]
             self.file_path_to_info[file_paths[idx]] = \
                 {
                     'psnr': psnr,
@@ -221,22 +243,22 @@ class ImageCompressionEvaluator(Evaluator):
 
         return True
 
-    def show(self, results_dir: str):
+    def show(self, results_dir: str) -> Dict[str, Union[int, float]]:
         if results_dir is not None:
             with open(os.path.join(results_dir, 'test_metric.txt'), 'w') as f:
                 f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
 
-        mean_values = defaultdict(float)
-        sample_num = len(self.file_path_to_info)
+        mean_dict = defaultdict(float)
         for _, info in self.file_path_to_info.items():
             for key, value in info.items():
-                mean_values[key] += value
+                mean_dict[key + '(mean)'] += value
 
-        for key in mean_values:
-            mean_values[key] /= sample_num
+        samples_num = len(self.file_path_to_info)
+        for key in mean_dict:
+            mean_dict[key] /= samples_num
 
         if results_dir is not None:
             with open(os.path.join(results_dir, 'mean.txt'), 'w') as f:
-                f.write(json.dumps(mean_values, indent=2, sort_keys=False))
+                f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
 
-        return mean_values
+        return mean_dict

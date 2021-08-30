@@ -166,7 +166,9 @@ class SimpleConfig:
                     raise ValueError(f'unexpected arg: "{arg}"')
 
             else:
-                if var[0] == '[' and var[-1] == ']':
+                if var == '':
+                    dotdict_list.append({keys_seq: var})
+                elif var[0] == '[' and var[-1] == ']':
                     dotdict_list.append(
                         {keys_seq: [self.format_str(i) for i in var[1:-1].split(',')]}
                     )
@@ -230,7 +232,9 @@ class SimpleConfig:
     @staticmethod
     def format_str(string: str):
         string = string.strip()
-        if (string[0] == '"' and string[-1] == '"') or (string[0] == "'" and string[-1] == "'"):
+        if string == '':
+            pass
+        elif (string[0] == '"' and string[-1] == '"') or (string[0] == "'" and string[-1] == "'"):
             string = string[1:-1]
         elif string == 'True' or string == 'true': return True
         elif string == 'False' or string == 'false': return False

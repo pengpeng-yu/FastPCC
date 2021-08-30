@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from lib.data_utils import IMData
 from lib.torch_utils import MLPBlock
-from lib.evaluator import ImageCompressionEvaluator
+from lib.evaluators import ImageCompressionEvaluator
 from lib.entropy_models.hyperprior import \
     NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel, \
     NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel
@@ -198,7 +198,7 @@ class ImageCompressor(nn.Module):
             fea_recon = channel_first_permutation(fea_recon)
 
             im_recon = self.decoder(fea_recon)
-            im_recon = (im_recon * 255).round_()
+            im_recon = (im_recon * 255).round_().clip(None, 255)
             batch_im = (batch_im * 255).round_()
 
             ret = self.evaluator.log_batch(

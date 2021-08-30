@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from lib.data_utils import PCData
 from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyModel
-from lib.loss_function import chamfer_loss
+from lib.loss_functions import chamfer_loss
 from lib.points_layers import PointLayerMessage, TransitionDown, RandLANeighborFea, \
     LocalFeatureAggregation as LFA
 from lib.torch_utils import MLPBlock

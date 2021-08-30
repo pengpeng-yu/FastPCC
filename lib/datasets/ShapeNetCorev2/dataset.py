@@ -113,6 +113,11 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             assert self.cfg.resolution > 1
             xyz *= self.cfg.resolution
             xyz = ME.utils.sparse_quantize(xyz)
+            if self.cfg.data_format == '.obj' and \
+                    self.cfg.mesh_sample_points_num / xyz.shape[0] < 2:
+                print(f'Warring: '
+                      f'cfg.mesh_sample_points_num = {self.cfg.mesh_sample_points_num}, '
+                      f'sparse quantized points_num = {xyz.shape[0]}')
 
         return PCData(
             xyz=xyz if isinstance(xyz, torch.Tensor) else torch.from_numpy(xyz),

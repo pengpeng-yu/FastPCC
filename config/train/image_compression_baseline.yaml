@@ -30,7 +30,7 @@ train:
 
     normalization_scaler: 255
     channels_order: 'BGR'
-    target_shapes: [640, 640, 1024, 1024, 1280, 1280]
+    target_shapes: [1024, 1024, 1280, 1280]
     resize_strategy: 'Expand'
 
 
