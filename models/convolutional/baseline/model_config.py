@@ -7,16 +7,16 @@ from lib.config import SimpleConfig
 @dataclass
 class ModelConfig(SimpleConfig):
     input_feature_type: str = 'Occupation'  # Occupation or Coordinate
+    minkowski_algorithm: str = 'DEFAULT'  # DEFAULT, SPEED_OPTIMIZED, MEMORY_EFFICIENT
     basic_block_type: str = 'InceptionResBlock'  # ResBlock or InceptionResBlock
+    conv_region_type: str = 'HYPER_CUBE'  # HYPER_CUBE or HYPER_CROSS
     basic_block_num: int = 3
     use_batch_norm: bool = False
     activation: str = 'relu'
-    use_skip_connection: bool = False
-    skipped_fea_fusion_method: str = 'Cat'  # Add or Cat
+    conv_trans_near_pruning: bool = False
     encoder_channels: Tuple[int, ...] = (16, 32, 64, 32)
     compressed_channels: int = 8
     decoder_channels: Tuple[int, ...] = (64, 32, 16)
-    skip_connection_channels: Tuple[int, ...] = (16, 32, 64)
 
     hyperprior: str = 'None'
     hyper_compressed_channels: int = 8

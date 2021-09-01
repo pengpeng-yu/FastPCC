@@ -174,7 +174,7 @@ class SimpleConfig:
                     )
                 elif var[0] == '(' and var[-1] == ')':
                     dotdict_list.append(
-                        {keys_seq: (self.format_str(i) for i in var[1:-1].split(','))}
+                        {keys_seq: tuple(self.format_str(i) for i in var[1:-1].split(','))}
                     )
                 else:
                     dotdict_list.append(

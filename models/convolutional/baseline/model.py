@@ -31,6 +31,11 @@ class PCC(nn.Module):
         super(PCC, self).__init__()
         ME.set_sparse_tensor_operation_mode(ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
 
+        if cfg.minkowski_algorithm in ['DEFAULT', 'SPEED_OPTIMIZED', 'MEMORY_EFFICIENT']:
+            self.minkowski_algorithm = getattr(ME.MinkowskiAlgorithm, cfg.minkowski_algorithm)
+        else:
+            raise NotImplementedError
+
         self.evaluator = PCGCEvaluator(
             cfg.mpeg_pcc_error_command,
             cfg.mpeg_pcc_error_threads,
@@ -40,32 +45,26 @@ class PCC(nn.Module):
                                cfg.compressed_channels,
                                cfg.encoder_channels,
                                cfg.basic_block_type,
+                               cfg.conv_region_type,
                                cfg.basic_block_num,
                                cfg.use_batch_norm,
-                               cfg.activation,
-                               cfg.use_skip_connection,
-                               cfg.skip_connection_channels)
+                               cfg.activation)
 
         self.decoder = Decoder(cfg.compressed_channels,
                                cfg.decoder_channels,
                                cfg.basic_block_type,
+                               cfg.conv_region_type,
                                cfg.basic_block_num,
                                cfg.use_batch_norm,
                                cfg.activation,
-                               cfg.use_skip_connection,
-                               cfg.skipped_fea_fusion_method,
-                               cfg.skip_connection_channels,
+                               cfg.conv_trans_near_pruning,
                                loss_type='BCE' if cfg.reconstruct_loss_type == 'Focal'
                                else cfg.reconstruct_loss_type,
                                dist_upper_bound=cfg.dist_upper_bound)
 
         if cfg.hyperprior == 'None':
-            prior_channels = cfg.compressed_channels
-            if cfg.use_skip_connection:
-                prior_channels += sum(cfg.skip_connection_channels)
-
             self.entropy_bottleneck = NoisyDeepFactorizedEntropyModel(
-                batch_shape=torch.Size([prior_channels]),
+                batch_shape=torch.Size([cfg.compressed_channels]),
                 coding_ndim=2,
                 init_scale=2)
 
@@ -78,11 +77,14 @@ class PCC(nn.Module):
                         ConvBlock(
                             intra_channels[idx - 1] if idx != 0 else in_channels,
                             intra_channels[idx],
-                            3, 1, bn=cfg.use_batch_norm, act=cfg.activation
+                            3, 1,
+                            region_type=cfg.conv_region_type,
+                            bn=cfg.use_batch_norm, act=cfg.activation
                         ),
 
                         *[BLOCKS_DICT[cfg.basic_block_type](
                             intra_channels[idx],
+                            region_type=cfg.conv_region_type,
                             bn=cfg.use_batch_norm, act=cfg.activation
                         ) for _ in range(cfg.basic_block_num)]
 
@@ -90,7 +92,9 @@ class PCC(nn.Module):
 
                     ConvBlock(intra_channels[-1],
                               out_channels,
-                              3, 1, bn=True, act=None)
+                              3, 1,
+                              region_type=cfg.conv_region_type,
+                              bn=True, act=None)
                 )
 
             hyper_decoder_out_channels = cfg.compressed_channels * len(cfg.prior_indexes_range)
@@ -155,7 +159,9 @@ class PCC(nn.Module):
                 features=torch.ones(pc_data.xyz.shape[0], 1,
                                     dtype=torch.float,
                                     device=pc_data.xyz.device),
-                coordinates=pc_data.xyz)
+                coordinates=pc_data.xyz,
+                minkowski_algorithm=self.minkowski_algorithm
+            )
 
         elif self.cfg.input_feature_type == 'Coordinate':
             input_coords_scaler = torch.tensor(
@@ -163,7 +169,9 @@ class PCC(nn.Module):
                 device=pc_data.xyz.device)[pc_data.xyz[:, 0].type(torch.long), None]
             sparse_pc = ME.SparseTensor(
                 features=pc_data.xyz[:, 1:].type(torch.float) / input_coords_scaler,
-                coordinates=pc_data.xyz)
+                coordinates=pc_data.xyz,
+                minkowski_algorithm=self.minkowski_algorithm
+            )
 
         else: raise NotImplementedError
 
@@ -177,25 +185,14 @@ class PCC(nn.Module):
                               [[int(n * self.cfg.adaptive_pruning_num_scaler) for n in _]
                                for _ in points_num_list[1:]]
 
-        if self.cfg.use_skip_connection:
-            # feature = ME.cat(feature, *cached_feature_list)
-            raise NotImplementedError
-
         if self.training:
             fea_tilde, loss_dict = self.entropy_bottleneck(feature)
-
-            if self.cfg.use_skip_connection:
-                # fea_tilde, *cached_feature_list = minkowski_tensor_split(
-                #     fea_tilde, [self.cfg.compressed_channels,
-                #                 *self.cfg.skip_connection_channels])
-                raise NotImplementedError
 
             decoder_message = self.decoder(
                 GenerativeUpsampleMessage(
                     fea=fea_tilde,
                     target_key=sparse_pc.coordinate_map_key,
-                    points_num_list=points_num_list,
-                    cached_fea_list=cached_feature_list))
+                    points_num_list=points_num_list))
 
             loss_dict['reconstruct_loss'] = self.get_reconstruct_loss(
                 decoder_message.cached_pred_list,
@@ -241,18 +238,11 @@ class PCC(nn.Module):
         elif not self.training:
             fea_reconstructed, loss_dict, compressed_strings = self.entropy_bottleneck(feature)
 
-            if self.cfg.use_skip_connection:
-                # fea_reconstructed, *cached_feature_list = minkowski_tensor_split(
-                #     fea_reconstructed, [self.cfg.compressed_channels,
-                #                         *self.cfg.skip_connection_channels])
-                raise NotImplementedError
-
             decoder_message = self.decoder(
                 GenerativeUpsampleMessage(
                     fea=fea_reconstructed,
                     target_key=sparse_pc.coordinate_map_key,
-                    points_num_list=points_num_list,
-                    cached_fea_list=cached_feature_list))
+                    points_num_list=points_num_list))
 
             # the last one is supposed to be the final output of decoder
             pc_reconstructed = decoder_message.cached_pred_list[-1]
