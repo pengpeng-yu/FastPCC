@@ -1,5 +1,6 @@
-from functools import partial
-from typing import List, Callable
+import io
+from functools import partial, reduce
+from typing import List, Callable, Union, Tuple, Generator
 
 import torch
 import torch.nn as nn
@@ -11,19 +12,30 @@ from lib.torch_utils import MLPBlock
 from lib.data_utils import PCData
 from lib.evaluators import PCGCEvaluator
 from lib.sparse_conv_layers import GenerativeUpsampleMessage
-from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyModel
-from lib.entropy_models.hyperprior import \
-    NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel, \
-    NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel
+from lib.entropy_models.continuous_batched import \
+    NoisyDeepFactorizedEntropyModel as NoisyDeepFactorizedPriorEntropyModel
+from lib.entropy_models.hyperprior.noisy_deep_factorized import \
+    ScaleNoisyNormalEntropyModel as HyperPriorScaleNoisyNormalEntropyModel, \
+    NoisyDeepFactorizedEntropyModel as HyperPriorNoisyDeepFactorizedEntropyModel
+from lib.entropy_models.hyperprior.sparse_tensor_specialized.noisy_deep_factorized import \
+    GeoLosslessNoisyDeepFactorizedEntropyModel
 
-from models.convolutional.baseline.layers import Encoder, Decoder, ConvBlock, BLOCKS_DICT
+from models.convolutional.baseline.layers import \
+    Encoder, Decoder, \
+    HyperEncoder, HyperDecoder, \
+    HyperEncoderForGeoLossLess, HyperDecoderListForGeoLossLess, \
+    DecoderListForGeoLossLess
 from models.convolutional.baseline.model_config import ModelConfig
 
 
 class PCC(nn.Module):
     params_divisions: List[Callable[[str], bool]] = [
-        lambda s: 'entropy_bottleneck.' not in s and not s.endswith("aux_param"),
-        lambda s: 'entropy_bottleneck.' in s and not s.endswith("aux_param"),
+        lambda s: 'entropy_bottleneck.' not in s and
+                  'geo_lossless_em.' not in s and
+                  not s.endswith("aux_param"),
+        lambda s: ('entropy_bottleneck.' in s or
+                   'geo_lossless_em.' in s) and
+                  not s.endswith("aux_param"),
         lambda s: s.endswith("aux_param")
     ]
 
@@ -31,92 +43,79 @@ class PCC(nn.Module):
         super(PCC, self).__init__()
         ME.set_sparse_tensor_operation_mode(ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
 
-        if cfg.minkowski_algorithm in ['DEFAULT', 'SPEED_OPTIMIZED', 'MEMORY_EFFICIENT']:
-            self.minkowski_algorithm = getattr(ME.MinkowskiAlgorithm, cfg.minkowski_algorithm)
-        else:
-            raise NotImplementedError
+        self.minkowski_algorithm = getattr(ME.MinkowskiAlgorithm, cfg.minkowski_algorithm)
 
         self.evaluator = PCGCEvaluator(
             cfg.mpeg_pcc_error_command,
             cfg.mpeg_pcc_error_threads,
             cfg.chamfer_dist_test_phase
         )
-        self.encoder = Encoder(1 if cfg.input_feature_type == 'Occupation' else 3,
-                               cfg.compressed_channels,
-                               cfg.encoder_channels,
-                               cfg.basic_block_type,
-                               cfg.conv_region_type,
-                               cfg.basic_block_num,
-                               cfg.use_batch_norm,
-                               cfg.activation)
 
-        self.decoder = Decoder(cfg.compressed_channels,
-                               cfg.decoder_channels,
-                               cfg.basic_block_type,
-                               cfg.conv_region_type,
-                               cfg.basic_block_num,
-                               cfg.use_batch_norm,
-                               cfg.activation,
-                               cfg.conv_trans_near_pruning,
-                               loss_type='BCE' if cfg.reconstruct_loss_type == 'Focal'
-                               else cfg.reconstruct_loss_type,
-                               dist_upper_bound=cfg.dist_upper_bound)
+        self.encoder = Encoder(
+            1 if cfg.input_feature_type == 'Occupation' else 3,
+            cfg.compressed_channels if not cfg.lossless_compression_based
+            else cfg.encoder_channels[-1],
+            cfg.encoder_channels,
+            cfg.basic_block_type,
+            cfg.conv_region_type,
+            cfg.basic_block_num,
+            cfg.use_batch_norm,
+            cfg.activation,
+            cfg.adaptive_pruning,
+            cfg.adaptive_pruning_num_scaler
+        )
+
+        self.decoder = Decoder(
+            cfg.compressed_channels if not cfg.lossless_compression_based
+            else cfg.encoder_channels[-1] + cfg.compressed_channels,
+            cfg.decoder_channels,
+            cfg.basic_block_type,
+            cfg.conv_region_type,
+            cfg.basic_block_num,
+            cfg.use_batch_norm,
+            cfg.activation,
+            cfg.conv_trans_near_pruning,
+            loss_type='BCE' if cfg.reconstruct_loss_type == 'Focal'
+            else cfg.reconstruct_loss_type,
+            dist_upper_bound=cfg.dist_upper_bound
+        )
 
         if cfg.hyperprior == 'None':
-            self.entropy_bottleneck = NoisyDeepFactorizedEntropyModel(
+            entropy_bottleneck = NoisyDeepFactorizedPriorEntropyModel(
                 batch_shape=torch.Size([cfg.compressed_channels]),
                 coding_ndim=2,
                 init_scale=2)
 
         else:
-            # BN is always performed for the last conv of hyper encoder and hyper decoder
-            def make_hyper_coder(in_channels, intra_channels, out_channels):
-                return nn.Sequential(
-                    *[nn.Sequential(
-
-                        ConvBlock(
-                            intra_channels[idx - 1] if idx != 0 else in_channels,
-                            intra_channels[idx],
-                            3, 1,
-                            region_type=cfg.conv_region_type,
-                            bn=cfg.use_batch_norm, act=cfg.activation
-                        ),
-
-                        *[BLOCKS_DICT[cfg.basic_block_type](
-                            intra_channels[idx],
-                            region_type=cfg.conv_region_type,
-                            bn=cfg.use_batch_norm, act=cfg.activation
-                        ) for _ in range(cfg.basic_block_num)]
-
-                    ) for idx in range(len(intra_channels))],
-
-                    ConvBlock(intra_channels[-1],
-                              out_channels,
-                              3, 1,
-                              region_type=cfg.conv_region_type,
-                              bn=True, act=None)
-                )
-
-            hyper_decoder_out_channels = cfg.compressed_channels * len(cfg.prior_indexes_range)
-
-            hyper_encoder = make_hyper_coder(
+            hyper_encoder = HyperEncoder(
                 cfg.compressed_channels,
-                cfg.hyper_encoder_channels,
-                cfg.hyper_compressed_channels)
-
-            hyper_decoder = make_hyper_coder(
                 cfg.hyper_compressed_channels,
+                cfg.hyper_encoder_channels,
+                cfg.basic_block_type,
+                cfg.conv_region_type,
+                cfg.basic_block_num,
+                cfg.use_batch_norm,
+                cfg.activation,
+            )
+
+            hyper_decoder = HyperDecoder(
+                cfg.hyper_compressed_channels,
+                cfg.compressed_channels * len(cfg.prior_indexes_range),
                 cfg.hyper_decoder_channels,
-                hyper_decoder_out_channels,
+                cfg.basic_block_type,
+                cfg.conv_region_type,
+                cfg.basic_block_num,
+                cfg.use_batch_norm,
+                cfg.activation,
             )
 
             if cfg.hyperprior == 'ScaleNoisyNormal':
                 assert len(cfg.prior_indexes_range) == 1
-                self.entropy_bottleneck = \
-                    NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel(
+                entropy_bottleneck = HyperPriorScaleNoisyNormalEntropyModel(
                         hyper_encoder=hyper_encoder,
                         hyper_decoder=hyper_decoder,
                         hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
+                        hyperprior_bytes_num_bytes=2,
                         coding_ndim=2,
                         num_scales=cfg.prior_indexes_range[0],
                         scale_min=0.11,
@@ -133,11 +132,11 @@ class PCC(nn.Module):
                                   bias=True)
                     )
 
-                self.entropy_bottleneck = \
-                    NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(
+                entropy_bottleneck = HyperPriorNoisyDeepFactorizedEntropyModel(
                         hyper_encoder=hyper_encoder,
                         hyper_decoder=hyper_decoder,
                         hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
+                        hyperprior_bytes_num_bytes=2,
                         coding_ndim=2,
                         index_ranges=cfg.prior_indexes_range,
                         parameter_fns_type='transform',
@@ -148,116 +147,315 @@ class PCC(nn.Module):
 
             else: raise NotImplementedError
 
+        if cfg.lossless_compression_based:
+            hyper_encoder_geo_lossless = HyperEncoderForGeoLossLess(
+                cfg.encoder_channels[-1],
+                cfg.compressed_channels,
+                cfg.lossless_coder_channels,
+                cfg.basic_block_type,
+                cfg.conv_region_type,
+                cfg.basic_block_num,
+                cfg.use_batch_norm,
+                cfg.activation
+            )
+            hyper_decoder_geo_lossless = HyperDecoderListForGeoLossLess(
+                (*[_ + cfg.compressed_channels for _ in cfg.lossless_coder_channels[:-1]],
+                 cfg.compressed_channels),
+                (len(cfg.lossless_prior_indexes_range), ) * len(cfg.lossless_coder_channels),
+                cfg.basic_block_type,
+                cfg.conv_region_type,
+                cfg.basic_block_num,
+                cfg.use_batch_norm,
+                cfg.activation
+            )
+
+            decoder_geo_lossless = DecoderListForGeoLossLess(
+                (*[_ + cfg.compressed_channels for _ in cfg.lossless_coder_channels[:-1]],
+                 cfg.compressed_channels),
+                (cfg.encoder_channels[-1], *cfg.lossless_coder_channels[:-1]),
+                cfg.basic_block_type,
+                cfg.conv_region_type,
+                cfg.basic_block_num,
+                cfg.use_batch_norm,
+                cfg.activation
+            )
+
+            def parameter_fns_factory(in_channels, out_channels):
+                return nn.Sequential(
+                    MLPBlock(in_channels, out_channels,
+                             bn=None, act=cfg.activation),
+                    nn.Linear(out_channels, out_channels,
+                              bias=True)
+                )
+
+            self.entropy_bottleneck = GeoLosslessNoisyDeepFactorizedEntropyModel(
+                fea_prior_entropy_model=entropy_bottleneck,
+                skip_connection=True,
+                fusion_method='Cat',
+                hyper_encoder=hyper_encoder_geo_lossless,
+                decoder=decoder_geo_lossless,
+                hyper_decoder=hyper_decoder_geo_lossless,
+                fea_bytes_num_bytes=2,
+                coord_bytes_num_bytes=2,
+                index_ranges=cfg.lossless_prior_indexes_range,
+                parameter_fns_type='transform',
+                parameter_fns_factory=parameter_fns_factory,
+                num_filters=(1, 3, 3, 3, 1),
+                quantize_indexes=True
+            )
+
+        else:
+            self.entropy_bottleneck = entropy_bottleneck
+
         self.cfg = cfg
         self.init_parameters()
 
     def forward(self, pc_data: PCData):
+        if self.training:
+            sparse_pc = self.get_sparse_pc(pc_data.xyz)
+            return self.train_forward(sparse_pc)
+
+        else:
+            assert pc_data.batch_size == 1, 'Only supports batch size == 1 during testing.'
+            if isinstance(pc_data.xyz, torch.Tensor):
+                sparse_pc = self.get_sparse_pc(pc_data.xyz)
+                return self.test_forward(sparse_pc, pc_data)
+
+            else:
+                sparse_pc_partitions = self.get_sparse_pc_partitions(pc_data.xyz)
+                return self.test_partitions_forward(sparse_pc_partitions, pc_data)
+
+    def get_sparse_pc(self, xyz: torch.Tensor,
+                      tensor_stride: int = 1,
+                      only_return_coords: bool = False)\
+            -> Union[ME.SparseTensor, Tuple[ME.CoordinateMapKey, ME.CoordinateManager]]:
         ME.clear_global_coordinate_manager()
+        global_coord_mg = ME.CoordinateManager(
+            D=3,
+            coordinate_map_type=ME.CoordinateMapType.CUDA if
+            xyz.is_cuda
+            else ME.CoordinateMapType.CPU,
+            minkowski_algorithm=self.minkowski_algorithm
+        )
+        ME.set_global_coordinate_manager(global_coord_mg)
 
-        if self.cfg.input_feature_type == 'Occupation':
+        pc_coord_key, _ = global_coord_mg.insert_and_map(xyz, [tensor_stride] * 3)
+
+        if only_return_coords:
+            return pc_coord_key, global_coord_mg
+
+        else:
+            if self.cfg.input_feature_type == 'Occupation':
+                sparse_pc_feature = torch.ones(
+                    xyz.shape[0], 1,
+                    dtype=torch.float,
+                    device=xyz.device
+                )
+
+            else:
+                raise NotImplementedError
+
             sparse_pc = ME.SparseTensor(
-                features=torch.ones(pc_data.xyz.shape[0], 1,
-                                    dtype=torch.float,
-                                    device=pc_data.xyz.device),
-                coordinates=pc_data.xyz,
-                minkowski_algorithm=self.minkowski_algorithm
+                features=sparse_pc_feature,
+                coordinate_map_key=pc_coord_key,
+                coordinate_manager=global_coord_mg
             )
+            return sparse_pc
 
-        elif self.cfg.input_feature_type == 'Coordinate':
-            input_coords_scaler = torch.tensor(
-                pc_data.resolution,
-                device=pc_data.xyz.device)[pc_data.xyz[:, 0].type(torch.long), None]
-            sparse_pc = ME.SparseTensor(
-                features=pc_data.xyz[:, 1:].type(torch.float) / input_coords_scaler,
-                coordinates=pc_data.xyz,
-                minkowski_algorithm=self.minkowski_algorithm
-            )
+    def get_sparse_pc_partitions(self, xyz: List[torch.Tensor]) -> Generator:
+        # The first one is supposed to be the original coordinates.
+        for sub_xyz in xyz[1:]:
+            yield self.get_sparse_pc(sub_xyz)
 
-        else: raise NotImplementedError
-
+    def train_forward(self, sparse_pc: ME.SparseTensor):
         feature, cached_feature_list, points_num_list = self.encoder(sparse_pc)
 
-        # points_num_list type: List[List[int]]
-        if not self.cfg.adaptive_pruning:
-            points_num_list = None
+        feature, loss_dict = self.entropy_bottleneck(feature)
+
+        decoder_message = self.decoder(
+            GenerativeUpsampleMessage(
+                fea=feature,
+                target_key=sparse_pc.coordinate_map_key,
+                points_num_list=points_num_list
+            )
+        )
+
+        for key in loss_dict:
+            if key.endswith('bits_loss'):
+                loss_dict[key] = loss_dict[key] * (
+                        self.cfg.bpp_loss_factor / sparse_pc.shape[0]
+                )
+
+        loss_dict['reconstruct_loss'] = self.get_reconstruct_loss(
+            decoder_message.cached_pred_list,
+            decoder_message.cached_target_list)
+
+        loss_dict['loss'] = sum(loss_dict.values())
+        for key in loss_dict:
+            if key != 'loss':
+                loss_dict[key] = loss_dict[key].detach().item()
+
+        return loss_dict
+
+    def test_forward(self, sparse_pc: ME.SparseTensor, pc_data: PCData):
+        compressed_string, sparse_tensor_coords = self.compress(sparse_pc)
+
+        del sparse_pc
+        ME.clear_global_coordinate_manager()
+        torch.cuda.empty_cache()
+
+        pc_recon = self.decompress(compressed_string, sparse_tensor_coords)
+
+        ret = self.evaluator.log_batch(
+            preds=[pc_recon],
+            targets=[pc_data.xyz[:, 1:]],
+            compressed_strings=[compressed_string],
+            pc_data=pc_data
+        )
+
+        return ret
+
+    def test_partitions_forward(self, sparse_pc_partitions: Generator, pc_data: PCData):
+        compressed_string, sparse_tensor_coords_list = self.compress_partitions(sparse_pc_partitions)
+        pc_recon = self.decompress_partitions(compressed_string, sparse_tensor_coords_list)
+
+        ret = self.evaluator.log_batch(
+            preds=[pc_recon],
+            targets=[pc_data.xyz[0]],
+            compressed_strings=[compressed_string],
+            pc_data=pc_data
+        )
+
+        return ret
+
+    def compress(self, sparse_pc: ME.SparseTensor) -> Tuple[bytes, torch.Tensor]:
+        feature, cached_feature_list, points_num_list = self.encoder(sparse_pc)
+
+        if self.cfg.lossless_compression_based:
+            em_string, bottom_fea_recon, fea_recon = \
+                self.entropy_bottleneck.compress(feature)
+
+            sparse_tensor_coords = bottom_fea_recon.C
+
         else:
-            points_num_list = [points_num_list[0]] + \
-                              [[int(n * self.cfg.adaptive_pruning_num_scaler) for n in _]
-                               for _ in points_num_list[1:]]
+            em_strings, coding_batch_shape, _ = \
+                self.entropy_bottleneck.compress(feature)
+            assert coding_batch_shape == torch.Size([1])
 
-        if self.training:
-            fea_tilde, loss_dict = self.entropy_bottleneck(feature)
+            sparse_tensor_coords = feature.C
 
-            decoder_message = self.decoder(
-                GenerativeUpsampleMessage(
-                    fea=fea_tilde,
-                    target_key=sparse_pc.coordinate_map_key,
-                    points_num_list=points_num_list))
+            em_string = em_strings[0]
 
-            loss_dict['reconstruct_loss'] = self.get_reconstruct_loss(
-                decoder_message.cached_pred_list,
-                decoder_message.cached_target_list)
+        with io.BytesIO() as bs:
+            if self.cfg.adaptive_pruning:
+                bs.write(reduce(
+                    lambda i, j: i + j,
+                    [_[0].to_bytes(4, 'little', signed=False)
+                     for _ in points_num_list]
+                ))
 
-            loss_dict['bits_loss'] = loss_dict['bits_loss'] * \
-                (self.cfg.bpp_loss_factor / sparse_pc.shape[0])
+            bs.write(len(em_string).to_bytes(4, 'little', signed=False))
+            bs.write(em_string)
 
-            if 'hyper_bits_loss' in loss_dict:
-                loss_dict['hyper_bits_loss'] = loss_dict['hyper_bits_loss'] * \
-                    (self.cfg.hyper_bpp_loss_factor / sparse_pc.shape[0])
+            # TODO: sparse_tensor_coords_list -> strings
 
-            excluded_loss = {}
-            if self.cfg.bpp_target != 0:
-                raise NotImplementedError
-            #     assert self.cfg.bpp_loss_factor == self.cfg.hyper_bpp_loss_factor == 1
-            #     total_bpp_loss = loss_dict['bits_loss']
-            #     excluded_loss['bits_loss'] = loss_dict['bits_loss'].detach().item()
-            #
-            #     if 'hyper_bits_loss' in loss_dict:
-            #         total_bpp_loss += loss_dict['hyper_bits_loss']
-            #         excluded_loss['hyper_bits_loss'] = loss_dict['hyper_bits_loss'].detach().item()
-            #
-            #     loss_dict['bpp_target_loss'] = F.l1_loss(
-            #         total_bpp_loss,
-            #         torch.tensor(self.cfg.bpp_target,
-            #                      dtype=total_bpp_loss.dtype,
-            #                      device=total_bpp_loss.device)
-            #     )
-            #
-            #     del loss_dict['bits_loss'], loss_dict['hyper_bits_loss']
+            compressed_string = bs.getvalue()
 
-            loss_dict['loss'] = sum(loss_dict.values())
-            for key in loss_dict:
-                if key != 'loss':
-                    loss_dict[key] = loss_dict[key].detach().item()
+        return compressed_string, sparse_tensor_coords
 
-            loss_dict.update(excluded_loss)
+    def compress_partitions(self, sparse_pc_partitions: Generator) \
+            -> Tuple[bytes, List[torch.Tensor]]:
+        compressed_string_list = []
+        sparse_tensor_coords_list = []
 
-            return loss_dict
+        for sparse_pc in sparse_pc_partitions:
+            compressed_string, sparse_tensor_coords = self.compress(sparse_pc)
 
-        # Only supports batch size == 1.
-        elif not self.training:
-            fea_reconstructed, loss_dict, compressed_strings = self.entropy_bottleneck(feature)
+            del sparse_pc
+            ME.clear_global_coordinate_manager()
+            torch.cuda.empty_cache()
 
-            decoder_message = self.decoder(
-                GenerativeUpsampleMessage(
-                    fea=fea_reconstructed,
-                    target_key=sparse_pc.coordinate_map_key,
-                    points_num_list=points_num_list))
+            compressed_string_list.append(compressed_string)
+            sparse_tensor_coords_list.append(sparse_tensor_coords)
 
-            # the last one is supposed to be the final output of decoder
-            pc_reconstructed = decoder_message.cached_pred_list[-1]
+        # Log bytes of each partitions.
+        concat_string = reduce(lambda i, j: i + j,
+                               (len(s).to_bytes(4, 'little', signed=False) + s
+                                for s in compressed_string_list))
 
-            ret = self.evaluator.log_batch(
-                preds=pc_reconstructed.decomposed_coordinates,
-                targets=sparse_pc.decomposed_coordinates,
-                compressed_strings=compressed_strings,
-                bits_preds=[loss_dict['bits_loss'].item() +
-                            loss_dict.get('hyper_bits_loss', torch.tensor([0])).item()],
-                feature_points_numbers=[_.shape[0] for _ in feature.decomposed_coordinates],
-                pc_data=pc_data
+        return concat_string, sparse_tensor_coords_list
+
+    def decompress(self, compressed_string: bytes, sparse_tensor_coords: torch.Tensor) -> torch.Tensor:
+        device = next(self.parameters()).device
+
+        with io.BytesIO(compressed_string) as bs:
+            if self.cfg.adaptive_pruning:
+                points_num_list = []
+                for idx in range(len(self.cfg.decoder_channels)):
+                    points_num_list.append([int.from_bytes(bs.read(4), 'little', signed=False)])
+            else:
+                points_num_list = None
+
+            em_string_len = int.from_bytes(bs.read(4), 'little', signed=False)
+            em_string = bs.read(em_string_len)
+
+        if self.cfg.lossless_compression_based:
+            assert isinstance(self.entropy_bottleneck,
+                              GeoLosslessNoisyDeepFactorizedEntropyModel)
+            fea_recon = self.entropy_bottleneck.decompress(
+                em_string,
+                device,
+                self.get_sparse_pc(
+                    sparse_tensor_coords,
+                    tensor_stride=2 ** (
+                            len(self.cfg.decoder_channels) +
+                            len(self.cfg.lossless_coder_channels)),
+                    only_return_coords=True
+                )
             )
 
-            return ret
+        else:
+            fea_recon = self.entropy_bottleneck.decompress(
+                [em_string],
+                torch.Size([1]),
+                device,
+                sparse_tensor_coords_tuple=self.get_sparse_pc(
+                    sparse_tensor_coords,
+                    tensor_stride=2 ** len(self.cfg.decoder_channels),
+                    only_return_coords=True
+                )
+            )
+
+        decoder_message = self.decoder(
+            GenerativeUpsampleMessage(
+                fea=fea_recon,
+                points_num_list=points_num_list
+            )
+        )
+
+        # The last one is supposed to be the final output of the decoder.
+        pc_recon = decoder_message.cached_pred_list[-1].C[:, 1:]
+        return pc_recon
+
+    def decompress_partitions(self, concat_string: bytes,
+                              sparse_tensor_coords_list: List[torch.Tensor]) \
+            -> torch.Tensor:
+        pc_recon_list = []
+        concat_string_len = len(concat_string)
+
+        with io.BytesIO(concat_string) as bs:
+            while bs.tell() != concat_string_len:
+                length = int.from_bytes(bs.read(4), 'little', signed=False)
+                pc_recon_list.append(self.decompress(
+                    bs.read(length), sparse_tensor_coords_list.pop(0)
+                ))
+
+                ME.clear_global_coordinate_manager()
+                torch.cuda.empty_cache()
+
+        pc_recon = torch.cat([pc_recon for pc_recon in pc_recon_list], 0)
+
+        return pc_recon
 
     def get_reconstruct_loss(self, cached_pred_list, cached_target_list):
         if self.cfg.reconstruct_loss_type == 'BCE':
@@ -305,36 +503,6 @@ class PCC(nn.Module):
         return super(PCC, self).train(mode=mode)
 
 
-def main_debug():
-    ME.clear_global_coordinate_manager()
-    ME.set_sparse_tensor_operation_mode(
-        ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
-
-    coords, feats = ME.utils.sparse_collate(
-        coords=[torch.tensor([[3, 5, 7], [8, 9, 1], [-2, 3, 3], [-2, 3, 4]],
-                             dtype=torch.int32)],
-        feats=[torch.tensor([[0.5, 0.4], [0.1, 0.6], [-0.9, 10], [-0.9, 8]])])
-    batch_coords = torch.tensor(
-        [[0, 3, 5, 7], [0, 8, 9, 1], [0, -2, 3, 2], [0, -2, 3, 4]],
-        dtype=torch.int32)
-
-    pc = ME.SparseTensor(features=feats, coordinates=coords, tensor_stride=1)
-    cm = ME.global_coordinate_manager()
-    coord_map_key = cm.insert_and_map(batch_coords, tensor_stride=1)[0]
-
-    print(cm.kernel_map(pc.coordinate_map_key, coord_map_key, kernel_size=1))
-
-    conv11 = ME.MinkowskiConvolution(2, 2, 1, 1, dimension=3)
-    conv_trans22 = ME.MinkowskiConvolutionTranspose(2, 6, 2, 2, dimension=3)
-
-    pc = conv11(pc)
-    m_out_trans = conv_trans22(pc)
-    pc = pc.dense(shape=torch.Size([1, 3, 10, 10, 10]),
-                  min_coordinate=torch.IntTensor([0, 0, 0]))
-
-    print('Done')
-
-
 def model_debug():
     cfg = ModelConfig()
     cfg.resolution = 128
@@ -351,5 +519,4 @@ def model_debug():
 
 
 if __name__ == '__main__':
-    # main_debug()
     model_debug()

@@ -84,7 +84,7 @@ class PCC(nn.Module):
             return loss_dict
 
         else:
-            fea_recon, loss_dict, compressed_strings = self.entropy_bottleneck(feature)
+            fea_recon, compressed_strings, coding_batch_shape = self.entropy_bottleneck(feature)
             decoder_msg = self.decoder(
                 PointLayerMessage(
                     xyz=encoder_msg.xyz,
@@ -93,7 +93,7 @@ class PCC(nn.Module):
             pc_recon = self.decoder_out_mlp(decoder_msg.feature)
             pc_recon = pc_recon.reshape(pc_data.xyz.shape)
 
-            return pc_recon, loss_dict['bits_loss'], compressed_strings
+            return pc_recon, compressed_strings
 
     def init_weights(self):
         torch.nn.init.uniform_(self.encoder_out_mlp.bn.weight, -10, 10)

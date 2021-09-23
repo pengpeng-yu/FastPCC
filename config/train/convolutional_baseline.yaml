@@ -4,12 +4,12 @@ model:
   basic_block_num: 3
   use_batch_norm: False
   activation: 'leaky_relu(0.2)'
+  conv_trans_near_pruning: False
   encoder_channels: [4, 16, 64, 64]
   compressed_channels: 8
   decoder_channels: [64, 16, 4]
   bpp_loss_factor: 0.2
   hyperprior: NoisyDeepFactorized
-  hyper_bpp_loss_factor: 0.2
   hyper_encoder_channels: [32]
   hyper_compressed_channels: 8
   hyper_decoder_channels: [32, 32]
@@ -35,7 +35,7 @@ train:
   lr_step_size: 4
   lr_step_gamma: 0.3
 
-  ckpt_frequency: 1
+  ckpt_frequency: 2
   resume_from_ckpt: ''  # 'runs/train_convolutional_23/ckpts/epoch_<maxindex>.pt'
   resume_items: ['state_dict']
   test_frequency: 4
@@ -47,11 +47,10 @@ train:
     with_resolution: True
 
 # use mesh objects to generate voxelized points with high resolution
-# TODO: expand resolution gradually during training. lr 3e-5 for r 256
 #  dataset_path: 'lib.datasets.ShapeNetCorev2'
 #  dataset:
 #    data_format: '.obj'
-#    mesh_sample_points_num: 5000000
+#    mesh_sample_points_num: 2000000
 #    resolution: 256
 #    random_rotation: True
 #    with_resolution: True

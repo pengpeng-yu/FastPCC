@@ -1,7 +1,6 @@
 import os
 import pathlib
 
-import open3d as o3d
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 import torch
@@ -9,11 +8,11 @@ import torch.utils.data
 
 try:
     import MinkowskiEngine as ME
-except ImportError: pass
+except ImportError: ME = None
 
 from lib.data_utils import binvox_rw, PCData, pc_data_collate_fn
 from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
-from lib.data_utils import o3d_coords_from_triangle_mesh, normalize_coords
+from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coords
 
 
 class ShapeNetCorev2(torch.utils.data.Dataset):
@@ -97,12 +96,15 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         if self.cfg.data_format != '.obj':
             with open(file_path, 'rb') as f:
-                xyz = binvox_rw.read_as_coord_array(f).data.astype(np.int32).T
+                xyz = binvox_rw.read_as_coord_array(f).data.astype(np.float32).T
                 xyz = np.ascontiguousarray(xyz)
         else:
-            xyz = o3d_coords_from_triangle_mesh(file_path,
-                                                self.cfg.mesh_sample_points_num,
-                                                self.cfg.mesh_sample_point_method)
+            xyz = o3d_coords_sampled_from_triangle_mesh(
+                file_path,
+                self.cfg.mesh_sample_points_num,
+                self.cfg.mesh_sample_point_method,
+                dtype=np.float32
+            )
 
         if self.cfg.random_rotation:
             xyz = R.random().apply(xyz).astype(np.float32)
@@ -112,7 +114,9 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         if self.cfg.resolution != 0:
             assert self.cfg.resolution > 1
             xyz *= self.cfg.resolution
-            xyz = ME.utils.sparse_quantize(xyz)
+            unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True)
+            xyz = xyz[unique_map]
+
             if self.cfg.data_format == '.obj' and \
                     self.cfg.mesh_sample_points_num / xyz.shape[0] < 2:
                 print(f'Warring: '

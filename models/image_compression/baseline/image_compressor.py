@@ -1,4 +1,4 @@
-from typing import Union, List
+from typing import Union
 import math
 
 import torch
@@ -8,9 +8,8 @@ import torch.nn.functional as F
 from lib.data_utils import IMData
 from lib.torch_utils import MLPBlock
 from lib.evaluators import ImageCompressionEvaluator
-from lib.entropy_models.hyperprior import \
-    NoisyDeepFactorizedHyperPriorScaleNoisyNormalEntropyModel, \
-    NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel
+from lib.entropy_models.hyperprior.noisy_deep_factorized import \
+    NoisyDeepFactorizedEntropyModel as HyperPriorNoisyDeepFactorizedEntropyModel
 
 from models.image_compression.baseline.image_compressor_config import ModelConfig
 
@@ -141,11 +140,13 @@ class ImageCompressor(nn.Module):
             )
 
         self.entropy_bottleneck = \
-            NoisyDeepFactorizedHyperPriorNoisyDeepFactorizedEntropyModel(
+            HyperPriorNoisyDeepFactorizedEntropyModel(
                 hyper_encoder=hyper_encoder,
                 hyper_decoder=hyper_decoder,
                 hyperprior_batch_shape=torch.Size([cfg.hyper_encoder_channels[-1]]),
                 coding_ndim=3,
+                hyperprior_broadcast_shape_bytes=(2, 2),
+                hyperprior_bytes_num_bytes=4,
                 index_ranges=cfg.prior_indexes_range,
                 parameter_fns_type='transform',
                 parameter_fns_factory=parameter_fns_factory,
@@ -170,17 +171,15 @@ class ImageCompressor(nn.Module):
 
             im_recon = self.decoder(fea_tilde)
 
+            for key in loss_dict:
+                if key.endswith('bits_loss'):
+                    loss_dict[key] = loss_dict[key] * (
+                            self.cfg.bpp_loss_factor / pixels_num
+                    )
+
             loss_dict['reconstruct_loss'] = F.mse_loss(
                 im_recon, batch_im
             ) * self.cfg.reconstruct_loss_factor
-
-            loss_dict['bits_loss'] = loss_dict['bits_loss'] * \
-                (self.cfg.bpp_loss_factor / pixels_num)
-
-            try:
-                loss_dict['hyper_bits_loss'] = loss_dict['hyper_bits_loss'] * \
-                    (self.cfg.hyper_bpp_loss_factor / pixels_num)
-            except KeyError: pass
 
             loss_dict['loss'] = sum(loss_dict.values())
 
@@ -194,7 +193,7 @@ class ImageCompressor(nn.Module):
             return loss_dict
 
         elif not self.training:
-            fea_recon, loss_dict, compressed_strings = self.entropy_bottleneck(feature)
+            fea_recon, compressed_strings, coding_batch_shape = self.entropy_bottleneck(feature)
             fea_recon = channel_first_permutation(fea_recon)
 
             im_recon = self.decoder(fea_recon)
@@ -203,7 +202,6 @@ class ImageCompressor(nn.Module):
 
             ret = self.evaluator.log_batch(
                 im_recon, batch_im,
-                [loss_dict['bits_loss'].item()],
                 compressed_strings,
                 im_data.file_path,
                 im_data.valid_range,

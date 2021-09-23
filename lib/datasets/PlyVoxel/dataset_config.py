@@ -10,6 +10,8 @@ class DatasetConfig(SimpleConfig):
     filelist_path: Union[str, Tuple[str, ...]] = 'list.txt'
     file_path_pattern: Union[str, Tuple[str, ...]] = '**/*.ply'  # works if filelist does not exist
 
+    kd_tree_partition_max_points_num: int = 0
+
     with_color: bool = False
     with_normal: bool = False
     with_file_path: bool = True

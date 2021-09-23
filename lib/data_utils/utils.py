@@ -1,7 +1,7 @@
 import math
 import os
 from collections import defaultdict
-from typing import Tuple, List, Optional, Union
+from typing import Tuple, List, Optional, Union, Dict
 
 import numpy as np
 import cv2
@@ -9,7 +9,9 @@ import open3d as o3d
 import torch
 try:
     import MinkowskiEngine as ME
-except ImportError: pass
+except ImportError: ME = None
+
+from lib.torch_utils import kd_tree_partition
 
 
 class SampleData:
@@ -80,47 +82,135 @@ def im_data_collate_fn(data_list: List[IMData],
 
 
 class PCData(SampleData):
-    def __init__(self, xyz: torch.Tensor,
-                 colors: torch.Tensor = None,
-                 normals: torch.Tensor = None,
+    tensor_to_tensor_items = ('colors', 'normals')
+    list_to_tensor_items = ('class_idx',)
+
+    def __init__(self,
+                 xyz: Union[torch.Tensor, List[torch.Tensor]],
+                 colors: Union[torch.Tensor, List[torch.Tensor]] = None,
+                 normals: Union[torch.Tensor, List[torch.Tensor]] = None,
                  class_idx: Union[int, torch.Tensor] = None,
                  ori_resolution: Union[int, List[int]] = None,
                  resolution: Union[int, List[int]] = None,
-                 file_path: Union[str, List[str]] = None):
+                 file_path: Union[str, List[str]] = None,
+                 batch_size: int = 0):
+        """
+        xyz is supposed to be a torch.float32 tensor in cpu
+        when initialized by a single sample.
+        """
         super(PCData, self).__init__()
         self.xyz = xyz
         self.colors = colors
         self.normals = normals
+        self.class_idx = class_idx
         self.ori_resolution = ori_resolution
         self.resolution = resolution
         self.file_path = file_path
-        self.class_idx = class_idx
+        self.batch_size = batch_size
+
+    def to(self, device, non_blocking=False):
+        super(PCData, self).to(device, non_blocking)
+
+        for key in ('xyz', *self.tensor_to_tensor_items):
+            value = self.__dict__[key]
+            if isinstance(value, List):
+                # Ignore the first value of partitions lists.
+                for idx, v in enumerate(value[1:]):
+                    assert isinstance(v, torch.Tensor)
+                    value[idx + 1] = v.to(device, non_blocking=non_blocking)
 
 
 def pc_data_collate_fn(data_list: List[PCData],
-                       sparse_collate: bool) -> PCData:
-    data_dict = defaultdict(list)
+                       sparse_collate: bool,
+                       kd_tree_partition_max_points_num: int = 0) -> PCData:
+    """
+    If sparse_collate is True, PCData.xyz will be batched
+    using ME.utils.batched_coordinates, which returns a torch.int32 tensor.
+    """
+    if kd_tree_partition_max_points_num > 0:
+        use_kd_tree_partition = True
+        assert len(data_list) == 1, 'Only supports kd-tree partition when batch size == 1.'
+    else:
+        use_kd_tree_partition = False
+
+    data_dict: Dict[str, List] = defaultdict(list)
     for data in data_list:
         for key, value in data.__dict__.items():
             if value is not None:
                 data_dict[key].append(value)
 
-    batched_data_dict = {}
-    for key, value in data_dict.items():
-        if key in ('xyz', 'colors', 'normals'):
-            if not sparse_collate:
-                batched_data_dict[key] = torch.stack(value, dim=0)
-            else:
-                if key == 'xyz':
-                    batched_data_dict[key] = ME.utils.batched_coordinates(value)
+    batched_data_dict = {'batch_size': len(data_list)}
+
+    if not use_kd_tree_partition:
+        for key, value in data_dict.items():
+            if key == 'xyz':
+                if not sparse_collate:
+                    batched_data_dict[key] = torch.stack(value, dim=0)
+                else:
+                    batched_data_dict[key] = ME.utils.batched_coordinates(
+                        value, dtype=torch.int32
+                    )
+
+            elif key in PCData.tensor_to_tensor_items:
+                if not sparse_collate:
+                    batched_data_dict[key] = torch.stack(value, dim=0)
                 else:
                     batched_data_dict[key] = torch.cat(value, dim=0)
 
-        elif key in ('class_idx',):
-            batched_data_dict[key] = torch.tensor(value)
+            elif key in PCData.list_to_tensor_items:
+                batched_data_dict[key] = torch.tensor(value)
 
+            elif key != 'batch_size':
+                batched_data_dict[key] = value
+
+    else:
+        # Use kd-tree partition.
+        extras_dict = {item: data_dict[item][0]
+                       for item in PCData.tensor_to_tensor_items if item in data_dict}
+        if extras_dict == {}:
+            # Retain original coordinates in the head of list.
+            batched_data_dict['xyz'] = data_dict['xyz']
+
+            batched_data_dict['xyz'].extend(
+                kd_tree_partition(
+                    data_dict['xyz'][0], kd_tree_partition_max_points_num,
+                )
+            )
         else:
-            batched_data_dict[key] = value
+            xyz_partitions, extras = kd_tree_partition(
+                data_dict['xyz'][0], kd_tree_partition_max_points_num,
+                extras=list(extras_dict.values())
+            )
+
+            batched_data_dict['xyz'] = data_dict['xyz']
+            batched_data_dict['xyz'].extend(xyz_partitions)
+
+            for idx, key in enumerate(extras_dict):
+                batched_data_dict[key] = [extras_dict[key]]
+                batched_data_dict[key].extend(extras[idx])
+
+        for key, value in data_dict.items():
+            if key == 'xyz':
+                # Add batch dimension.
+                # The first one is supposed to be the original coordinates.
+                if not sparse_collate:
+                    batched_data_dict[key] = [_[None] if idx != 0 else _
+                                              for idx, _ in enumerate(batched_data_dict[key])]
+                else:
+                    batched_data_dict[key] = [ME.utils.batched_coordinates([_], dtype=torch.int32)
+                                              if idx != 0 else _.to(torch.int32)
+                                              for idx, _ in enumerate(batched_data_dict[key])]
+
+            elif key in PCData.tensor_to_tensor_items:
+                # Add batch dimension.
+                if not sparse_collate:
+                    batched_data_dict[key] = [_[None] for _ in batched_data_dict[key][1:]]
+
+            elif key in PCData.list_to_tensor_items:
+                batched_data_dict[key] = torch.tensor(value)
+
+            elif key != 'batch_size':
+                batched_data_dict[key] = value
 
     return PCData(**batched_data_dict)
 
@@ -198,31 +288,9 @@ def im_pad(
     return holder, valid_range
 
 
-class OFFIO:
-    @classmethod
-    def load_by_np(cls, file_path):
-        with open(file_path) as f:
-            assert f.readlines(1)[0].strip() == 'OFF'
-            vertices_num, faces_num, edges_num = [int(_) for _ in f.readlines(1)[0].split()]
-            if edges_num != 0: raise NotImplementedError
-            vertices = np.loadtxt(f, dtype=np.float32, max_rows=vertices_num)
-            faces = np.loadtxt(f, dtype=np.int32, max_rows=faces_num)
-        return vertices, faces
-
-    @classmethod
-    def save(cls, file_path, vertices: np.ndarray, faces: np.ndarray):
-        if os.path.exists(file_path):
-            raise FileExistsError
-        with open(file_path, 'w') as f:
-            f.write('OFF\n')
-            f.write(f'{vertices.shape[0]} {faces.shape[0]} 0\n')
-            np.savetxt(f, vertices, fmt='%d' if vertices.dtype == np.int32 else '%.18e')
-            np.savetxt(f, faces, fmt='%d')
-        return True
-
-
-def o3d_coords_from_triangle_mesh(triangle_mesh_path: str, points_num: int,
-                                  sample_method: str = 'uniform') -> np.ndarray:
+def o3d_coords_sampled_from_triangle_mesh(triangle_mesh_path: str, points_num: int,
+                                          sample_method: str = 'uniform',
+                                          dtype=np.float32) -> np.ndarray:
     mesh_object = o3d.io.read_triangle_mesh(triangle_mesh_path)
 
     if sample_method == 'barycentric':
@@ -235,7 +303,7 @@ def o3d_coords_from_triangle_mesh(triangle_mesh_path: str, points_num: int,
         point_cloud = np.asarray(mesh_object.sample_points_uniformly(points_num).points)
     else:
         raise NotImplementedError
-    point_cloud = point_cloud.astype(np.float32)
+    point_cloud = point_cloud.astype(dtype)
     return point_cloud
 
 

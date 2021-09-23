@@ -229,93 +229,138 @@ class BatchNorm1dChnlLast(nn.Module):
         return x
 
 
-def unbatched_coordinates(coords: torch.Tensor):
-    # Used for Minkowski batched sparse tensor
-    assert len(coords.shape) == 2 and coords.shape[1] == 4
-    return [coords[coords[:, 0] == batch_idx, 1:] for batch_idx in range(coords[:, 0].max() + 1)]
+def concat_loss_dicts(loss_dict_a: Dict[str, torch.Tensor],
+                      loss_dict_b: Dict[str, torch.Tensor],
+                      b_key_to_a_key_f: Callable[[str], str] = lambda x: x):
+    for b_key in loss_dict_b:
+        a_key = b_key_to_a_key_f(b_key)
+        if a_key in loss_dict_a:
+            loss_dict_a[a_key] += loss_dict_b[b_key]
+        else:
+            loss_dict_a[a_key] = loss_dict_b[b_key]
+    return loss_dict_a
 
 
-def minkowski_tensor_wrapped(inout_mapping_dict: Dict[Union[int, str], Optional[int]] = None,
-                             add_batch_dim: bool = True,
-                             extra_preparation: Dict[Union[int, str], Callable] = None):
+def minkowski_tensor_wrapped_op(x, operation: Callable,
+                                needs_recover: bool = True,
+                                add_batch_dim: bool = False):
+    if ME is None or isinstance(x, torch.Tensor):
+        return operation(x)
+    else:
+        if needs_recover is True:
+            assert add_batch_dim is False
+            return ME.SparseTensor(
+                features=operation(x.F),
+                coordinate_map_key=x.coordinate_map_key,
+                coordinate_manager=x.coordinate_manager
+            )
+        else:
+            ret = operation(x.F)
+            if add_batch_dim is True:
+                ret = ret[None]
+            return ret
+
+
+def get_minkowski_tensor_coords_tuple(x):
+    try:
+        sparse_tensor_coords_tuple = x.coordinate_map_key, \
+                                     x.coordinate_manager
+    except AttributeError:
+        sparse_tensor_coords_tuple = None
+    return sparse_tensor_coords_tuple
+
+
+def minkowski_tensor_wrapped_fn(
+        inout_mapping_dict: Dict[Union[int, str], Union[int, List[int], None]] = None,
+        add_batch_dim: bool = True):
 
     inout_mapping_dict = inout_mapping_dict or {}
-    predefined_extra_preparation = extra_preparation or {}
 
     def func_decorator(func):
         @wraps(func)
-        def wrapped_func(*args,
-                         extra_preparation: Dict[Union[int, str], Callable] = None,
-                         **kwargs):
-            if extra_preparation is None:
-                extra_preparation = predefined_extra_preparation
+        def wrapped_func(*args, **kwargs):
 
-            arg_coords_keys = {}
-            arg_coord_mgs = {}
+            ret_coords: Dict[int, Union[Tuple, List]] = {}
 
-            new_pos_args = list(args)
+            args = list(args)
 
-            for idx, in_idx in enumerate(inout_mapping_dict):
-                if isinstance(in_idx, int):
-                    collection = new_pos_args
-                elif isinstance(in_idx, str):
-                    collection = kwargs
-                else:
-                    raise NotImplementedError
-
-                obj = collection[in_idx]
-                if not isinstance(obj, ME.SparseTensor):
-                    assert idx == 0
-                    needs_recover = False
-                    break
-
-                arg_coords_keys[in_idx] = obj.coordinate_map_key
-                arg_coord_mgs[in_idx] = obj.coordinate_manager
-                collection[in_idx] = obj.F
-                if add_batch_dim:
-                    collection[in_idx] = collection[in_idx][None]
+            if ME is None or inout_mapping_dict == {}:
+                needs_recover = False
 
             else:
                 needs_recover = True
+                for in_key, out_idx in inout_mapping_dict.items():
+                    if isinstance(in_key, str) and in_key[0] == '<':
+                        flag_end = in_key.find('>')
+                        assert flag_end != -1
+                        flag = in_key[1: flag_end]
+                        in_key = in_key[flag_end + 1:]
+                    else:
+                        flag = None
 
-            if inout_mapping_dict == {}:
-                needs_recover = False
+                    try:
+                        in_key = int(in_key)
+                    except ValueError: pass
 
-            for in_idx in extra_preparation:
-                if isinstance(in_idx, int):
-                    collection = new_pos_args
-                elif isinstance(in_idx, str):
-                    collection = kwargs
-                else:
-                    raise NotImplementedError
+                    if isinstance(in_key, int):
+                        collection = args
+                    elif isinstance(in_key, str):
+                        collection = kwargs
+                    else:
+                        raise NotImplementedError
 
-                if isinstance(collection[in_idx], torch.Tensor):
-                    collection[in_idx] = extra_preparation[in_idx](collection[in_idx])
+                    try:
+                        obj = collection[in_key]
+                    except (IndexError, KeyError):
+                        # If designated var is not provided, ignore it.
+                        continue
 
-                elif isinstance(collection[in_idx], ME.SparseTensor):
-                    collection[in_idx] = ME.SparseTensor(
-                        extra_preparation[in_idx](collection[in_idx].F),
-                        coordinate_map_key=collection[in_idx].coordinate_map_key,
-                        coordinate_manager=collection[in_idx].coordinate_manager
-                    )
+                    if isinstance(obj, ME.SparseTensor):
+                        collection[in_key] = obj.F
 
-                else: raise NotImplementedError
+                        if add_batch_dim:
+                            collection[in_key] = collection[in_key][None]
 
-            new_pos_args = tuple(new_pos_args)
+                        if out_idx is not None:
+                            if not isinstance(out_idx, list):
+                                out_idx = [out_idx]
+                            for i in out_idx:
+                                ret_coords[i] = (obj.coordinate_map_key, obj.coordinate_manager)
 
-            ret = func(*new_pos_args, **kwargs)
+                    elif isinstance(obj, tuple) or isinstance(obj, list):
+                        assert len(obj) == 2
+                        assert isinstance(obj[0], ME.CoordinateMapKey)
+                        assert isinstance(obj[1], ME.CoordinateManager)
+                        if out_idx is not None:
+                            if not isinstance(out_idx, list):
+                                out_idx = [out_idx]
+                            for i in out_idx:
+                                ret_coords[i] = obj
+
+                    else:
+                        # If designated var is not a ME.SparseTensor
+                        # or a tuple of a CoordinateMapKey and a CoordinateManager,
+                        # ignore it.
+                        pass
+
+                    if flag == 'del':
+                        del collection[in_key]
+                    elif flag is None: pass
+                    else: raise NotImplementedError
+
+            if ret_coords == {}: needs_recover = False
+
+            ret = func(*args, **kwargs)
 
             if needs_recover:
-                ret = list(ret)
-                for in_idx, out_idx in inout_mapping_dict.items():
-                    if out_idx is not None:
-                        assert isinstance(out_idx, int)
-                        assert isinstance(ret[out_idx], torch.Tensor)
-                        ret[out_idx] = ME.SparseTensor(
-                            ret[out_idx][0] if add_batch_dim else ret[out_idx],
-                            coordinate_map_key=arg_coords_keys[in_idx],
-                            coordinate_manager=arg_coord_mgs[in_idx]
-                        )
+                ret = list(ret) if isinstance(ret, tuple) else [ret]
+                for out_idx, (coords_key, coords_mg) in ret_coords.items():
+                    assert isinstance(ret[out_idx], torch.Tensor)
+                    ret[out_idx] = ME.SparseTensor(
+                        features=ret[out_idx][0] if add_batch_dim else ret[out_idx],
+                        coordinate_map_key=coords_key,
+                        coordinate_manager=coords_mg
+                    )
 
                 if len(ret) == 1:
                     ret = ret[0]
@@ -392,6 +437,84 @@ class GumbelSigmoidMLPBlock(MLPBlock):
         logits = super(GumbelSigmoidMLPBlock, self).forward(x)
         logits = gumbel_sigmoid(logits, tau=self.tau, hard=self.hard)
         return logits * x
+
+
+class KDNode:
+    def __init__(self, point: torch.Tensor):
+        super(KDNode, self).__init__()
+        self.point = point
+        self.left: Union[torch.Tensor, KDNode, None] = None
+        self.right: Union[torch.Tensor, KDNode, None] = None
+
+
+def create_kd_tree(data: torch.Tensor, max_num: int = 1) -> Union[KDNode, torch.Tensor]:
+    if len(data) <= max_num:
+        return data
+
+    dim_index = torch.argmax(torch.var(data, dim=0))
+    data_sorted = data[torch.argsort(data[:, dim_index])]
+
+    point_index = len(data) // 2
+    point = data_sorted[point_index]
+    kd_node = KDNode(point)
+
+    kd_node.left = create_kd_tree(data_sorted[:point_index], max_num)
+    kd_node.right = create_kd_tree(data_sorted[point_index:], max_num)
+
+    return kd_node
+
+
+def kd_tree_partition(data: torch.Tensor, max_num: int, extras: List[torch.Tensor] = None)\
+        -> Union[List[torch.Tensor], Tuple[List[torch.Tensor], List[List[torch.Tensor]]]]:
+    if extras is None or extras == []:
+        return kd_tree_partition_base(data, max_num)
+    else:
+        return kd_tree_partition_extended(data, max_num, extras)
+
+
+def kd_tree_partition_base(data: torch.Tensor, max_num: int) \
+        -> List[torch.Tensor]:
+    if len(data) <= max_num:
+        return [data]
+
+    dim_index = torch.argmax(torch.var(data, dim=0))
+    data_sorted = data[torch.argsort(data[:, dim_index])]
+
+    index_point = len(data) // 2
+    left_partitions = kd_tree_partition_base(data_sorted[:index_point], max_num)
+    right_partitions = kd_tree_partition_base(data_sorted[index_point:], max_num)
+
+    left_partitions.extend(right_partitions)
+
+    return left_partitions
+
+
+def kd_tree_partition_extended(data: torch.Tensor, max_num: int, extras: List[torch.Tensor])\
+        -> Tuple[List[torch.Tensor], List[List[torch.Tensor]]]:
+    if len(data) <= max_num:
+        return [data], [[extra] for extra in extras]
+
+    dim_index = torch.argmax(torch.var(data, dim=0))
+    arg_sorted = torch.argsort(data[:, dim_index])
+    data_sorted = data[arg_sorted]
+
+    for idx, extra in enumerate(extras):
+        extras[idx] = extra[arg_sorted]
+    del arg_sorted
+
+    index_point = len(data) // 2
+    left_partitions, left_extra_partitions = kd_tree_partition_extended(
+        data_sorted[:index_point], max_num, [extra[:index_point] for extra in extras]
+    )
+    right_partitions, right_extra_partitions = kd_tree_partition_extended(
+        data_sorted[index_point:], max_num, [extra[index_point:] for extra in extras]
+    )
+
+    left_partitions.extend(right_partitions)
+    for idx, p in enumerate(right_extra_partitions):
+        left_extra_partitions[idx].extend(p)
+
+    return left_partitions, left_extra_partitions
 
 
 if __name__ == '__main__':

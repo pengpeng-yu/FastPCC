@@ -68,8 +68,6 @@ class PCGCEvaluator(Evaluator):
                   preds: Union[List[torch.Tensor], torch.Tensor],
                   targets: Union[List[torch.Tensor], torch.Tensor],
                   compressed_strings: List[bytes],
-                  bits_preds: List[float],
-                  feature_points_numbers: List[int],
                   pc_data: PCData):
         """
         "preds" and "targets" are supposed to be list contains unnormalized discrete
@@ -79,9 +77,7 @@ class PCGCEvaluator(Evaluator):
 
         assert batch_size == \
                len(targets) == \
-               len(compressed_strings) == \
-               len(bits_preds) == \
-               len(feature_points_numbers)
+               len(compressed_strings)
 
         if self.compute_chamfer_loss:
             assert batch_size == len(pc_data.resolution)
@@ -110,7 +106,6 @@ class PCGCEvaluator(Evaluator):
                 ).item()
 
             bpp = len(compressed_string) * 8 / target.shape[0]
-            bpp_pred = bits_preds[idx] / target.shape[0]
 
             if pc_data.results_dir is not None:
                 out_file_path = os.path.join(
@@ -126,12 +121,10 @@ class PCGCEvaluator(Evaluator):
 
                 file_info_dict.update(
                     {
-                        'fea_points_num': feature_points_numbers[idx],
                         'input_points_num': target.shape[0],
                         'output_points_num': pred.shape[0],
                         'compressed_bytes': len(compressed_string),
-                        'bpp': bpp,
-                        'bpp_pred': bpp_pred
+                        'bpp': bpp
                     }
                 )
 
@@ -204,7 +197,7 @@ class ImageCompressionEvaluator(Evaluator):
 
     def log_batch(self,
                   batch_im_recon,
-                  batch_im, bits_preds,
+                  batch_im,
                   compressed_strings,
                   file_paths,
                   valid_ranges,
@@ -212,7 +205,7 @@ class ImageCompressionEvaluator(Evaluator):
         if not batch_im_recon.shape[0] == 1:
             raise NotImplementedError
 
-        assert len(batch_im_recon) == len(bits_preds) == len(compressed_strings) == len(file_paths)
+        assert len(batch_im_recon) == len(compressed_strings) == len(file_paths)
 
         valid_range = valid_ranges[0]
         batch_psnr = batch_image_psnr(
@@ -237,7 +230,6 @@ class ImageCompressionEvaluator(Evaluator):
             self.file_path_to_info[file_paths[idx]] = \
                 {
                     'psnr': psnr,
-                    'bpp_pred': bits_preds[idx] / pixels_num,
                     'bpp': len(compressed_strings[idx]) * 8 / pixels_num
                 }
 

@@ -6,7 +6,7 @@ from lib.config import SimpleConfig
 
 @dataclass
 class ModelConfig(SimpleConfig):
-    input_feature_type: str = 'Occupation'  # Occupation or Coordinate
+    input_feature_type: str = 'Occupation'
     minkowski_algorithm: str = 'DEFAULT'  # DEFAULT, SPEED_OPTIMIZED, MEMORY_EFFICIENT
     basic_block_type: str = 'InceptionResBlock'  # ResBlock or InceptionResBlock
     conv_region_type: str = 'HYPER_CUBE'  # HYPER_CUBE or HYPER_CROSS
@@ -20,10 +20,13 @@ class ModelConfig(SimpleConfig):
 
     hyperprior: str = 'None'
     hyper_compressed_channels: int = 8
-    hyper_bpp_loss_factor: float = 0.2
     hyper_encoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
     hyper_decoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
     prior_indexes_range: Tuple[int, ...] = (64, )
+
+    lossless_compression_based: bool = False
+    lossless_coder_channels: Tuple[int, ...] = (16, 16, 16, 16)
+    lossless_prior_indexes_range: Tuple[int, ...] = (4, 4)
 
     reconstruct_loss_type: str = 'BCE'  # BCE or Dist or Focal
     dist_upper_bound = 2.0
@@ -31,7 +34,6 @@ class ModelConfig(SimpleConfig):
     adaptive_pruning_num_scaler: float = 1.0
     bpp_loss_factor: float = 0.2
     reconstruct_loss_factor: float = 1.0
-    bpp_target: float = 0.0
 
     # only for test phase:
     chamfer_dist_test_phase: bool = False

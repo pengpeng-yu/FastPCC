@@ -10,6 +10,8 @@ from compressai import ans
 
 from .utils import quantization_offset
 
+from lib.torch_utils import minkowski_tensor_wrapped_fn
+
 
 def batched_pmf_to_quantized_cdf(pmf: torch.Tensor,
                                  overflow: torch.Tensor,
@@ -48,14 +50,14 @@ class DistributionQuantizedCDFTable(nn.Module):
     """
     def __init__(self,
                  base: Distribution,
-                 tail_mass: float = 2 ** -8,
                  init_scale: int = 10,
+                 tail_mass: float = 2 ** -8,
                  cdf_precision: int = 16,
                  ):
         super(DistributionQuantizedCDFTable, self).__init__()
         self.base = base
-        self.tail_mass = tail_mass
         self.init_scale = init_scale
+        self.tail_mass = tail_mass
         self.cdf_precision = cdf_precision
 
         self.register_buffer('cached_cdf_table', torch.tensor([], dtype=torch.int32))
@@ -396,20 +398,22 @@ class ContinuousEntropyModelBase(nn.Module):
     def __init__(self,
                  prior: Distribution,
                  coding_ndim: int,
-                 tail_mass: float = 2 ** -8,
+                 additive_uniform_noise: bool = True,
                  init_scale: int = 10,
+                 tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16):
         super(ContinuousEntropyModelBase, self).__init__()
         # "self.prior" is supposed to be able to generate
         # flat quantized CDF table used by range coder.
         self.prior: DistributionQuantizedCDFTable = DistributionQuantizedCDFTable(
             base=prior,
-            tail_mass=tail_mass,
             init_scale=init_scale,
+            tail_mass=tail_mass,
             cdf_precision=range_coder_precision
         )
         self.coding_ndim = coding_ndim
         self.range_coder_precision = range_coder_precision
+        self.additive_uniform_noise = additive_uniform_noise
         self.range_encoder = ans.RansEncoder()
         self.range_decoder = ans.RansDecoder()
 
@@ -417,17 +421,25 @@ class ContinuousEntropyModelBase(nn.Module):
             raise NotImplementedError
 
     def perturb(self, x: torch.Tensor) -> torch.Tensor:
-        if not hasattr(self, "_noise"):
-            setattr(self, "_noise", torch.empty(x.shape, dtype=torch.float, device=x.device))
-        self._noise.resize_(x.shape)
-        self._noise.uniform_(-0.5, 0.5)
-        return x + self._noise
+        if self.additive_uniform_noise:
+            if not hasattr(self, "_noise"):
+                setattr(self, "_noise", torch.empty(x.shape, dtype=torch.float, device=x.device))
+            self._noise.resize_(x.shape)
+            self._noise.uniform_(-0.5, 0.5)
+            x = x + self._noise
+        return x
 
     @torch.no_grad()
-    def quantize(self, x: torch.Tensor, offset=None) -> torch.Tensor:
+    @minkowski_tensor_wrapped_fn({1: [0, 1]})
+    def quantize(self, x: torch.Tensor, offset=None, return_dequantized: bool = False) \
+            -> Tuple[torch.Tensor, torch.Tensor]:
         if offset is None: offset = quantization_offset(self.prior.base)
         x -= offset
-        return torch.round(x).to(torch.int32)
+        torch.round_(x)
+        quantized_x = x.to(torch.int32)
+        if return_dequantized is True:
+            x += offset
+        return quantized_x, x
 
     @torch.no_grad()
     def dequantize(self, x: torch.Tensor, offset=None) -> torch.Tensor:

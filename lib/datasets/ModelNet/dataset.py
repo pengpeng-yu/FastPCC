@@ -13,7 +13,7 @@ except ImportError: pass
 
 from lib.data_utils import PCData, pc_data_collate_fn
 from lib.datasets.ModelNet.dataset_config import DatasetConfig
-from lib.data_utils import OFFIO, o3d_coords_from_triangle_mesh, normalize_coords
+from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coords
 
 
 class ModelNetDataset(torch.utils.data.Dataset):
@@ -99,7 +99,6 @@ class ModelNetDataset(torch.utils.data.Dataset):
         # for modelnet40_normal_resampled
         if file_path.endswith('.txt'):
             point_cloud = np.loadtxt(file_path, dtype=np.float32, delimiter=',')
-            # sample
             assert point_cloud.shape[0] >= self.cfg.input_points_num
             if point_cloud.shape[0] > self.cfg.input_points_num:
                 if self.cfg.sample_method == 'uniform':
@@ -113,22 +112,12 @@ class ModelNetDataset(torch.utils.data.Dataset):
             if self.cfg.with_normal_channel: raise NotImplementedError
 
             # mesh -> points
-            point_cloud = o3d_coords_from_triangle_mesh(file_path,
-                                                        self.cfg.input_points_num,
-                                                        self.cfg.mesh_sample_point_method,)
-
-            # # mesh -> voxel points
-            # # could produce strange result if surface is not closed
-            # vertices, faces = OFFIO.load_by_np(file_path)
-            #
-            # vmax = vertices.max(0, keepdims=True)
-            # vmin = vertices.min(0, keepdims=True)
-            # vertices = (vertices - vmin) * (self.cfg.resolution / (vmax - vmin).max())
-            # mesh_object = pyvista.PolyData(vertices, faces)
-            #
-            # point_cloud = pyvista.voxelize(mesh_object, density=1, check_surface=False)
-            # point_cloud = np.asarray(point_cloud.points.astype(np.int32))
-            # voxelized_flag = True
+            point_cloud = o3d_coords_sampled_from_triangle_mesh(
+                file_path,
+                self.cfg.input_points_num,
+                self.cfg.mesh_sample_point_method,
+                dtype=np.float32
+            )
 
         else:
             raise NotImplementedError
@@ -157,10 +146,11 @@ class ModelNetDataset(torch.utils.data.Dataset):
                 xyz *= (self.cfg.resolution // 2)
             else:
                 xyz *= self.cfg.resolution
+
+            unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True)
+            xyz = xyz[unique_map]
             if self.cfg.with_normal_channel:
-                xyz, normals = ME.utils.sparse_quantize(xyz, normals)
-            else:
-                xyz = ME.utils.sparse_quantize(xyz)
+                normals = normals[unique_map]
 
         # classes
         if self.cfg.with_classes:
@@ -169,8 +159,8 @@ class ModelNetDataset(torch.utils.data.Dataset):
             cls_idx = None
 
         # cache and return
-        return_obj = PCData(xyz=xyz,
-                            normals=normals,
+        return_obj = PCData(xyz=torch.from_numpy(xyz),
+                            normals=torch.from_numpy(normals),
                             class_idx=cls_idx,
                             file_path=file_path if self.cfg.with_file_path else None,
                             resolution=self.cfg.resolution if self.cfg.with_resolution else None)
@@ -192,7 +182,7 @@ if __name__ == '__main__':
     config = DatasetConfig()
     config.input_points_num = 200000
     config.with_classes = False
-    config.with_normal_channel = False
+    config.with_normal_channel = True
     config.with_file_path = True
     config.resolution = 128
     config.root = 'datasets/modelnet40_manually_aligned'

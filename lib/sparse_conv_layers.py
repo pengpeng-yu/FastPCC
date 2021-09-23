@@ -1,16 +1,110 @@
-from typing import Tuple, List, Dict, Union, Optional, Any
+from typing import Tuple, List, Dict, Union, Callable
 
 import torch
-import torch.nn as nn
 from pytorch3d.ops import knn_points
 import MinkowskiEngine as ME
+from torch import nn as nn
 
 from lib.metrics.misc import precision_recall
 
-MConv = ME.MinkowskiConvolution
-MReLU = ME.MinkowskiReLU
-MGenConvTranspose = ME.MinkowskiGenerativeConvolutionTranspose
-MConvTranspose = ME.MinkowskiConvolutionTranspose
+
+class BaseConvBlock(nn.Module):
+    def __init__(self,
+                 conv_class: Callable,
+                 in_channels, out_channels, kernel_size, stride,
+                 dilation=1, dimension=3,
+                 region_type: str = 'HYPER_CUBE',
+                 bn: bool = False,
+                 act: Union[str, nn.Module, None] = 'relu'):
+        super(BaseConvBlock, self).__init__()
+
+        self.region_type = getattr(ME.RegionType, region_type)
+
+        self.conv = conv_class(
+            in_channels, out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            dilation=dilation,
+            bias=not bn,
+            kernel_generator=ME.KernelGenerator(
+                kernel_size,
+                stride,
+                dilation,
+                region_type=self.region_type,
+                dimension=dimension),
+            dimension=dimension
+        )
+        self.bn = ME.MinkowskiBatchNorm(out_channels) if bn else None
+        if isinstance(act, nn.Module):
+            self.act = act
+        if act is None or act == 'None':
+            self.act = None
+        elif act == 'relu':
+            self.act = ME.MinkowskiReLU(inplace=True)
+        elif act.startswith('leaky_relu'):
+            self.act = ME.MinkowskiLeakyReLU(
+                negative_slope=float(act.split('(', 1)[1].split(')', 1)[0]),
+                inplace=True)
+        else: raise NotImplementedError
+
+    def forward(self, x, *args, **kwargs):
+        x = self.conv(x, *args, **kwargs)
+        if self.bn is not None:
+            x = self.bn(x)
+        if self.act is not None:
+            x = self.act(x)
+        return x
+
+    def __repr__(self):
+        return f'{str(self.conv).replace("Minkowski", "ME", 1)}, ' \
+               f'region_type={self.region_type.name}, ' \
+               f'bn={self.bn is not None}, ' \
+               f'act={str(self.act).replace("Minkowski", "ME", 1).rstrip("()")}'
+
+
+class ConvBlock(BaseConvBlock):
+    def __init__(self,
+                 in_channels, out_channels, kernel_size, stride,
+                 dilation=1, dimension=3,
+                 region_type: str = 'HYPER_CUBE',
+                 bn: bool = False,
+                 act: Union[str, nn.Module, None] = 'relu'):
+        super(ConvBlock, self).__init__(
+            ME.MinkowskiConvolution,
+            in_channels, out_channels, kernel_size, stride,
+            dilation, dimension,
+            region_type, bn, act
+        )
+
+
+class ConvTransBlock(BaseConvBlock):
+    def __init__(self,
+                 in_channels, out_channels, kernel_size, stride,
+                 dilation=1, dimension=3,
+                 region_type: str = 'HYPER_CUBE',
+                 bn: bool = False,
+                 act: Union[str, nn.Module, None] = 'relu'):
+        super(ConvTransBlock, self).__init__(
+            ME.MinkowskiConvolutionTranspose,
+            in_channels, out_channels, kernel_size, stride,
+            dilation, dimension,
+            region_type, bn, act
+        )
+
+
+class GenConvTransBlock(BaseConvBlock):
+    def __init__(self,
+                 in_channels, out_channels, kernel_size, stride,
+                 dilation=1, dimension=3,
+                 region_type: str = 'HYPER_CUBE',
+                 bn: bool = False,
+                 act: Union[str, nn.Module, None] = 'relu'):
+        super(GenConvTransBlock, self).__init__(
+            ME.MinkowskiGenerativeConvolutionTranspose,
+            in_channels, out_channels, kernel_size, stride,
+            dilation, dimension,
+            region_type, bn, act
+        )
 
 
 class GenerativeUpsampleMessage:
@@ -36,10 +130,13 @@ class GenerativeUpsample(nn.Module):
                  upsample_block: nn.Module,
                  classify_block: nn.Module,
                  mapping_target_kernel_size=1,
+                 mapping_target_region_type='HYPER_CUBE',
+
                  loss_type='BCE',
                  dist_upper_bound=2.0,
                  is_last_layer=False,
-                 require_metric_during_testing=False,
+
+                 requires_metric_during_testing=False,
                  use_cached_feature=False,
                  cached_feature_fusion_method='Cat'):
         super(GenerativeUpsample, self).__init__()
@@ -52,14 +149,15 @@ class GenerativeUpsample(nn.Module):
         self.classify_block = classify_block
 
         self.mapping_target_kernel_size = mapping_target_kernel_size
+        self.mapping_target_region_type = getattr(ME.RegionType, mapping_target_region_type)
+
         self.loss_type = loss_type
         self.square_dist_upper_bound = dist_upper_bound ** 2
         self.is_last_layer = is_last_layer
-        self.require_metric_during_testing = require_metric_during_testing
+        self.requires_metric_during_testing = requires_metric_during_testing
         self.use_cached_feature = use_cached_feature
         self.cached_feature_fusion_method = cached_feature_fusion_method
 
-        # It will consume huge memory if too many unnecessary points are retained after pruning
         self.pruning = ME.MinkowskiPruning()
 
     def forward(self, message: GenerativeUpsampleMessage):
@@ -108,7 +206,7 @@ class GenerativeUpsample(nn.Module):
                 message.fea = None
 
         elif not self.training:
-            if self.require_metric_during_testing:
+            if self.requires_metric_during_testing:
                 keep_target = self.get_target(fea, pred, message.target_key, False)
                 message.cached_metric_list.append(
                     precision_recall(pred=keep, tgt=keep_target))
@@ -167,7 +265,7 @@ class GenerativeUpsample(nn.Module):
                    fea: ME.SparseTensor,
                    pred: ME.SparseTensor,
                    target_key: ME.CoordinateMapKey,
-                   require_loss_target: bool) \
+                   requires_loss_target: bool) \
             -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         cm = fea.coordinate_manager
 
@@ -175,12 +273,12 @@ class GenerativeUpsample(nn.Module):
         kernel_map = cm.kernel_map(fea.coordinate_map_key,
                                    strided_target_key,
                                    kernel_size=self.mapping_target_kernel_size,
-                                   region_type=1)
+                                   region_type=self.mapping_target_region_type)
         keep_target = torch.zeros(fea.shape[0], dtype=torch.bool, device=fea.device)
         for _, curr_in in kernel_map.items():
             keep_target[curr_in[0].type(torch.long)] = 1
 
-        if require_loss_target:
+        if requires_loss_target:
             if self.loss_type == 'BCE':
                 loss_target = keep_target
 
@@ -217,15 +315,16 @@ class GenerativeUpsample(nn.Module):
 
 def generative_upsample_t():
     class DecoderBlock(nn.Module):
-        def __init__(self, mapping_target_kernel_size=1):
+        def __init__(self, **kwargs):
             super(DecoderBlock, self).__init__()
-            upsample_block = nn.Sequential(MGenConvTranspose(16, 16, 2, 2, bias=True, dimension=3),
-                                           MReLU(inplace=True),
-                                           MConv(16, 16, 3, 1, bias=True, dimension=3),
-                                           MReLU(inplace=True))
-            classify_block = MConv(16, 1, 3, 1, bias=True, dimension=3)
-            self.generative_upsample = GenerativeUpsample(upsample_block, classify_block,
-                                                          mapping_target_kernel_size=mapping_target_kernel_size)
+            upsample_block = nn.Sequential(
+                GenConvTransBlock(16, 16, 2, 2, bn=False, act='relu'),
+                ConvBlock(16, 16, 3, 1, bn=False, act='relu')
+            )
+            classify_block = ConvBlock(16, 1, 3, 1, bn=False, act=None)
+            self.generative_upsample = GenerativeUpsample(
+                upsample_block, classify_block, **kwargs
+            )
 
         def forward(self, x: GenerativeUpsampleMessage):
             return self.generative_upsample(x)
@@ -233,28 +332,27 @@ def generative_upsample_t():
     class Compressor(nn.Module):
         def __init__(self):
             super(Compressor, self).__init__()
-            self.encoder = nn.Sequential(MConv(1, 8, 3, 1, dimension=3),
-                                         MReLU(inplace=True),
-                                         MConv(8, 16, 2, 2, dimension=3),
-                                         MReLU(inplace=True),
-                                         MConv(16, 16, 3, 1, dimension=3),
-                                         MReLU(inplace=True),
-                                         MConv(16, 16, 2, 2, dimension=3),
-                                         MReLU(inplace=True),
-                                         MConv(16, 16, 3, 1, dimension=3),
-                                         MReLU(inplace=True),
-                                         MConv(16, 16, 2, 2, dimension=3),
-                                         MReLU(inplace=True),
-                                         MConv(16, 16, 3, 1, dimension=3))
+            self.encoder = nn.Sequential(
+                ConvBlock(1, 8, 3, 1),
+                ConvBlock(8, 16, 2, 2),
+                ConvBlock(16, 16, 3, 1),
+                ConvBlock(16, 16, 2, 2),
+                ConvBlock(16, 16, 3, 1),
+            )
 
-            self.decoder = nn.Sequential(DecoderBlock(),
-                                         DecoderBlock())
+            self.decoder = nn.Sequential(
+                DecoderBlock(), DecoderBlock()
+            )
 
         def forward(self, xyz):
             if self.training:
                 encoded_xyz = self.encoder(xyz)
-                out = self.decoder(GenerativeUpsampleMessage(fea=encoded_xyz,
-                                                             target_key=xyz.coordinate_map_key))
+                out = self.decoder(
+                    GenerativeUpsampleMessage(
+                        fea=encoded_xyz,
+                        target_key=xyz.coordinate_map_key
+                    )
+                )
                 return out
             else:
                 return None

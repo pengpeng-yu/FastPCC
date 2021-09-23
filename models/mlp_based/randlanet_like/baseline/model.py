@@ -132,14 +132,14 @@ class PCC(nn.Module):
             return loss_dict
 
         else:
-            fea_recon, loss_dict, compressed_strings = self.entropy_bottleneck(feature)
+            fea_recon, compressed_strings, coding_batch_shape = self.entropy_bottleneck(feature)
             fea_recon = fea_recon / self.cfg.bottleneck_scaler
             decoder_msg: PointLayerMessage = self.decoder(
                 PointLayerMessage(xyz=encoder_msg.xyz, feature=fea_recon)
             )
             pc_recon = decoder_msg.cached_feature[-1]
 
-            return pc_recon, loss_dict['bits_loss'], compressed_strings
+            return pc_recon, compressed_strings
 
 
 def main_t():
