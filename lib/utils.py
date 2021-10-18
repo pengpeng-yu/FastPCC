@@ -5,25 +5,18 @@ import datetime
 import numpy as np
 
 
-def make_new_dirs(dir_path, logger) -> None:
+def make_new_dirs(dir_path, logger):
     if os.path.exists(dir_path):
         logger.warning('folder "{}" ready exists.'.format(dir_path))
-        for obj_name in os.listdir(dir_path):
-            obj_path = os.path.join(dir_path, obj_name)
-            if os.path.isfile(obj_path):
-                new_name = obj_name[:obj_name.rfind('.')] + '_bak' + obj_name[obj_name.rfind('.'):]
-            else:
-                new_name = obj_name + '_bak'
-            new_path = os.path.join(dir_path, new_name)
-            os.rename(obj_path, new_path)
-            logger.warning(f'rename {obj_path} as {new_path}')
-    else:
-        os.makedirs(dir_path)
-        logger.info('make dirs "{}"'.format(dir_path))
+        target_path = autoindex_obj(str(dir_path) + '_bak<autoindex>')
+        os.rename(dir_path, target_path)
+        logger.warning(f'rename {dir_path} as {target_path}')
+    os.makedirs(dir_path)
+    logger.info('make dirs "{}"'.format(dir_path))
 
 
 def autoindex_obj(obj_path: str) -> str:
-    dir_path, obj_name = os.path.split(obj_path)
+    dir_path, obj_name = os.path.split(os.path.abspath(obj_path))
     notations = {
         '<maxindex>': lambda x: max(x + [0]),
         '<minindex>': lambda x: min(x + [0]),
@@ -35,12 +28,12 @@ def autoindex_obj(obj_path: str) -> str:
         return obj_path
     for notation in notations:
         if obj_name.find(notation) != -1:
-            pattern = obj_name.replace(notation, '([0-9]+)')
+            pattern = re.compile(obj_name.replace(notation, '([0-9]+)') + '$')
             objects_exist = os.listdir(dir_path)
             indexes_exist = []
 
             for name in objects_exist:
-                match_res = re.match(pattern, name)
+                match_res = pattern.match(name)
                 if match_res:
                     indexes_exist.append(int(match_res.group(1)))
 

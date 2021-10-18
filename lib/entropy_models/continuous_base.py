@@ -14,13 +14,11 @@ from lib.torch_utils import minkowski_tensor_wrapped_fn
 
 
 def batched_pmf_to_quantized_cdf(pmf: torch.Tensor,
-                                 overflow: torch.Tensor,
                                  pmf_length: torch.Tensor,
                                  max_length: int,
                                  entropy_coder_precision: int = 16):
     """
     :param pmf: (channels, max_length) float
-    :param overflow: (channels, ) float
     :param pmf_length: (channels, ) int32
     :param max_length: max length of pmf, int
     :param entropy_coder_precision
@@ -28,10 +26,13 @@ def batched_pmf_to_quantized_cdf(pmf: torch.Tensor,
     """
     cdf = torch.zeros((len(pmf_length), max_length + 2),
                       dtype=torch.int32, device=pmf.device)
-    for i, p in enumerate(pmf):
-        prob = torch.cat((p[: pmf_length[i]], overflow[i, None]), dim=0)
-        _cdf = _pmf_to_quantized_cdf(prob.tolist(), entropy_coder_precision)
-        cdf[i, : len(_cdf)] = torch.tensor(_cdf, dtype=torch.int32)
+    for i in range(len(pmf)):
+        p = pmf[i][: pmf_length[i]]
+        overflow = (1 - torch.sum(p)).clip(0)
+        p = p.tolist()
+        p.append(overflow.item())
+        c = _pmf_to_quantized_cdf(p, entropy_coder_precision)
+        cdf[i, : len(c)] = torch.tensor(c, dtype=torch.int32)
     return cdf
 
 
@@ -240,6 +241,8 @@ class DistributionQuantizedCDFTable(nn.Module):
             # maxima > upper_tail - offset
             minima = torch.floor(lower_tail - offset).to(torch.int32)
             maxima = torch.ceil(upper_tail - offset).to(torch.int32)
+            # For stability.
+            maxima.clip_(minima)
 
             # PMF starting positions and lengths.
             pmf_start = minima + offset
@@ -263,12 +266,9 @@ class DistributionQuantizedCDFTable(nn.Module):
 
             # Collapse batch dimensions of distribution.
             pmf = pmf.reshape(max_length, -1).T
-            overflow = (1 - pmf.sum(dim=1)).clamp_(min=0)
             pmf_length = pmf_length.reshape(-1)
 
-            cdf = batched_pmf_to_quantized_cdf(pmf, overflow,  # TODO: check
-                                               pmf_length, max_length,
-                                               self.cdf_precision)
+            cdf = batched_pmf_to_quantized_cdf(pmf, pmf_length, max_length, self.cdf_precision)
             cdf_length = pmf_length + 2
             cdf_offset = minima.reshape(-1)
 
@@ -398,7 +398,6 @@ class ContinuousEntropyModelBase(nn.Module):
     def __init__(self,
                  prior: Distribution,
                  coding_ndim: int,
-                 additive_uniform_noise: bool = True,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16):
@@ -413,7 +412,6 @@ class ContinuousEntropyModelBase(nn.Module):
         )
         self.coding_ndim = coding_ndim
         self.range_coder_precision = range_coder_precision
-        self.additive_uniform_noise = additive_uniform_noise
         self.range_encoder = ans.RansEncoder()
         self.range_decoder = ans.RansDecoder()
 
@@ -421,12 +419,11 @@ class ContinuousEntropyModelBase(nn.Module):
             raise NotImplementedError
 
     def perturb(self, x: torch.Tensor) -> torch.Tensor:
-        if self.additive_uniform_noise:
-            if not hasattr(self, "_noise"):
-                setattr(self, "_noise", torch.empty(x.shape, dtype=torch.float, device=x.device))
-            self._noise.resize_(x.shape)
-            self._noise.uniform_(-0.5, 0.5)
-            x = x + self._noise
+        if not hasattr(self, "_noise"):
+            setattr(self, "_noise", torch.empty(x.shape, dtype=torch.float, device=x.device))
+        self._noise.resize_(x.shape)
+        self._noise.uniform_(-0.5, 0.5)
+        x = x + self._noise
         return x
 
     @torch.no_grad()

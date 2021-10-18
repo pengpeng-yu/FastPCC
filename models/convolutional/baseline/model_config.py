@@ -25,8 +25,11 @@ class ModelConfig(SimpleConfig):
     prior_indexes_range: Tuple[int, ...] = (64, )
 
     lossless_compression_based: bool = False
-    lossless_coder_channels: Tuple[int, ...] = (16, 16, 16, 16)
-    lossless_prior_indexes_range: Tuple[int, ...] = (4, 4)
+    lossless_shared_coder: bool = True
+    lossless_skip_connection: bool = True
+    lossless_coder_channels: Tuple[int, ...] = (64, 64, 64, 64)
+    lossless_prior_indexes_range: Tuple[int, ...] = (8, 8, 8, 8)
+    lossless_decoder_basic_block_num: int = 3
 
     reconstruct_loss_type: str = 'BCE'  # BCE or Dist or Focal
     dist_upper_bound = 2.0
@@ -34,6 +37,7 @@ class ModelConfig(SimpleConfig):
     adaptive_pruning_num_scaler: float = 1.0
     bpp_loss_factor: float = 0.2
     reconstruct_loss_factor: float = 1.0
+    warmup_steps: int = 0
 
     # only for test phase:
     chamfer_dist_test_phase: bool = False

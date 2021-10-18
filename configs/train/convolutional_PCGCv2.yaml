@@ -11,6 +11,7 @@ model:
   reconstruct_loss_type: 'BCE'
   adaptive_pruning: True
   adaptive_pruning_num_scaler: 1.0
+  bpp_loss_factor: 0.2
 
 
 train:
@@ -22,7 +23,7 @@ train:
   num_workers: 4
   optimizer: [Adam, Adam, SGD]
   momentum: 0.9
-  weight_decay: 0.0001
+  weight_decay: [0.0001, 0.0001, 0]
   max_grad_norm: [1.0, 1.0, 0.0]
 
   learning_rate: [0.0001, 0.0001, 0.0001]
@@ -42,25 +43,13 @@ train:
     random_rotation: True
     with_resolution: True
 
-
 test:
-  device: '3'
   batch_size: 1
   num_workers: 2
   save_results: True
   dataset_path:
-    'lib.datasets.PlyVoxel'
+    'lib.datasets.PlyVoxel.Base'
   log_frequency: 1
   dataset:
-    root: ['datasets/MVUB', 'datasets/8iVFBv2', 'datasets/Owlii']
-    filelist_path: 'list.txt'
-    file_path_pattern: '**/*.ply'
-
-    with_color: False
-    with_normal: False
-    with_file_path: True
     with_resolution: True
     with_ori_resolution: True
-
-    ori_resolution: [512, 1024, 2048]
-    resolution: [512, 1024, 2048]

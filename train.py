@@ -75,19 +75,14 @@ def main():
             else:
                 logger.info(f'resumed tensorboard log file(s) in {last_tb_dir}')
 
-        tb_writer = SummaryWriter(tb_logdir)
+        tb_writer = SummaryWriter(str(tb_logdir))
         tb_program = program.TensorBoard()
-        tb_ports = ['6006', '6007', '6008']
-        for tb_port in tb_ports:
-            try:
-                tb_program.configure(argv=[None, '--logdir', str(tb_logdir), '--port', tb_port])
-                tb_url = tb_program.launch()
-            except Exception as e:
-                logger.warning(f'fail to launch Tensorboard at http://localhost:{int(tb_port)}')
-            else: break
-        else:
-            logger.error(f'fail to launch Tensorboard at port{tb_ports}')
-            return
+        try:
+            tb_program.configure(argv=[None, '--logdir', str(tb_logdir)])
+            tb_url = tb_program.launch()
+        except Exception as e:
+            logger.error(f'fail to launch Tensorboard')
+            raise e
         logger.info(f'TensorBoard {tensorboard.__version__} at {tb_url}')
 
         train(cfg, local_rank, logger, tb_writer, run_dir, ckpts_dir)
@@ -126,16 +121,16 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     except Exception as e:
         raise ImportError(*e.args)
 
-    params_divisions: List[Callable[[str], bool]] = [
-        lambda s: not s.endswith("aux_param"),
-        lambda s: s.endswith("aux_param")
-    ]
-    if hasattr(Model, 'params_divisions'):
-        params_divisions = Model.params_divisions
-    assert params_divisions != []
-    assert len(params_divisions) == len(cfg.train.optimizer)
-
     model = Model(cfg.model)
+
+    if hasattr(model, 'params_divider'):
+        params_divider = model.params_divider
+    else:
+        if len(cfg.train.optimizer) == 2:
+            params_divider: Callable[[str], int] = lambda s: 0 if not s.endswith("aux_param") else 1
+        else:
+            assert len(cfg.train.optimizer) == 1
+            params_divider: Callable[[str], int] = lambda s: 0
 
     if device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() == 1 and False:  # disabled
         model = model.to(device)
@@ -150,7 +145,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         logger.info('using DataParallel')
     elif device.type != 'cpu' and global_rank != -1:
         logger.info('using DistributedDataParallel')
-        model = DDP(model.to(device), device_ids=[local_rank], output_device=local_rank)
+        model = DDP(model.to(device), device_ids=[local_rank], output_device=local_rank,
+                    find_unused_parameters=cfg.train.find_unused_parameters)
         if not cfg.train.shuffle:
             logger.warning('ignore cfg.train.shuffle == False due to DDP mode')
     else: logger.info('using CPU')
@@ -187,25 +183,12 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     steps_one_epoch = len(dataloader)
 
     # Initialize optimizers and schedulers
-    params_list: List[List[torch.nn.Parameter]] = [[] for _ in range(len(params_divisions))]
+    params_list: List[List[torch.nn.Parameter]] = [[] for _ in range(len(cfg.train.optimizer))]
 
     for param_name, param in model.named_parameters():
-        find_division = False
-        last_division_idx = -1
-
-        for idx, division_fn in enumerate(params_divisions):
-            if division_fn(param_name) is True:
-                if find_division is True:
-                    logger.warning(f'Parameter "{param_name}" is contained in both '
-                                   f'division {last_division_idx} and '
-                                   f'division {idx}. Is this intentional?')
-                find_division = True
-                last_division_idx = idx
-                params_list[idx].append(param)
-
-        if find_division is False:
-            logger.warning(f'Parameter "{param_name}" is not found in any division. '
-                           f'Is this intentional?')
+        division_idx = params_divider(param_name)
+        assert division_idx >= 0
+        params_list[division_idx].append(param)
 
     optimizer_list = []
     scheduler_list = []
@@ -213,6 +196,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     def get_optimizer_class(name: str, momentum: float):
         if name == 'Adam':
             return partial(torch.optim.Adam, betas=(momentum, 0.999))
+        elif name == 'AdamW':
+            return partial(torch.optim.AdamW, betas=(momentum, 0.999))
         elif name == 'SGD':
             return partial(torch.optim.SGD, momentum=momentum, nesterov=momentum != 0.0)
         else:
@@ -318,15 +303,19 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 batch_data = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                               for k, v in batch_data.items()}
             elif isinstance(batch_data, SampleData):
+                batch_data.training_step = global_step
                 batch_data.to(device=device, non_blocking=True)
             else: raise NotImplementedError
 
             if cfg.train.amp:
                 with amp.autocast():
                     loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
-                    loss = loss_dict['loss']
 
-                scaler.scale(loss).backward()
+                for idx, optimizer in enumerate(optimizer_list):
+                    if optimizer is not None:
+                        optimizer.zero_grad()
+
+                scaler.scale(loss_dict['loss']).backward()
 
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
@@ -341,8 +330,12 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
             else:
                 loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
-                loss = loss_dict['loss']
-                loss.backward()
+
+                for idx, optimizer in enumerate(optimizer_list):
+                    if optimizer is not None:
+                        optimizer.zero_grad()
+
+                loss_dict['loss'].backward()
 
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
@@ -352,10 +345,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                                 cfg.train.max_grad_norm[idx]
                             )
                         optimizer.step()
-
-            for idx, optimizer in enumerate(optimizer_list):
-                if optimizer is not None:
-                    optimizer.zero_grad()
 
             # logging
             time_this_step = time.time() - start_time

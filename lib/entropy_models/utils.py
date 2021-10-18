@@ -18,11 +18,17 @@ class LowerBoundFunction(torch.autograd.Function):
         return pass_through_if * grad_output, None
 
 
-def lower_bound(x: torch.Tensor, bound: Union[int, float, torch.Tensor]) \
+def lower_bound(x: torch.Tensor, bound: Union[int, float, torch.Tensor],
+                gradient: str = "identity_if_towards") \
         -> torch.Tensor:
     if not isinstance(bound, torch.Tensor):
         bound = torch.tensor([bound], dtype=x.dtype, device=x.device)
-    return LowerBoundFunction.apply(x, bound)
+    if gradient == "identity_if_towards":
+        return LowerBoundFunction.apply(x, bound)
+    elif gradient == "disconnected":
+        return torch.maximum(x, bound)
+    else:
+        raise NotImplementedError
 
 
 class UpperBoundFunction(torch.autograd.Function):
@@ -38,11 +44,17 @@ class UpperBoundFunction(torch.autograd.Function):
         return pass_through_if * grad_output, None
 
 
-def upper_bound(x: torch.Tensor, bound: Union[int, float, torch.Tensor]) \
+def upper_bound(x: torch.Tensor, bound: Union[int, float, torch.Tensor],
+                gradient: str = "identity_if_towards") \
         -> torch.Tensor:
     if not isinstance(bound, torch.Tensor):
         bound = torch.tensor([bound], dtype=x.dtype, device=x.device)
-    return UpperBoundFunction.apply(x, bound)
+    if gradient == "identity_if_towards":
+        return UpperBoundFunction.apply(x, bound)
+    elif gradient == "disconnected":
+        return torch.minimum(x, bound)
+    else:
+        raise NotImplementedError
 
 
 @torch.no_grad()

@@ -13,6 +13,7 @@ class TrainConfig(SimpleConfig):
     device: str = '0'  # 0 or 0,1,2 or cpu
     more_reproducible: bool = False
     amp: bool = True
+    find_unused_parameters: bool = False
     batch_size: int = 2
     shuffle: bool = True
     num_workers: int = 4

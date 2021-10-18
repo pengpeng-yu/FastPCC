@@ -17,7 +17,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                  index_ranges: Tuple[int, ...],
                  parameter_fns: Dict[str, Callable[[torch.Tensor], Any]],
                  coding_ndim: int,
-                 additive_uniform_noise: bool = True,
+                 indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
@@ -45,6 +45,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         self.prior_fn = prior_fn
         self.parameter_fns = parameter_fns
         self.index_ranges = index_ranges
+        self.indexes_bound_gradient = indexes_bound_gradient
         self.quantize_indexes = quantize_indexes
         range_coding_prior_indexes = self.make_range_coding_prior()
         with torch.no_grad():
@@ -53,7 +54,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         super(ContinuousIndexedEntropyModel, self).__init__(
             prior=prior,
             coding_ndim=coding_ndim,
-            additive_uniform_noise=additive_uniform_noise,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
@@ -90,7 +90,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         """
         Return indexes within bounds.
         """
-        indexes = lower_bound(indexes, 0)
+        indexes = lower_bound(indexes, 0, self.indexes_bound_gradient)
         if not self.additional_indexes_dim:
             bounds = torch.tensor([self.index_ranges[0] - 1],
                                   dtype=torch.int32, device=indexes.device)
@@ -99,11 +99,13 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                                   dtype=torch.int32, device=indexes.device)
             bounds_shape = [1] * (indexes.ndim - 1) + [len(self.index_ranges)]
             bounds = bounds.reshape(bounds_shape)
-        indexes = upper_bound(indexes, bounds)
+        indexes = upper_bound(indexes, bounds, self.indexes_bound_gradient)
         return indexes
 
     @minkowski_tensor_wrapped_fn({1: 0, 2: None})
-    def forward(self, x: torch.Tensor, indexes: torch.Tensor) \
+    def forward(self, x: torch.Tensor, indexes: torch.Tensor,
+                return_aux_loss: bool = True,
+                additive_uniform_noise: bool = True) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, List[bytes]]]:
         """
@@ -115,10 +117,16 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         if self.training:
             with torch.no_grad():
                 self.prior.update_base(self.make_prior(self.range_coding_prior_indexes))
-            x_perturbed = self.perturb(x)
+            if additive_uniform_noise is True:
+                x_perturbed = self.perturb(x)
+            else:
+                x_perturbed = x
             log_probs = prior.log_prob(x_perturbed)
-            return x_perturbed, {'bits_loss': log_probs.sum() / (-math.log(2)),
-                                 'aux_loss': self.prior.aux_loss()}
+            loss_dict = {'bits_loss': log_probs.sum() / (-math.log(2))}
+            if return_aux_loss:
+                loss_dict['aux_loss'] = self.prior.aux_loss()
+            return x_perturbed, loss_dict
+
         else:
             strings, _ = self.compress(x, indexes)
             decompressed = self.decompress(strings, indexes, x.device)
@@ -244,7 +252,6 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
                  num_scales: int,
                  scale_fn: Dict[str, Callable[..., Union[int, float, torch.Tensor]]],
                  coding_ndim: int,
-                 additive_uniform_noise: bool = True,
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
@@ -254,18 +261,21 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
             index_ranges=(num_scales,),
             parameter_fns={'loc': lambda _: 0, 'scale': scale_fn},
             coding_ndim=coding_ndim,
-            additive_uniform_noise=additive_uniform_noise,
             quantize_indexes=quantize_indexes,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
         )
 
-    def forward(self, x: torch.Tensor, scale_indexes: torch.Tensor, loc=None):
+    def forward(self, x: torch.Tensor, scale_indexes: torch.Tensor, loc=None,
+                return_aux_loss: bool = True,
+                additive_uniform_noise: bool = True) \
+            -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
+                     Tuple[torch.Tensor, List[bytes]]]:
         if loc is not None:
             x = x - loc
         values, *ret = super(LocationScaleIndexedEntropyModel, self).forward(
-            x, indexes=scale_indexes)
+            x, scale_indexes, return_aux_loss, additive_uniform_noise)
         if loc is not None:
             values = values + loc
         return (values, *ret)
@@ -279,7 +289,7 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
     @torch.no_grad()
     def decompress(self, strings, indexes, loc=None):
         values = super(LocationScaleIndexedEntropyModel, self).decompress(
-            strings, indexes=indexes)
+            strings, indexes)
         if loc is not None:
             values += loc
         return values

@@ -18,7 +18,6 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
     def __init__(self,
                  prior: Distribution,
                  coding_ndim: int,
-                 additive_uniform_noise: bool = True,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16,
@@ -38,7 +37,6 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         super(ContinuousBatchedEntropyModel, self).__init__(
             prior=prior,
             coding_ndim=coding_ndim,
-            additive_uniform_noise=additive_uniform_noise,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
@@ -54,7 +52,9 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         return indexes
 
     @minkowski_tensor_wrapped_fn({1: 0})
-    def forward(self, x: torch.Tensor) \
+    def forward(self, x: torch.Tensor,
+                return_aux_loss: bool = True,
+                additive_uniform_noise: bool = True) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, List[bytes], torch.Size]]:
         """
@@ -63,10 +63,16 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         be broadcastable to `self.prior_shape`.
         """
         if self.training:
-            x_perturbed = self.perturb(x)
+            if additive_uniform_noise is True:
+                x_perturbed = self.perturb(x)
+            else:
+                x_perturbed = x
             log_probs = self.prior.log_prob(x_perturbed)
-            return x_perturbed, {'bits_loss': log_probs.sum() / (-math.log(2)),
-                                 'aux_loss': self.prior.aux_loss()}
+            loss_dict = {'bits_loss': log_probs.sum() / (-math.log(2))}
+            if return_aux_loss:
+                loss_dict['aux_loss'] = self.prior.aux_loss()
+            return x_perturbed, loss_dict
+
         else:
             strings, batch_shape, _ = self.compress(x)
             decompressed = self.decompress(strings, batch_shape, x.device)
@@ -178,7 +184,6 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
                  batch_shape: torch.Size,
                  coding_ndim: int,
                  num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
-                 additive_uniform_noise: bool = True,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16,
@@ -196,7 +201,6 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
                 weights=prior_weights,
                 biases=prior_biases,
                 factors=prior_factors),
-            additive_uniform_noise=additive_uniform_noise,
             coding_ndim=coding_ndim,
             init_scale=init_scale,
             tail_mass=tail_mass,

@@ -12,9 +12,7 @@ from models.classification.baseline import Config
 
 
 class Model(nn.Module):
-    params_divisions: List[Callable[[str], bool]] = [
-        lambda s: True
-    ]
+    params_divider: Callable[[str], int] = lambda s: 0
 
     def __init__(self, cfg: Config):
         super(Model, self).__init__()

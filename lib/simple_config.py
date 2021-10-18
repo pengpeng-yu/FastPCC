@@ -1,8 +1,12 @@
 from copy import deepcopy
 from typing import List, Tuple, Dict, Union
-from dataclasses import dataclass
 import importlib
 import yaml
+
+
+class NoAliasDumper(yaml.SafeDumper):
+    def ignore_aliases(self, data):
+        return True
 
 
 class SimpleConfig:
@@ -50,11 +54,11 @@ class SimpleConfig:
         assert issubclass(type(self), SimpleConfig), \
             f'this method checks types of {type(self)} obj instead of {type(self)} object'
         assert hasattr(self, '__dict__'), f'object does not have attribute __dict__'
-        if self.__dict__ != {}:
+        if self.__dict__ != {} and not hasattr(self, '__dataclass_fields__'):
             assert hasattr(self, '__annotations__'), f'object of class {type(self)} has no type annotation'
 
         for key, value in self.__dict__.items():
-            value_anno_type = self.__annotations__[key]
+            value_anno_type = self.get_anno_by_key(key)
             value_type = type(value)
 
             if value_type in basic_types:
@@ -100,12 +104,18 @@ class SimpleConfig:
             if isinstance(key, str) and key.endswith('_path'):
                 target_key = key[:-len('_path')]
                 if target_key in self.__dict__:
-                    assert issubclass(self.__annotations__[target_key], SimpleConfig)
+                    assert issubclass(self.get_anno_by_key(target_key), SimpleConfig)
                     try:
                         self.__dict__[target_key] = importlib.import_module(self.__dict__[key]).Config()
                         assert issubclass(type(self.__dict__[target_key]), SimpleConfig)
                     except Exception as e:
                         raise ImportError(*e.args)
+
+    def get_anno_by_key(self, key):
+        if hasattr(self, '__dataclass_fields__'):
+            return self.__dataclass_fields__[key].type
+        else:
+            return self.__annotations__[key]
 
     def merge_setattr(self, key, value):
         self.__dict__[key] = value
@@ -160,8 +170,7 @@ class SimpleConfig:
 
             except ValueError:
                 try:
-                    yaml_dict = yaml.safe_load(open(arg))
-                    dotdict_list.append(self.dict_to_dotdict(yaml_dict))
+                    dotdict_list.append(self.yaml_to_dotdict(arg))
                 except Exception as e:
                     raise ValueError(f'unexpected arg: "{arg}"')
 
@@ -169,12 +178,18 @@ class SimpleConfig:
                 if var == '':
                     dotdict_list.append({keys_seq: var})
                 elif var[0] == '[' and var[-1] == ']':
+                    var = var[1:-1]
+                    if var[-1] == ',':
+                        var = var[:-1]
                     dotdict_list.append(
-                        {keys_seq: [self.format_str(i) for i in var[1:-1].split(',')]}
+                        {keys_seq: [self.format_str(i) for i in var.split(',')]}
                     )
                 elif var[0] == '(' and var[-1] == ')':
+                    var = var[1:-1]
+                    if var[-1] == ',':
+                        var = var[:-1]
                     dotdict_list.append(
-                        {keys_seq: tuple(self.format_str(i) for i in var[1:-1].split(','))}
+                        {keys_seq: tuple(self.format_str(i) for i in var.split(','))}
                     )
                 else:
                     dotdict_list.append(
@@ -201,11 +216,9 @@ class SimpleConfig:
         return self.merge_with_dotdict(dotdict)
 
     def merge_with_yaml(self, yaml_path):
-        yaml_dict = yaml.safe_load(open(yaml_path))
-        return self.merge_with_dict(yaml_dict)
+        return self.merge_with_dotdict(self.yaml_to_dotdict(yaml_path))
 
     def to_dict(self):
-        assert isinstance(self, SimpleConfig)
         dict_obj = {}
         for key, var in self.__dict__.items():
             if issubclass(type(var), SimpleConfig):
@@ -214,8 +227,18 @@ class SimpleConfig:
                 dict_obj[key] = var
         return dict_obj
 
+    def yaml_to_dotdict(self, yaml_path):
+        yaml_dict = yaml.safe_load(open(yaml_path))
+        dotdict = self.dict_to_dotdict(yaml_dict)
+        return dotdict
+
     def to_yaml(self):
-        return yaml.safe_dump(self.to_dict(), default_flow_style=False, sort_keys=False)
+        return yaml.dump(
+            self.to_dict(),
+            Dumper=NoAliasDumper,
+            default_flow_style=False,
+            sort_keys=False
+        )
 
     @classmethod
     def dict_to_dotdict(cls, dict_obj: Dict):

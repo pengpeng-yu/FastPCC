@@ -32,31 +32,38 @@ class GeoLosslessEntropyModel(nn.Module):
 
                  hyper_encoder: nn.Module,
                  decoder: nn.ModuleList,
-                 hyper_decoder: nn.ModuleList,
+                 hyper_decoder_coord: nn.ModuleList,
 
                  prior_fn: Callable[..., Distribution],
                  index_ranges: Tuple[int, ...],
                  parameter_fns: Dict[str, Callable[[torch.Tensor], Any]],
 
+                 hyper_decoder_fea: nn.ModuleList = None,
                  hyper_encoder_post_op: Callable = lambda x: x,
                  hyper_decoder_post_op: Callable = lambda x: x,
                  fea_bytes_num_bytes: int = 2,
                  coord_bytes_num_bytes: int = 2,
 
+                 indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16
                  ):
         super(GeoLosslessEntropyModel, self).__init__()
+        if not skip_connection:
+            assert hyper_decoder_fea is None
+        else:
+            assert isinstance(hyper_decoder_fea, nn.ModuleList)
 
         self.fea_prior_entropy_model = fea_prior_entropy_model
-        self.hyper_encoder = hyper_encoder
-        self.decoder = decoder
-        self.hyper_decoder = hyper_decoder
-        self.hyper_coder_num = len(hyper_decoder)
         self.skip_connection = skip_connection
         self.fusion_method = fusion_method
+        self.hyper_encoder = hyper_encoder
+        self.decoder = decoder
+        self.hyper_decoder_coord = hyper_decoder_coord
+        self.hyper_coder_num = len(hyper_decoder_coord)
+        self.hyper_decoder_fea = hyper_decoder_fea
         self.hyper_encoder_post_op = hyper_encoder_post_op
         self.hyper_decoder_post_op = hyper_decoder_post_op
         self.fea_bytes_num_bytes = fea_bytes_num_bytes
@@ -67,7 +74,7 @@ class GeoLosslessEntropyModel(nn.Module):
             index_ranges=index_ranges,
             parameter_fns=parameter_fns,
             coding_ndim=2,
-            additive_uniform_noise=False,
+            indexes_bound_gradient=indexes_bound_gradient,
             quantize_indexes=quantize_indexes,
             init_scale=init_scale,
             tail_mass=tail_mass,
@@ -86,30 +93,43 @@ class GeoLosslessEntropyModel(nn.Module):
             fea = bottom_fea_tilde
 
             for idx in range(self.hyper_coder_num - 1, -1, -1):
-                sub_hyper_decoder = self.hyper_decoder[idx]
+                sub_hyper_decoder_coord = self.hyper_decoder_coord[idx]
                 sub_decoder = self.decoder[idx]
 
-                pre_indexes: ME.SparseTensor = sub_hyper_decoder(fea)
+                pre_indexes: ME.SparseTensor = sub_hyper_decoder_coord(fea)
                 indexes = self.hyper_decoder_post_op(pre_indexes)
                 coord_target_key = strided_list[idx].coordinate_map_key
                 coord_mask = self.get_coord_mask((coord_target_key, cm), pre_indexes)
-                coord_mask_f_, coord_loss_dict = self.indexed_entropy_model(coord_mask.F[None], indexes)
+                coord_mask_f_, coord_loss_dict = self.indexed_entropy_model(
+                    coord_mask.F[None], indexes,
+                    return_aux_loss=idx == self.hyper_coder_num - 1,
+                    additive_uniform_noise=False
+                )
                 concat_loss_dicts(loss_dict, coord_loss_dict, lambda k: 'coord_' + k)
 
-                fea = sub_decoder(fea)
+                new_fea = sub_decoder(fea)
 
                 if self.skip_connection is True:
-                    fea_skipped, fea_loss_dict = self.fea_prior_entropy_model(strided_list[idx])
+                    skipped_fea_indexes = self.hyper_decoder_post_op(
+                        self.hyper_decoder_fea[idx](fea)
+                    )
+                    skipped_fea_tilde, fea_loss_dict = self.indexed_entropy_model(
+                        strided_list[idx], skipped_fea_indexes,
+                        return_aux_loss=False
+                    )
                     concat_loss_dicts(loss_dict, fea_loss_dict)
 
                     if self.fusion_method == 'Add':
-                        fea += fea_skipped
+                        fea = new_fea + skipped_fea_tilde
 
                     elif self.fusion_method == 'Cat':
-                        fea = ME.cat(fea, fea_skipped)
+                        fea = ME.cat(new_fea, skipped_fea_tilde)
 
                     else:
                         raise NotImplementedError
+
+                else:
+                    fea = new_fea
 
             return fea, loss_dict
 
@@ -146,46 +166,58 @@ class GeoLosslessEntropyModel(nn.Module):
         recon = bottom_recon
 
         for idx in range(self.hyper_coder_num - 1, -1, -1):
-            sub_hyper_decoder = self.hyper_decoder[idx]
+            sub_hyper_decoder_coord = self.hyper_decoder_coord[idx]
             sub_decoder = self.decoder[idx]
 
-            pre_indexes: ME.SparseTensor = sub_hyper_decoder(recon)
+            pre_indexes: ME.SparseTensor = sub_hyper_decoder_coord(recon)
             indexes = self.hyper_decoder_post_op(pre_indexes)
-            coord_mask = self.get_coord_mask((strided_list[idx].coordinate_map_key, cm), pre_indexes)
-            (coord_string,), coord_mask_f_ = self.indexed_entropy_model.compress(coord_mask.F[None], indexes, True)
+            coord_target_key = strided_list[idx].coordinate_map_key
+            coord_mask = self.get_coord_mask((coord_target_key, cm), pre_indexes)
+            (coord_string,), coord_mask_f_ = self.indexed_entropy_model.compress(
+                coord_mask.F[None], indexes, True
+            )
             coord_recon = coord_mask.C[coord_mask.F.to(torch.bool)[:, 0]]
-            coord_recon_key, _ = cm.insert_and_map(
+            coord_recon_key = cm.insert_and_map(
                 coord_recon, pre_indexes.tensor_stride,
                 pre_indexes.coordinate_map_key.get_key()[1] + 'pruned'
-            )
+            )[0]
 
-            recon = sub_decoder(recon, coordinates=coord_recon_key)
+            new_recon = sub_decoder(recon, coordinates=coord_recon_key)
 
             if self.skip_connection is True:
                 # Permute features from encoders to fit in with order of features from decoders.
                 permutation_kernel_map = cm.kernel_map(
-                    strided_list[idx].coordinate_map_key,
+                    coord_target_key,
                     coord_recon_key,
-                    kernel_size=1)[0].to(torch.long)
+                    kernel_size=1)[0][0].to(torch.long)
 
-                (fea_string,), coding_batch_shape, fea_skipped = \
-                    self.fea_prior_entropy_model.compress(
-                        ME.SparseTensor(
-                            features=strided_list[idx].F[permutation_kernel_map[0]][permutation_kernel_map[1]],
-                            coordinate_map_key=coord_recon_key,
-                            coordinate_manager=cm
-                        ),
-                        return_dequantized=True
+                skipped_fea_indexes = self.hyper_decoder_post_op(
+                    self.hyper_decoder_fea[idx](
+                        recon, coordinates=coord_recon_key
                     )
+                )
+                (fea_string,), skipped_fea_recon = self.indexed_entropy_model.compress(
+                    strided_list[idx].F[permutation_kernel_map][None],
+                    skipped_fea_indexes,
+                    return_dequantized=True
+                )
+                skipped_fea_recon = ME.SparseTensor(
+                    features=skipped_fea_recon[0],
+                    coordinate_map_key=coord_recon_key,
+                    coordinate_manager=cm
+                )
 
                 if self.fusion_method == 'Add':
-                    recon += fea_skipped
+                    recon = new_recon + skipped_fea_recon
 
                 elif self.fusion_method == 'Cat':
-                    recon = ME.cat(recon, fea_skipped)
+                    recon = ME.cat(new_recon, skipped_fea_recon)
 
                 else: raise NotImplementedError
                 fea_strings.append(fea_string)
+
+            else:
+                recon = new_recon
 
             coord_strings.append(coord_string)
 
@@ -210,11 +242,17 @@ class GeoLosslessEntropyModel(nn.Module):
                    sparse_tensor_coords_tuple: Tuple[ME.CoordinateMapKey, ME.CoordinateManager]) \
             -> ME.SparseTensor:
 
-        (bottom_fea_string,),  (other_string,) = self.split_strings(concat_string, 1, [4, 4])
+        (bottom_fea_string,), (other_string,) = self.split_strings(
+            concat_string, 1, [self.fea_bytes_num_bytes, self.coord_bytes_num_bytes]
+        )
         if self.skip_connection:
-            fea_strings, coord_strings = self.split_strings(other_string, self.hyper_coder_num, [4, 4])
+            fea_strings, coord_strings = self.split_strings(
+                other_string, self.hyper_coder_num, [self.fea_bytes_num_bytes, self.coord_bytes_num_bytes]
+            )
         else:
-            coord_strings, = self.split_strings(other_string, self.hyper_coder_num, [4])
+            coord_strings, = self.split_strings(
+                other_string, self.hyper_coder_num, [self.coord_bytes_num_bytes]
+            )
             fea_strings = None
 
         cm = sparse_tensor_coords_tuple[1]
@@ -225,11 +263,11 @@ class GeoLosslessEntropyModel(nn.Module):
         )
 
         for idx in range(self.hyper_coder_num):
-            sub_hyper_decoder = self.hyper_decoder[self.hyper_coder_num - 1 - idx]
+            sub_hyper_decoder_coord = self.hyper_decoder_coord[self.hyper_coder_num - 1 - idx]
             sub_decoder = self.decoder[self.hyper_coder_num - 1 - idx]
             coord_string = coord_strings[idx]
 
-            pre_indexes = sub_hyper_decoder(recon)
+            pre_indexes = sub_hyper_decoder_coord(recon)
 
             indexes = self.hyper_decoder_post_op(pre_indexes)
             coord_mask: ME.SparseTensor = self.indexed_entropy_model.decompress(
@@ -237,26 +275,34 @@ class GeoLosslessEntropyModel(nn.Module):
                 sparse_tensor_coords_tuple=(pre_indexes.coordinate_map_key, cm)
             )
             coord_recon = coord_mask.C[coord_mask.F.to(torch.bool)[:, 0]]
-            coord_recon_key, _ = cm.insert_and_map(
+            coord_recon_key = cm.insert_and_map(
                 coord_recon, pre_indexes.tensor_stride,
                 pre_indexes.coordinate_map_key.get_key()[1] + 'pruned'
-            )
-            recon = sub_decoder(recon, coordinates=coord_recon_key)
+            )[0]
+            new_recon = sub_decoder(recon, coordinates=coord_recon_key)
 
             if self.skip_connection:
                 fea_string = fea_strings[idx]
-                fea_skipped = self.fea_prior_entropy_model.decompress(
-                    [fea_string], torch.Size([1]), target_device,
+                skipped_fea_indexes = self.hyper_decoder_post_op(
+                    self.hyper_decoder_fea[self.hyper_coder_num - 1 - idx](
+                        recon, coordinates=coord_recon_key
+                    )
+                )
+                skipped_fea_recon = self.indexed_entropy_model.decompress(
+                    [fea_string], skipped_fea_indexes, target_device,
                     sparse_tensor_coords_tuple=(coord_recon_key, cm)
                 )
 
                 if self.fusion_method == 'Add':
-                    recon += fea_skipped
+                    recon = new_recon + skipped_fea_recon
 
                 elif self.fusion_method == 'Cat':
-                    recon = ME.cat(recon, fea_skipped)
+                    recon = ME.cat(new_recon, skipped_fea_recon)
 
                 else: raise NotImplementedError
+
+            else:
+                recon = new_recon
 
         return recon
 
@@ -344,14 +390,16 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
 
                  hyper_encoder: nn.Module,
                  decoder: nn.ModuleList,
-                 hyper_decoder: nn.ModuleList,
+                 hyper_decoder_coord: nn.ModuleList,
 
+                 hyper_decoder_fea: nn.ModuleList = None,
                  fea_bytes_num_bytes: int = 2,
                  coord_bytes_num_bytes: int = 2,
                  num_scales: int = 64,
                  scale_min: float = 0.11,
                  scale_max: float = 256,
 
+                 indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
@@ -362,16 +410,18 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
 
         super(GeoLosslessScaleNoisyNormalEntropyModel, self).__init__(
             fea_prior_entropy_model, skip_connection, fusion_method,
-            hyper_encoder, decoder, hyper_decoder,
+            hyper_encoder, decoder, hyper_decoder_coord,
             NoisyNormal, (num_scales,), {'loc': lambda _: 0,
                                          'scale': lambda i: torch.exp(offset + factor * i)},
+            hyper_decoder_fea,
             lambda x: x, lambda x: x, fea_bytes_num_bytes, coord_bytes_num_bytes,
-            quantize_indexes, init_scale, tail_mass, range_coder_precision
+            indexes_bound_gradient, quantize_indexes,
+            init_scale, tail_mass, range_coder_precision
         )
 
-    def forward(self, y):
-        y = minkowski_tensor_wrapped_op(y, torch.abs_)
-        return super(GeoLosslessScaleNoisyNormalEntropyModel, self).forward(y)
+    def forward(self, y_top):
+        y_top = minkowski_tensor_wrapped_op(y_top, torch.abs_)
+        return super(GeoLosslessScaleNoisyNormalEntropyModel, self).forward(y_top)
 
 
 class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
@@ -383,8 +433,9 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
 
                  hyper_encoder: nn.Module,
                  decoder: nn.ModuleList,
-                 hyper_decoder: nn.ModuleList,
+                 hyper_decoder_coord: nn.ModuleList,
 
+                 hyper_decoder_fea: nn.ModuleList = None,
                  fea_bytes_num_bytes: int = 2,
                  coord_bytes_num_bytes: int = 2,
 
@@ -392,6 +443,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  parameter_fns_type: str = 'split',
                  parameter_fns_factory: Callable[..., nn.Module] = None,
                  num_filters: Tuple[int, ...] = (1, 2, 1),
+                 indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
@@ -405,10 +457,12 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
 
         super(GeoLosslessNoisyDeepFactorizedEntropyModel, self).__init__(
             fea_prior_entropy_model, skip_connection, fusion_method,
-            hyper_encoder, decoder, hyper_decoder,
+            hyper_encoder, decoder, hyper_decoder_coord,
             NoisyDeepFactorized, index_ranges, parameter_fns,
+            hyper_decoder_fea,
             lambda x: x, indexes_view_fn, fea_bytes_num_bytes, coord_bytes_num_bytes,
-            quantize_indexes, init_scale, tail_mass, range_coder_precision
+            indexes_bound_gradient, quantize_indexes,
+            init_scale, tail_mass, range_coder_precision
         )
 
         for module_name, module in modules_to_add.items():

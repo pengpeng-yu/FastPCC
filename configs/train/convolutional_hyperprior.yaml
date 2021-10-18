@@ -3,18 +3,18 @@ model:
   basic_block_type: 'InceptionResBlock'
   basic_block_num: 3
   use_batch_norm: False
-  activation: 'leaky_relu(0.2)'
+  activation: 'relu'
   conv_trans_near_pruning: False
   encoder_channels: [4, 16, 64, 64]
   compressed_channels: 8
   decoder_channels: [64, 16, 4]
-  bpp_loss_factor: 0.2
   hyperprior: NoisyDeepFactorized
-  hyper_encoder_channels: [32]
+  hyper_encoder_channels: [32, 32]
   hyper_compressed_channels: 8
   hyper_decoder_channels: [32, 32]
-  prior_indexes_range: [4, 4, 4, 4]
-
+  prior_indexes_range: [8, 8, 8, 8]
+  bpp_loss_factor: 0.2
+  warmup_steps: 1000
 
 train:
   rundir_name: 'train_convolutional_<autoindex>'
@@ -23,9 +23,9 @@ train:
   more_reproducible: False
   batch_size: 8
   num_workers: 2
-  optimizer: [Adam, Adam, SGD]
+  optimizer: [AdamW, AdamW, Adam]
   momentum: 0.9
-  weight_decay: 0.0001
+  weight_decay: [0.0001, 0.0001, 0.0]
   max_grad_norm: [1.0, 1.0, 0.0]
 
   learning_rate: [0.0005, 0.0001, 0.005]
@@ -36,45 +36,23 @@ train:
   lr_step_gamma: 0.3
 
   ckpt_frequency: 2
-  resume_from_ckpt: ''  # 'runs/train_convolutional_23/ckpts/epoch_<maxindex>.pt'
+  resume_from_ckpt: ''
   resume_items: ['state_dict']
   test_frequency: 4
 
   dataset_path: 'lib.datasets.ShapeNetCorev2'
   dataset:
     random_rotation: True
-    # for predicting feature points coordinates or using coordinates as input feature
     with_resolution: True
-
-# use mesh objects to generate voxelized points with high resolution
-#  dataset_path: 'lib.datasets.ShapeNetCorev2'
-#  dataset:
-#    data_format: '.obj'
-#    mesh_sample_points_num: 2000000
-#    resolution: 256
-#    random_rotation: True
-#    with_resolution: True
-#    train_filelist_path: 'train_list_obj.txt'
 
 
 test:
-  device: '3'
   batch_size: 1
   num_workers: 2
   save_results: True
   dataset_path:
-    'lib.datasets.PlyVoxel'
+    'lib.datasets.PlyVoxel.Owlii_8iVFBv2'
   log_frequency: 1
   dataset:
-    root: ['datasets/Owlii', 'datasets/8iVFBv2']
-    filelist_path: 'list.txt'
-    file_path_pattern: '**/*.ply'
-
-    with_color: False
-    with_normal: False
-    with_file_path: True
     with_resolution: True
     with_ori_resolution: True
-
-    ori_resolution: [2048, 1024]
-    resolution: [2048, 1024]

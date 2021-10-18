@@ -1,4 +1,4 @@
-from typing import Tuple, List, Dict, Union, Callable
+from typing import Tuple, List, Dict, Union, Callable, Optional
 
 import torch
 from pytorch3d.ops import knn_points
@@ -6,6 +6,24 @@ import MinkowskiEngine as ME
 from torch import nn as nn
 
 from lib.metrics.misc import precision_recall
+
+
+def get_act_module(act: Union[str, nn.Module, None]) -> Optional[nn.Module]:
+    if isinstance(act, nn.Module):
+        act_module = act
+    elif act is None or act == 'None':
+        act_module = None
+    elif act == 'relu':
+        act_module = ME.MinkowskiReLU(inplace=True)
+    elif act.startswith('leaky_relu'):
+        act_module = ME.MinkowskiLeakyReLU(
+            negative_slope=float(act.split('(', 1)[1].split(')', 1)[0]),
+            inplace=True)
+    elif act == 'sigmoid':
+        act_module = ME.MinkowskiSigmoid()
+    else:
+        raise NotImplementedError
+    return act_module
 
 
 class BaseConvBlock(nn.Module):
@@ -35,31 +53,22 @@ class BaseConvBlock(nn.Module):
             dimension=dimension
         )
         self.bn = ME.MinkowskiBatchNorm(out_channels) if bn else None
-        if isinstance(act, nn.Module):
-            self.act = act
-        if act is None or act == 'None':
-            self.act = None
-        elif act == 'relu':
-            self.act = ME.MinkowskiReLU(inplace=True)
-        elif act.startswith('leaky_relu'):
-            self.act = ME.MinkowskiLeakyReLU(
-                negative_slope=float(act.split('(', 1)[1].split(')', 1)[0]),
-                inplace=True)
-        else: raise NotImplementedError
+        self.act = act
+        self.act_module = get_act_module(act)
 
     def forward(self, x, *args, **kwargs):
         x = self.conv(x, *args, **kwargs)
         if self.bn is not None:
             x = self.bn(x)
-        if self.act is not None:
-            x = self.act(x)
+        if self.act_module is not None:
+            x = self.act_module(x)
         return x
 
     def __repr__(self):
         return f'{str(self.conv).replace("Minkowski", "ME", 1)}, ' \
                f'region_type={self.region_type.name}, ' \
                f'bn={self.bn is not None}, ' \
-               f'act={str(self.act).replace("Minkowski", "ME", 1).rstrip("()")}'
+               f'act={str(self.act_module).replace("Minkowski", "ME", 1).rstrip("()")}'
 
 
 class ConvBlock(BaseConvBlock):

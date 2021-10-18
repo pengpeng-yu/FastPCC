@@ -12,7 +12,7 @@ except ImportError:
     pass
 
 from lib.data_utils import PCData, pc_data_collate_fn
-from lib.datasets.PlyVoxel.dataset_config import DatasetConfig
+from lib.datasets.PlyVoxel.Base.dataset_config import DatasetConfig
 
 
 class PlyVoxel(torch.utils.data.Dataset):

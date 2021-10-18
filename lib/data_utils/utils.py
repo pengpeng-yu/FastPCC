@@ -16,7 +16,8 @@ from lib.torch_utils import kd_tree_partition
 
 class SampleData:
     def __init__(self):
-        self.results_dir = None
+        self.results_dir: Optional[str] = None
+        self.training_step: Optional[int] = None
 
     def to(self, device, non_blocking=False):
         for key, value in self.__dict__.items():

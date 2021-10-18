@@ -113,7 +113,7 @@ class PCGCEvaluator(Evaluator):
                 )
 
                 os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
-                compressed_path = out_file_path + '.txt'
+                compressed_path = out_file_path + '.bin'
                 reconstructed_path = out_file_path + '_recon.ply'
 
                 with open(compressed_path, 'wb') as f:

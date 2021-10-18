@@ -43,6 +43,7 @@ class EntropyModel(nn.Module):
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
                  hyperprior_bytes_num_bytes: int = 2,
 
+                 indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
@@ -60,7 +61,6 @@ class EntropyModel(nn.Module):
             batch_shape=hyperprior_batch_shape,
             coding_ndim=coding_ndim,
             num_filters=hyperprior_num_filters,
-            additive_uniform_noise=True,
             init_scale=hyperprior_init_scale,
             tail_mass=hyperprior_tail_mass,
             range_coder_precision=range_coder_precision,
@@ -72,19 +72,19 @@ class EntropyModel(nn.Module):
             index_ranges=index_ranges,
             parameter_fns=parameter_fns,
             coding_ndim=coding_ndim,
-            additive_uniform_noise=True,
+            indexes_bound_gradient=indexes_bound_gradient,
             quantize_indexes=quantize_indexes,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
         )
 
-    def forward(self, y):
+    def forward(self, y, return_aux_loss: bool = True):
         if self.training:
             z = self.hyper_encoder_post_op(self.hyper_encoder(y))
-            z_tilde, hyperprior_loss_dict = self.hyperprior_entropy_model(z)
+            z_tilde, hyperprior_loss_dict = self.hyperprior_entropy_model(z, return_aux_loss)
             indexes = self.hyper_decoder_post_op(self.hyper_decoder(z_tilde))
-            y_tilde, prior_loss_dict = self.prior_entropy_model(y, indexes)
+            y_tilde, prior_loss_dict = self.prior_entropy_model(y, indexes, return_aux_loss)
 
             loss_dict = concat_loss_dicts(prior_loss_dict, hyperprior_loss_dict, lambda k: 'hyper_' + k)
             return y_tilde, loss_dict
@@ -173,6 +173,7 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
                  hyperprior_bytes_num_bytes: int = 2,
 
+                 indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
@@ -189,12 +190,13 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
             lambda x: x, lambda x: x,
             hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
             hyperprior_broadcast_shape_bytes, hyperprior_bytes_num_bytes,
-            quantize_indexes, init_scale, tail_mass, range_coder_precision
+            indexes_bound_gradient, quantize_indexes,
+            init_scale, tail_mass, range_coder_precision
         )
 
-    def forward(self, y):
+    def forward(self, y, return_aux_loss: bool = True):
         y = minkowski_tensor_wrapped_op(y, torch.abs_)
-        return super(ScaleNoisyNormalEntropyModel, self).forward(y)
+        return super(ScaleNoisyNormalEntropyModel, self).forward(y, return_aux_loss)
 
 
 def _noisy_deep_factorized_entropy_model_init(index_ranges, parameter_fns_type, parameter_fns_factory, num_filters):
@@ -305,6 +307,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
                  parameter_fns_type: str = 'split',
                  parameter_fns_factory: Callable[..., nn.Module] = None,
                  num_filters: Tuple[int, ...] = (1, 2, 1),
+                 indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
@@ -323,7 +326,8 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
             lambda x: x, indexes_view_fn,
             hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
             hyperprior_broadcast_shape_bytes, hyperprior_bytes_num_bytes,
-            quantize_indexes, init_scale, tail_mass, range_coder_precision
+            indexes_bound_gradient, quantize_indexes,
+            init_scale, tail_mass, range_coder_precision
         )
 
         for module_name, module in modules_to_add.items():
