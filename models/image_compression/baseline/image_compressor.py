@@ -146,7 +146,7 @@ class ImageCompressor(nn.Module):
                 hyperprior_batch_shape=torch.Size([cfg.hyper_encoder_channels[-1]]),
                 coding_ndim=3,
                 hyperprior_broadcast_shape_bytes=(2, 2),
-                hyperprior_bytes_num_bytes=4,
+                prior_bytes_num_bytes=4,
                 index_ranges=cfg.prior_indexes_range,
                 parameter_fns_type='transform',
                 parameter_fns_factory=parameter_fns_factory,

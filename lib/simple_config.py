@@ -69,7 +69,7 @@ class SimpleConfig:
                     f'inconsistent with its annotation type {value_anno_type}'
 
             elif value_type in [list, tuple]:
-                element_type = type(value[0])
+                element_type = value_anno_type.__args__[0]
                 assert element_type in basic_types, \
                     f'unexpected type {element_type} of items in list/tuple {key}'
 

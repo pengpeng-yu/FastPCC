@@ -294,7 +294,9 @@ class DistributionQuantizedCDFTable(nn.Module):
         Call model.eval() after training before saving state dict
         to use precomputed cdf table latter.
         """
-        if state_dict[prefix + 'requires_updating_cdf_table']:
+        flag_key = prefix + 'requires_updating_cdf_table'
+
+        if flag_key not in state_dict or state_dict[flag_key]:
             # Delete invalid values in state dict.
             # Those values are supposed to be rebuilt via "model.eval()".
             # Warning of "IncompatibleKeys(missing_keys=[
@@ -302,9 +304,15 @@ class DistributionQuantizedCDFTable(nn.Module):
             # 'entropy_bottleneck.prior.cached_cdf_length',
             # 'entropy_bottleneck.prior.cached_cdf_offset'])"
             # is expected.
-            del state_dict[prefix + 'cached_cdf_table']
-            del state_dict[prefix + 'cached_cdf_length']
-            del state_dict[prefix + 'cached_cdf_offset']
+            try:
+                del state_dict[prefix + 'cached_cdf_table']
+            except KeyError: pass
+            try:
+                del state_dict[prefix + 'cached_cdf_length']
+            except KeyError: pass
+            try:
+                del state_dict[prefix + 'cached_cdf_offset']
+            except KeyError: pass
             print('Warning: cached cdf table in state dict requires updating.\n'
                   'You need to call model.eval() to build it after loading state dict '
                   'before any inference.')

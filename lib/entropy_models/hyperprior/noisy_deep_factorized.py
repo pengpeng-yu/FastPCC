@@ -41,7 +41,7 @@ class EntropyModel(nn.Module):
                  hyperprior_init_scale: int = 10,
                  hyperprior_tail_mass: float = 2 ** -8,
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
-                 hyperprior_bytes_num_bytes: int = 2,
+                 prior_bytes_num_bytes: int = 2,
 
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
@@ -55,7 +55,7 @@ class EntropyModel(nn.Module):
         self.hyper_decoder = hyper_decoder
         self.hyper_encoder_post_op = hyper_encoder_post_op
         self.hyper_decoder_post_op = hyper_decoder_post_op
-        self.hyperprior_bytes_num_bytes = hyperprior_bytes_num_bytes
+        self.prior_bytes_num_bytes = prior_bytes_num_bytes
 
         self.hyperprior_entropy_model = NoisyDeepFactorizedPriorEntropyModel(
             batch_shape=hyperprior_batch_shape,
@@ -101,16 +101,26 @@ class EntropyModel(nn.Module):
             )
             return y_recon, concat_strings, coding_batch_shape
 
-    def compress(self, y, return_dequantized: bool = False) -> Tuple[List[bytes], torch.Size, torch.Tensor]:
+    def compress(self, y, return_dequantized: bool = False, estimate_bits: bool = False) \
+            -> Union[Tuple[List[bytes], torch.Size, torch.Tensor],
+                     Tuple[List[bytes], torch.Size, torch.Tensor, torch.Tensor]]:
         z = self.hyper_encoder_post_op(self.hyper_encoder(y))
-        prior_strings, coding_batch_shape, z_recon = self.hyperprior_entropy_model.compress(
-            z, return_dequantized=True
-        )
+        prior_strings, coding_batch_shape, z_recon, *estimated_prior_bits = \
+            self.hyperprior_entropy_model.compress(
+                z, return_dequantized=True, estimate_bits=estimate_bits
+            )
         indexes = self.hyper_decoder_post_op(self.hyper_decoder(z_recon))
-        strings, rounded_y_or_dequantized_y = \
-            self.prior_entropy_model.compress(y, indexes, return_dequantized=return_dequantized)
+        strings, rounded_y_or_dequantized_y, *estimated_bits = \
+            self.prior_entropy_model.compress(
+                y, indexes, return_dequantized=return_dequantized, estimate_bits=estimate_bits
+            )
         concat_strings = self.concat_strings(prior_strings, strings)
-        return concat_strings, coding_batch_shape, rounded_y_or_dequantized_y
+
+        if estimated_bits:
+            return concat_strings, coding_batch_shape, rounded_y_or_dequantized_y, \
+                   estimated_prior_bits[0] + estimated_bits[0]
+        else:
+            return concat_strings, coding_batch_shape, rounded_y_or_dequantized_y,
 
     def decompress(self,
                    concat_strings: List[bytes],
@@ -134,7 +144,7 @@ class EntropyModel(nn.Module):
         return y_recon
 
     def concat_strings(self, prior_strings: List[bytes], strings: List[bytes]) -> List[bytes]:
-        return [len(i).to_bytes(self.hyperprior_bytes_num_bytes, 'little', signed=False) + i + j
+        return [len(i).to_bytes(self.prior_bytes_num_bytes, 'little', signed=False) + i + j
                 for i, j in zip(prior_strings, strings)]
 
     def split_strings(self, concat_strings: List[bytes]) -> Tuple[List[bytes], List[bytes]]:
@@ -142,15 +152,15 @@ class EntropyModel(nn.Module):
         strings = []
         for concat_s in concat_strings:
             prior_strings_len = int.from_bytes(
-                concat_s[:self.hyperprior_bytes_num_bytes],
+                concat_s[:self.prior_bytes_num_bytes],
                 'little', signed=False
             )
             prior_strings.append(
-                concat_s[self.hyperprior_bytes_num_bytes:
-                         self.hyperprior_bytes_num_bytes + prior_strings_len]
+                concat_s[self.prior_bytes_num_bytes:
+                         self.prior_bytes_num_bytes + prior_strings_len]
             )
             strings.append(
-                concat_s[self.hyperprior_bytes_num_bytes + prior_strings_len:]
+                concat_s[self.prior_bytes_num_bytes + prior_strings_len:]
             )
         return prior_strings, strings
 
@@ -171,7 +181,7 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
                  hyperprior_init_scale: int = 10,
                  hyperprior_tail_mass: float = 2 ** -8,
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
-                 hyperprior_bytes_num_bytes: int = 2,
+                 prior_bytes_num_bytes: int = 2,
 
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
@@ -189,7 +199,7 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
                                          'scale': lambda i: torch.exp(offset + factor * i)},
             lambda x: x, lambda x: x,
             hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
-            hyperprior_broadcast_shape_bytes, hyperprior_bytes_num_bytes,
+            hyperprior_broadcast_shape_bytes, prior_bytes_num_bytes,
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )
@@ -301,7 +311,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
                  hyperprior_init_scale: int = 10,
                  hyperprior_tail_mass: float = 2 ** -8,
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
-                 hyperprior_bytes_num_bytes: int = 2,
+                 prior_bytes_num_bytes: int = 2,
 
                  index_ranges: Tuple[int, ...] = (4,) * 9,
                  parameter_fns_type: str = 'split',
@@ -325,7 +335,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
             NoisyDeepFactorized, index_ranges, parameter_fns,
             lambda x: x, indexes_view_fn,
             hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
-            hyperprior_broadcast_shape_bytes, hyperprior_bytes_num_bytes,
+            hyperprior_broadcast_shape_bytes, prior_bytes_num_bytes,
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )

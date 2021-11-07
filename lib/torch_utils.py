@@ -231,13 +231,14 @@ class BatchNorm1dChnlLast(nn.Module):
 
 def concat_loss_dicts(loss_dict_a: Dict[str, torch.Tensor],
                       loss_dict_b: Dict[str, torch.Tensor],
-                      b_key_to_a_key_f: Callable[[str], str] = lambda x: x):
+                      b_key_to_a_key_f: Callable[[str], str] = lambda x: x,
+                      b_value_transform: Callable[[torch.Tensor], torch.Tensor] = lambda x: x):
     for b_key in loss_dict_b:
         a_key = b_key_to_a_key_f(b_key)
         if a_key in loss_dict_a:
-            loss_dict_a[a_key] += loss_dict_b[b_key]
+            loss_dict_a[a_key] += b_value_transform(loss_dict_b[b_key])
         else:
-            loss_dict_a[a_key] = loss_dict_b[b_key]
+            loss_dict_a[a_key] = b_value_transform(loss_dict_b[b_key])
     return loss_dict_a
 
 

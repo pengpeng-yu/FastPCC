@@ -15,6 +15,7 @@ model:
   prior_indexes_range: [8, 8, 8, 8]
   bpp_loss_factor: 0.2
   warmup_steps: 1000
+  warmup_bpp_loss_factor: 0.01
 
 train:
   rundir_name: 'train_convolutional_<autoindex>'

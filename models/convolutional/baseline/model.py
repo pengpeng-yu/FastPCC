@@ -23,8 +23,8 @@ from lib.entropy_models.hyperprior.sparse_tensor_specialized.noisy_deep_factoriz
 from models.convolutional.baseline.layers import \
     Encoder, Decoder, \
     HyperEncoder, HyperDecoder, \
-    HyperEncoderForGeoLossLess, HyperDecoderListForGeoLossLess, \
-    DecoderListForGeoLossLess
+    EncoderForGeoLossLess, DecoderForGeoLossLess, \
+    HyperEncoderForGeoLossLess, HyperDecoderForGeoLossLess
 from models.convolutional.baseline.model_config import ModelConfig
 
 
@@ -45,9 +45,8 @@ class PCC(nn.Module):
                 if 'entropy_bottleneck' not in s: return 0
 
                 else:
-                    if 'fea_prior_entropy_model' in s \
-                        or 'hyper_decoder' in s or 'prior_indexes_' in s: return 1
-                    else: return 0
+                    if '.encoder' in s or '.decoder' in s: return 0
+                    else: return 1
 
     def __init__(self, cfg: ModelConfig):
         super(PCC, self).__init__()
@@ -72,16 +71,17 @@ class PCC(nn.Module):
         self.encoder = Encoder(
             1 if cfg.input_feature_type == 'Occupation' else 3,
             cfg.compressed_channels if not cfg.lossless_compression_based
-            else cfg.lossless_coder_channels[0],
+            else cfg.lossless_coder_channels,
             cfg.encoder_channels,
             cfg.adaptive_pruning,
             cfg.adaptive_pruning_num_scaler,
+            cfg.encoder_scaler if not cfg.lossless_compression_based else 1,
             *basic_block_args
         )
 
         self.decoder = Decoder(
             cfg.compressed_channels if not cfg.lossless_compression_based
-            else cfg.lossless_coder_channels[0],
+            else cfg.lossless_coder_channels,
             cfg.decoder_channels,
             cfg.conv_trans_near_pruning,
             *basic_block_args,
@@ -98,6 +98,7 @@ class PCC(nn.Module):
 
         else:
             hyper_encoder = HyperEncoder(
+                cfg.hyper_encoder_scaler,
                 cfg.compressed_channels,
                 cfg.hyper_compressed_channels,
                 cfg.hyper_encoder_channels,
@@ -117,7 +118,7 @@ class PCC(nn.Module):
                         hyper_encoder=hyper_encoder,
                         hyper_decoder=hyper_decoder,
                         hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
-                        hyperprior_bytes_num_bytes=4,
+                        prior_bytes_num_bytes=4,
                         coding_ndim=2,
                         num_scales=cfg.prior_indexes_range[0],
                         scale_min=0.11,
@@ -137,7 +138,8 @@ class PCC(nn.Module):
                         hyper_encoder=hyper_encoder,
                         hyper_decoder=hyper_decoder,
                         hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
-                        hyperprior_bytes_num_bytes=4,
+                        hyperprior_broadcast_shape_bytes=(4,),  # TODO: lower?
+                        prior_bytes_num_bytes=4,
                         coding_ndim=2,
                         index_ranges=cfg.prior_indexes_range,
                         parameter_fns_type='transform',
@@ -149,51 +151,31 @@ class PCC(nn.Module):
             else: raise NotImplementedError
 
         if cfg.lossless_compression_based:
-            hyper_encoder_geo_lossless = HyperEncoderForGeoLossLess(
-                cfg.lossless_coder_channels[0],
+            encoder_geo_lossless = EncoderForGeoLossLess(
+                cfg.lossless_coder_channels,
                 cfg.compressed_channels,
-                cfg.lossless_coder_channels[1:],
-                cfg.lossless_shared_coder,
+                cfg.lossless_coder_num,
+                cfg.encoder_scaler,
                 *basic_block_args
             )
-            hyper_decoder_coord_geo_lossless = HyperDecoderListForGeoLossLess(
-                True,
-                (*cfg.lossless_coder_channels[1:-1], cfg.compressed_channels),
-                (len(cfg.lossless_prior_indexes_range), ) * len(cfg.lossless_coder_channels[1:]),
-                cfg.lossless_shared_coder,
-                cfg.basic_block_type,
-                cfg.conv_region_type,
-                cfg.lossless_decoder_basic_block_num,
-                cfg.use_batch_norm,
-                cfg.activation,
+            decoder_geo_lossless = DecoderForGeoLossLess(
+                cfg.compressed_channels,
+                cfg.lossless_coder_channels,
+                cfg.lossless_coder_num,
+                *basic_block_args
             )
-
-            if cfg.lossless_skip_connection is True:
-                hyper_decoder_fea_geo_lossless = HyperDecoderListForGeoLossLess(
-                    False,
-                    (*cfg.lossless_coder_channels[1:-1], cfg.compressed_channels),
-                    (len(cfg.lossless_prior_indexes_range)
-                     * cfg.compressed_channels,) * len(cfg.lossless_coder_channels[1:]),
-                    cfg.lossless_shared_coder,
-                    cfg.basic_block_type,
-                    cfg.conv_region_type,
-                    cfg.lossless_decoder_basic_block_num,
-                    cfg.use_batch_norm,
-                    cfg.activation,
-                )
-            else:
-                hyper_decoder_fea_geo_lossless = None
-
-            decoder_geo_lossless = DecoderListForGeoLossLess(
-                (*cfg.lossless_coder_channels[1:-1], cfg.compressed_channels),
-                tuple(_ - cfg.compressed_channels for _ in cfg.lossless_coder_channels[:-1])
-                if cfg.lossless_skip_connection is True else cfg.lossless_coder_channels[:-1],
-                cfg.lossless_shared_coder,
-                cfg.basic_block_type,
-                cfg.conv_region_type,
-                cfg.lossless_decoder_basic_block_num,
-                cfg.use_batch_norm,
-                cfg.activation,
+            hyper_encoder_coord_geo_lossless = HyperEncoderForGeoLossLess(
+                cfg.hyper_encoder_scaler,
+                cfg.lossless_coder_channels,
+                cfg.hyper_compressed_channels,
+                cfg.hyper_encoder_channels,
+                *basic_block_args
+            )
+            hyper_decoder_coord_geo_lossless = HyperDecoderForGeoLossLess(
+                cfg.hyper_compressed_channels,
+                1 * len(cfg.lossless_prior_indexes_range),
+                cfg.hyper_decoder_channels,
+                *basic_block_args
             )
 
             def parameter_fns_factory(in_channels, out_channels):
@@ -205,19 +187,20 @@ class PCC(nn.Module):
                 )
 
             self.entropy_bottleneck = GeoLosslessNoisyDeepFactorizedEntropyModel(
-                fea_prior_entropy_model=entropy_bottleneck,
-                skip_connection=cfg.lossless_skip_connection,
-                fusion_method='Cat',
-                hyper_encoder=hyper_encoder_geo_lossless,
+                fea_entropy_model=entropy_bottleneck,
+                encoder=encoder_geo_lossless,
                 decoder=decoder_geo_lossless,
+                hyper_encoder_coord=hyper_encoder_coord_geo_lossless,
                 hyper_decoder_coord=hyper_decoder_coord_geo_lossless,
-                hyper_decoder_fea=hyper_decoder_fea_geo_lossless,
+                hyperprior_batch_channels=cfg.hyper_compressed_channels,
+                hyperprior_broadcast_channels_bytes=4,  # TODO: lower?
                 fea_bytes_num_bytes=4,
-                coord_bytes_num_bytes=2,
+                coord_prior_bytes_num_bytes=4,
+                coord_bytes_num_bytes=4,
                 index_ranges=cfg.lossless_prior_indexes_range,
                 parameter_fns_type='transform',
                 parameter_fns_factory=parameter_fns_factory,
-                num_filters=(1, 3, 3, 3, 3, 1),
+                num_filters=(1, 3, 3, 3, 1),
                 quantize_indexes=True
             )
 
@@ -287,26 +270,32 @@ class PCC(nn.Module):
     def train_forward(self, sparse_pc: ME.SparseTensor, training_step: int):
         warmup_forward = training_step < self.cfg.warmup_steps
 
-        feature, cached_feature_list, points_num_list = self.encoder(sparse_pc)
-        feature, loss_dict = self.entropy_bottleneck(feature)
-
-        decoder_message = self.decoder(
-            GenerativeUpsampleMessage(
-                fea=feature,
-                target_key=sparse_pc.coordinate_map_key,
-                points_num_list=points_num_list
-            )
-        )
+        encoder_feature, cached_encoder_fea_list, points_num_list = self.encoder(sparse_pc)
+        bottleneck_feature, loss_dict = self.entropy_bottleneck(encoder_feature)
 
         for key in loss_dict:
             if key.endswith('bits_loss'):
                 loss_dict[key] = loss_dict[key] * (
-                    0 if warmup_forward else self.cfg.bpp_loss_factor / sparse_pc.shape[0]
+                        (self.cfg.warmup_bpp_loss_factor if warmup_forward
+                         else self.cfg.bpp_loss_factor) / sparse_pc.shape[0]
                 )
 
-        loss_dict['reconstruct_loss'] = self.get_reconstruct_loss(
-            decoder_message.cached_pred_list,
-            decoder_message.cached_target_list)
+        if not isinstance(bottleneck_feature, List):
+            bottleneck_feature = [bottleneck_feature]
+
+        for idx, sub_bn_fea in enumerate(bottleneck_feature):
+            decoder_message = self.decoder(
+                GenerativeUpsampleMessage(
+                    fea=sub_bn_fea,
+                    target_key=sparse_pc.coordinate_map_key,
+                    points_num_list=points_num_list
+                )
+            )
+
+            loss_dict[f'reconstruct_{idx}_loss'] = self.get_reconstruct_loss(
+                decoder_message.cached_pred_list,
+                decoder_message.cached_target_list
+            )
 
         loss_dict['loss'] = sum(loss_dict.values())
         for key in loss_dict:
@@ -350,10 +339,10 @@ class PCC(nn.Module):
         feature, cached_feature_list, points_num_list = self.encoder(sparse_pc)
 
         if self.cfg.lossless_compression_based:
-            em_string, bottom_fea_recon, fea_recon = \
+            em_string, bottom_rounded_fea, _ = \
                 self.entropy_bottleneck.compress(feature)
 
-            sparse_tensor_coords = bottom_fea_recon.C
+            sparse_tensor_coords = bottom_rounded_fea.C
 
         else:
             em_strings, coding_batch_shape, _ = \
@@ -426,10 +415,10 @@ class PCC(nn.Module):
                 self.get_sparse_pc(
                     sparse_tensor_coords,
                     tensor_stride=2 ** (
-                            len(self.cfg.decoder_channels) +
-                            len(self.cfg.lossless_coder_channels) - 1),
-                    only_return_coords=True
-                )
+                            len(self.cfg.decoder_channels)
+                            + self.cfg.lossless_coder_num),
+                    only_return_coords=True),
+                self.cfg.lossless_coder_num
             )
 
         else:

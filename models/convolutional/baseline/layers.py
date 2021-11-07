@@ -7,7 +7,7 @@ import MinkowskiEngine as ME
 
 from lib.sparse_conv_layers import \
     ConvBlock, ConvTransBlock, GenConvTransBlock, \
-    GenerativeUpsample, GenerativeUpsampleMessage
+    GenerativeUpsample, GenerativeUpsampleMessage, get_act_module
 from lib.torch_utils import minkowski_tensor_wrapped_op
 
 
@@ -185,6 +185,7 @@ class Encoder(nn.Module):
                  intra_channels: Tuple[int, ...],
                  requires_points_num_list: bool,
                  points_num_scaler: float,
+                 value_scaler: float,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -194,6 +195,7 @@ class Encoder(nn.Module):
 
         self.requires_points_num_list = requires_points_num_list
         self.points_num_scaler = points_num_scaler
+        self.value_scaler = value_scaler
 
         if intra_channels[0] != 0:
             self.first_block = ConvBlock(in_channels, intra_channels[0], 3, 1,
@@ -229,6 +231,13 @@ class Encoder(nn.Module):
             points_num_list = [points_num_list[0]] + \
                               [[int(n * self.points_num_scaler) for n in _]
                                for _ in points_num_list[1:]]
+
+        if self.value_scaler != 1:
+            x = minkowski_tensor_wrapped_op(x, lambda _: _ * self.value_scaler)
+            for idx in range(len(cached_feature_list)):
+                cached_feature_list[idx] = minkowski_tensor_wrapped_op(
+                    cached_feature_list[idx], lambda _: _ * self.value_scaler
+                )
 
         return x, cached_feature_list, points_num_list
 
@@ -303,224 +312,286 @@ class Decoder(nn.Module):
         return str(self.blocks)
 
 
-def make_hyper_coder(
-        coder_type: str,
-        in_channels,
-        out_channels,
-        intra_channels: Tuple[int, ...],
-        basic_block_type: str,
-        region_type: str,
-        basic_block_num: int,
-        use_batch_norm: bool,
-        act: Optional[str]):
-    basic_block = partial(BLOCKS_DICT[basic_block_type],
-                          region_type=region_type,
-                          bn=use_batch_norm, act=act)
-
-    return nn.Sequential(
-        *[nn.Sequential(
-
-            ConvBlock(
-                intra_channels[idx - 1] if idx != 0 else in_channels,
-                intra_channels[idx],
-                3, 1,
-                region_type=region_type,
-                bn=use_batch_norm, act=act
-            ),
-
-            *[basic_block(intra_channels[idx]) for _ in range(basic_block_num)]
-
-        ) for idx in range(len(intra_channels))],
-
-        ConvBlock(
-            intra_channels[-1],
-            out_channels,
-            3, 1,
-            region_type=region_type,
-            bn=use_batch_norm if coder_type == 'encoder' else False,
-            act=None
-        )
-    )
-
-
-HyperEncoder = partial(make_hyper_coder, 'encoder')
-HyperDecoder = partial(make_hyper_coder, 'decoder')
-
-
-class HyperEncoderForGeoLossLess(nn.Module):
+class HyperCoder(nn.Module):
     def __init__(self,
+                 coder_type: str,
+                 value_scaler: float,
                  in_channels,
                  out_channels,
                  intra_channels: Tuple[int, ...],
-                 shared_coder: bool,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
                  use_batch_norm: bool,
                  act: Optional[str]):
-        super(HyperEncoderForGeoLossLess, self).__init__()
+        super(HyperCoder, self).__init__()
+        self.value_scaler = value_scaler
 
-        if not shared_coder:
-            self.attn_blocks = nn.ModuleList(
-                [nn.Sequential(
-                    BLOCKS_DICT[basic_block_type](
-                        ch, region_type, use_batch_norm, act
-                    ),
-                    ConvBlock(
-                        ch, ch, 3, 1,
-                        region_type=region_type, bn=False, act='sigmoid'
-                    )
-                ) for ch in (in_channels, *intra_channels[:-1])]
-            )
+        basic_block = partial(BLOCKS_DICT[basic_block_type],
+                              region_type=region_type,
+                              bn=use_batch_norm, act=act)
 
-            self.main_blocks = make_downsample_blocks(
-                in_channels, intra_channels[-1], intra_channels,
-                basic_block_type, region_type, basic_block_num,
-                use_batch_norm, act,
-                use_batch_norm, act
-            )
+        self.main = nn.Sequential(
+            *[nn.Sequential(
 
-            self.out_blocks = nn.ModuleList(
-                [ConvBlock(
-                    ch, out_channels,
-                    3, 1,
+                GenConvTransBlock(
+                    intra_channels[idx - 1] if idx != 0 else in_channels,
+                    intra_channels[idx],
+                    2, 2,
                     region_type=region_type,
-                    bn=use_batch_norm, act=None
-                ) for ch in (in_channels, *intra_channels)]
-            )
-
-        else:
-            for ch in intra_channels:
-                assert ch == in_channels
-
-            self.attn_blocks = nn.ModuleList(
-                [nn.Sequential(
-                    BLOCKS_DICT[basic_block_type](
-                        in_channels, region_type, use_batch_norm, act
-                    ),
-                    ConvBlock(
-                        in_channels, in_channels, 3, 1,
-                        region_type=region_type, bn=False, act='sigmoid'
-                    )
-                )] * len(intra_channels)
-            )
-
-            self.main_blocks = nn.ModuleList([make_downsample_blocks(
-                in_channels, in_channels, (in_channels,),
-                basic_block_type, region_type, basic_block_num,
-                use_batch_norm, act,
-                use_batch_norm, act
-            )[0]] * len(intra_channels))
-
-            self.out_blocks = nn.ModuleList(
-                [ConvBlock(
-                    in_channels, out_channels,
-                    3, 1,
-                    region_type=region_type,
-                    bn=use_batch_norm, act=None
-                )] * (len(intra_channels) + 1)
-            )
-
-    def forward(self, x):
-        intra_results = [x]
-        ret = []
-
-        for attn_block, main_block in zip(self.attn_blocks, self.main_blocks):
-            attn = attn_block(intra_results[-1])
-            ret.append(
-                minkowski_tensor_wrapped_op(attn, lambda _: 1 - _) *
-                intra_results[-1]
-            )
-            intra_results.append(main_block(attn * intra_results[-1]))
-
-        for idx in range(len(ret)):
-            ret[idx] = self.out_blocks[idx](ret[idx])
-        ret.append(self.out_blocks[-1](intra_results[-1]))
-
-        return ret
-
-
-class EltWiseSelfAttn(nn.Module):
-    def __init__(self, channels, basic_block_type, region_type, use_batch_norm, act):
-        super(EltWiseSelfAttn, self).__init__()
-        self.attn_block = nn.Sequential(
-            BLOCKS_DICT[basic_block_type](
-                channels, region_type, use_batch_norm, act
-            ),
-            ConvBlock(
-                channels, channels, 3, 1,
-                region_type=region_type, bn=False, act='sigmoid'
-            )
-        )
-
-    def forward(self, x):
-        return self.attn_block(x) * x
-
-
-def decoder_list_for_geo_lossless(
-        coder_type: str,
-        generative: bool,
-        in_channels: Tuple[int, ...],
-        out_channels: Tuple[int, ...],
-        shared_coder: bool,
-        basic_block_type: str,
-        region_type: str,
-        basic_block_num: int,
-        use_batch_norm: bool,
-        act: Optional[str]):
-
-    if not shared_coder:
-        return nn.ModuleList(
-            [NNSequentialWithConvTransBlockArgs(
-                EltWiseSelfAttn(a, basic_block_type, region_type, use_batch_norm, act),
-                *make_upsample_block(
-                    generative,
-                    a, b,
-                    basic_block_type, region_type, basic_block_num,
-                    use_batch_norm, act,
-                    False,
-                    False if coder_type == 'hyper' else use_batch_norm,
-                    None if coder_type == 'hyper' else act
-                )
-            ) for a, b in zip(in_channels, out_channels)]
-        )
-
-    else:
-        for ch in in_channels[1:-1]:
-            assert ch == in_channels[0]
-
-        for ch in out_channels[1:]:
-            assert ch == out_channels[0]
-
-        shared_block = NNSequentialWithConvTransBlockArgs(
-            EltWiseSelfAttn(in_channels[0], basic_block_type, region_type, use_batch_norm, act),
-            *make_upsample_block(
-                generative,
-                in_channels[0], out_channels[0],
-                basic_block_type, region_type, basic_block_num,
-                use_batch_norm, act,
-                False,
-                False if coder_type == 'hyper' else use_batch_norm,
-                None if coder_type == 'hyper' else act
-            )
-        )
-
-        if in_channels[0] != in_channels[-1]:
-            last_block = NNSequentialWithConvTransBlockArgs(
+                    bn=use_batch_norm, act=act
+                ) if coder_type.startswith('generative_upsample') and idx == 0 else
                 ConvBlock(
-                    in_channels[-1], in_channels[0],
+                    intra_channels[idx - 1] if idx != 0 else in_channels,
+                    intra_channels[idx],
                     3, 1,
                     region_type=region_type,
                     bn=use_batch_norm, act=act
-                ), *shared_block
-            )
-            return nn.ModuleList(
-                [*[shared_block] * (len(in_channels) - 1), last_block]
-            )
+                ),
 
+                *[basic_block(intra_channels[idx]) for _ in range(basic_block_num)]
+
+            ) for idx in range(len(intra_channels))],
+
+            ConvBlock(
+                intra_channels[-1],
+                out_channels,
+                3, 1,
+                region_type=region_type,
+                bn=use_batch_norm if coder_type.endswith('encoder') else False,
+                act=None
+            )
+        )
+
+    def forward(self, x):
+        x = self.main(x)
+        if self.value_scaler != 1:
+            x = minkowski_tensor_wrapped_op(x, lambda _: _ * self.value_scaler)
+        return x
+
+
+HyperEncoder = partial(HyperCoder, 'encoder')
+HyperDecoder = partial(HyperCoder, 'decoder', 1.0)
+HyperEncoderForGeoLossLess = partial(HyperCoder, 'generative_upsample_encoder')
+HyperDecoderForGeoLossLess = HyperDecoder
+
+
+class EncoderForGeoLossLess(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 coder_num: int,
+                 value_scaler: Union[float, Tuple[float, ...]],
+                 basic_block_type: str,
+                 region_type: str,
+                 basic_block_num: int,
+                 use_batch_norm: bool,
+                 act: Optional[str]):
+        super(EncoderForGeoLossLess, self).__init__()
+        self.blocks_num = coder_num
+        if isinstance(value_scaler, float):
+            self.value_scaler = [value_scaler] * self.blocks_num
         else:
-            return nn.ModuleList([shared_block] * (len(in_channels)))
+            assert isinstance(value_scaler, List) or isinstance(value_scaler, Tuple)
+            self.value_scaler = value_scaler
+        self.first_act = get_act_module(act)
+
+        hidden_channels = in_channels
+        gate_channels = 4 * hidden_channels
+
+        self.conv_i = ConvBlock(
+            in_channels,
+            gate_channels,
+            2, 2,
+            region_type='HYPER_CUBE',
+            bn=use_batch_norm, act=act
+        )
+
+        self.conv_h = ConvBlock(
+            hidden_channels,
+            gate_channels,
+            2, 2,
+            region_type='HYPER_CUBE',
+            bn=use_batch_norm, act=act
+        )
+
+        self.conv_c = ConvBlock(
+            hidden_channels,
+            hidden_channels,
+            2, 2,
+            region_type='HYPER_CUBE',
+            bn=use_batch_norm, act=act
+        )
+
+        self.conv_out = ConvBlock(
+            hidden_channels,
+            out_channels,
+            3, 1,
+            region_type=region_type,
+            bn=use_batch_norm, act=None
+        )
+
+        self.conv_coord = make_downsample_blocks(
+            1, hidden_channels, (hidden_channels,),
+            basic_block_type, region_type, basic_block_num,
+            use_batch_norm, act,
+            use_batch_norm, act
+        )[0]
+
+        self.hidden_channels = hidden_channels
+
+    def forward(self, x):
+        x = self.first_act(x)
+        strided_fea_for_coord_list = []
+        strided_fea_list = []
+
+        cm = x.coordinate_manager
+        coordinate_map_key = x.coordinate_map_key
+        make_hidden = lambda: ME.SparseTensor(
+            features=torch.zeros(
+                (x.shape[0], self.hidden_channels),
+                dtype=x.F.dtype,
+                device=x.F.device
+            ),
+            coordinate_map_key=coordinate_map_key,
+            coordinate_manager=cm
+        )
+        hx = make_hidden()
+        cx = make_hidden()
+
+        for idx in range(self.blocks_num):
+            strided_fea_for_coord_list.append(
+                self.conv_coord(ME.SparseTensor(
+                    features=torch.ones(
+                        (hx.shape[0], 1), dtype=hx.F.dtype, device=hx.F.device
+                    ),
+                    coordinate_map_key=coordinate_map_key,
+                    coordinate_manager=cm
+                ))
+            )
+
+            cx = self.conv_c(cx)
+            gates = self.conv_h(hx)
+            coordinate_map_key = cx.coordinate_map_key
+            if idx == 0:
+                gates = gates + self.conv_i(x)
+
+            in_gate, forget_gate, cell_gate, out_gate = gates.F.chunk(4, 1)
+            in_gate = torch.sigmoid(in_gate)
+            forget_gate = torch.sigmoid(forget_gate)
+            cell_gate = torch.sigmoid(cell_gate)
+            out_gate = torch.sigmoid(out_gate)
+
+            cx = ME.SparseTensor(
+                features=(forget_gate * cx.F) + (in_gate * cell_gate),
+                coordinate_map_key=coordinate_map_key,
+                coordinate_manager=cm
+            )
+            hx = ME.SparseTensor(
+                out_gate * torch.tanh(cx.F),
+                coordinate_map_key=coordinate_map_key,
+                coordinate_manager=cm
+            )
+            strided_fea_list.append(hx)
+
+        for idx, fea in enumerate(strided_fea_list):
+            strided_fea_list[idx] = minkowski_tensor_wrapped_op(
+                self.conv_out(fea),
+                lambda _: _ * self.value_scaler[idx]
+            )
+
+        for idx, fea in enumerate(strided_fea_for_coord_list):
+            strided_fea_for_coord_list[idx] = minkowski_tensor_wrapped_op(
+                fea,
+                lambda _: _ * self.value_scaler[idx]
+            )
+
+        return strided_fea_for_coord_list, strided_fea_list
 
 
-HyperDecoderListForGeoLossLess = partial(decoder_list_for_geo_lossless, 'hyper')
-DecoderListForGeoLossLess = partial(decoder_list_for_geo_lossless, 'normal', False)
+class DecoderForGeoLossLess(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 hidden_channels,
+                 coder_num: int,
+                 basic_block_type: str,
+                 region_type: str,
+                 basic_block_num: int,
+                 use_batch_norm: bool,
+                 act: Optional[str]):
+        super(DecoderForGeoLossLess, self).__init__()
+        self.blocks_num = coder_num
+        gate_channels = 4 * hidden_channels
+
+        self.conv_i = ConvTransBlock(
+            in_channels,
+            gate_channels,
+            2, 2,
+            region_type='HYPER_CUBE',
+            bn=use_batch_norm, act=act
+        )
+
+        self.conv_h = ConvTransBlock(
+            hidden_channels,
+            gate_channels,
+            2, 2,
+            region_type='HYPER_CUBE',
+            bn=use_batch_norm, act=act
+        )
+
+        self.conv_c = ConvTransBlock(
+            hidden_channels,
+            hidden_channels,
+            2, 2,
+            region_type='HYPER_CUBE',
+            bn=use_batch_norm, act=act
+        )
+
+        self.hidden_channels = hidden_channels
+
+    def forward(self, x_list: List[Union[ME.SparseTensor, ME.CoordinateMapKey]]):
+        assert len(x_list) == self.blocks_num + 1
+
+        cm = x_list[0].coordinate_manager
+        coordinate_map_key = x_list[0].coordinate_map_key
+        make_hidden = lambda: ME.SparseTensor(
+            features=torch.zeros(
+                (x_list[0].shape[0], self.hidden_channels),
+                dtype=x_list[0].F.dtype,
+                device=x_list[0].F.device
+            ),
+            coordinate_map_key=coordinate_map_key,
+            coordinate_manager=cm
+        )
+        hx = make_hidden()
+        cx = make_hidden()
+
+        for idx in range(self.blocks_num):
+            if idx == self.blocks_num - 1:
+                coordinate_map_key = x_list[idx + 1]
+            else:
+                coordinate_map_key = x_list[idx + 1].coordinate_map_key
+            assert isinstance(coordinate_map_key, ME.CoordinateMapKey)
+
+            cx = self.conv_c(cx, coordinate_map_key)
+            gates = self.conv_h(hx, coordinate_map_key) + \
+                self.conv_i(x_list[idx], coordinate_map_key)
+
+            in_gate, forget_gate, cell_gate, out_gate = gates.F.chunk(4, 1)
+            in_gate = torch.sigmoid(in_gate)
+            forget_gate = torch.sigmoid(forget_gate)
+            cell_gate = torch.sigmoid(cell_gate)
+            out_gate = torch.sigmoid(out_gate)
+
+            cx = ME.SparseTensor(
+                features=(forget_gate * cx.F) + (in_gate * cell_gate),
+                coordinate_map_key=coordinate_map_key,
+                coordinate_manager=cm
+            )
+            hx = ME.SparseTensor(
+                out_gate * torch.tanh(cx.F),
+                coordinate_map_key=coordinate_map_key,
+                coordinate_manager=cm
+            )
+
+        return hx
