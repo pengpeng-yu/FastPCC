@@ -25,6 +25,7 @@ class ModelConfig(SimpleConfig):
     hyper_decoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
     prior_indexes_range: Tuple[int, ...] = (64, )
     hyper_encoder_scaler: float = 1.0
+    prior_indexes_scaler: float = 1.0
 
     lossless_compression_based: bool = False
     lossless_coder_channels: int = 64

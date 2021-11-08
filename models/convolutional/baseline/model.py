@@ -84,6 +84,7 @@ class PCC(nn.Module):
             else cfg.lossless_coder_channels,
             cfg.decoder_channels,
             cfg.conv_trans_near_pruning,
+            1 / cfg.encoder_scaler if not cfg.lossless_compression_based else 1,
             *basic_block_args,
             loss_type='BCE' if cfg.reconstruct_loss_type == 'Focal'
             else cfg.reconstruct_loss_type,
@@ -98,6 +99,8 @@ class PCC(nn.Module):
 
         else:
             hyper_encoder = HyperEncoder(
+                1 / cfg.encoder_scaler if isinstance(cfg.encoder_scaler, float)
+                else len(cfg.encoder_scaler) / sum(cfg.encoder_scaler),
                 cfg.hyper_encoder_scaler,
                 cfg.compressed_channels,
                 cfg.hyper_compressed_channels,
@@ -106,6 +109,8 @@ class PCC(nn.Module):
             )
 
             hyper_decoder = HyperDecoder(
+                1 / cfg.hyper_encoder_scaler,
+                cfg.prior_indexes_scaler,
                 cfg.hyper_compressed_channels,
                 cfg.compressed_channels * len(cfg.prior_indexes_range),
                 cfg.hyper_decoder_channels,
@@ -162,9 +167,12 @@ class PCC(nn.Module):
                 cfg.compressed_channels,
                 cfg.lossless_coder_channels,
                 cfg.lossless_coder_num,
+                1 / cfg.encoder_scaler if isinstance(cfg.encoder_scaler, float)
+                else [1 / _ for _ in cfg.encoder_scaler[::-1]],
                 *basic_block_args
             )
             hyper_encoder_coord_geo_lossless = HyperEncoderForGeoLossLess(
+                1.0,
                 cfg.hyper_encoder_scaler,
                 cfg.lossless_coder_channels,
                 cfg.hyper_compressed_channels,
@@ -172,6 +180,8 @@ class PCC(nn.Module):
                 *basic_block_args
             )
             hyper_decoder_coord_geo_lossless = HyperDecoderForGeoLossLess(
+                1 / cfg.hyper_encoder_scaler,
+                cfg.prior_indexes_scaler,
                 cfg.hyper_compressed_channels,
                 1 * len(cfg.lossless_prior_indexes_range),
                 cfg.hyper_decoder_channels,
@@ -208,7 +218,6 @@ class PCC(nn.Module):
             self.entropy_bottleneck = entropy_bottleneck
 
         self.cfg = cfg
-        self.init_parameters()
 
     def forward(self, pc_data: PCData):
         if self.training:
@@ -488,18 +497,6 @@ class PCC(nn.Module):
             reconstruct_loss *= self.cfg.reconstruct_loss_factor
 
         return reconstruct_loss
-
-    def init_parameters(self):
-        for m in self.modules():
-            if isinstance(m, (ME.MinkowskiConvolution,
-                              ME.MinkowskiGenerativeConvolutionTranspose)):
-                torch.nn.init.normal_(m.kernel, 0, 0.02)
-                if m.bias is not None:
-                    torch.nn.init.zeros_(m.bias)
-
-        for m in self.modules():
-            if not isinstance(m, PCC) and hasattr(m, 'init_parameters'):
-                m.init_parameters()
 
     def train(self, mode: bool = True):
         """

@@ -286,6 +286,7 @@ class Decoder(nn.Module):
                  in_channels,
                  intra_channels: Tuple[int, ...],
                  conv_trans_near_pruning: bool,
+                 value_scaler: float,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -293,7 +294,7 @@ class Decoder(nn.Module):
                  act: Optional[str],
                  **kwargs):
         super(Decoder, self).__init__()
-
+        self.value_scaler = value_scaler
         self.blocks = nn.Sequential(*[
             DecoderBlock(in_channels if idx == 0 else intra_channels[idx - 1],
                          ch, ch,
@@ -306,6 +307,10 @@ class Decoder(nn.Module):
                          **kwargs) for idx, ch in enumerate(intra_channels)])
 
     def forward(self, msg: GenerativeUpsampleMessage):
+        if self.value_scaler != 1:
+            msg.fea = minkowski_tensor_wrapped_op(
+                msg.fea, lambda _: _ * self.value_scaler
+            )
         return self.blocks(msg)
 
     def __repr__(self):
@@ -315,7 +320,8 @@ class Decoder(nn.Module):
 class HyperCoder(nn.Module):
     def __init__(self,
                  coder_type: str,
-                 value_scaler: float,
+                 pre_value_scaler: float,
+                 post_value_scaler: float,
                  in_channels,
                  out_channels,
                  intra_channels: Tuple[int, ...],
@@ -325,7 +331,9 @@ class HyperCoder(nn.Module):
                  use_batch_norm: bool,
                  act: Optional[str]):
         super(HyperCoder, self).__init__()
-        self.value_scaler = value_scaler
+        self.pre_value_scaler = pre_value_scaler
+        self.post_value_scaler = post_value_scaler
+        self.coder_type = coder_type
 
         basic_block = partial(BLOCKS_DICT[basic_block_type],
                               region_type=region_type,
@@ -364,14 +372,16 @@ class HyperCoder(nn.Module):
         )
 
     def forward(self, x):
+        if self.pre_value_scaler != 1:
+            x = minkowski_tensor_wrapped_op(x, lambda _: _ * self.pre_value_scaler)
         x = self.main(x)
-        if self.value_scaler != 1:
-            x = minkowski_tensor_wrapped_op(x, lambda _: _ * self.value_scaler)
+        if self.post_value_scaler != 1:
+            x = minkowski_tensor_wrapped_op(x, lambda _: _ * self.post_value_scaler)
         return x
 
 
 HyperEncoder = partial(HyperCoder, 'encoder')
-HyperDecoder = partial(HyperCoder, 'decoder', 1.0)
+HyperDecoder = partial(HyperCoder, 'decoder')
 HyperEncoderForGeoLossLess = partial(HyperCoder, 'generative_upsample_encoder')
 HyperDecoderForGeoLossLess = HyperDecoder
 
@@ -404,7 +414,7 @@ class EncoderForGeoLossLess(nn.Module):
             gate_channels,
             2, 2,
             region_type='HYPER_CUBE',
-            bn=use_batch_norm, act=act
+            bn=use_batch_norm, act=None
         )
 
         self.conv_h = ConvBlock(
@@ -412,7 +422,7 @@ class EncoderForGeoLossLess(nn.Module):
             gate_channels,
             2, 2,
             region_type='HYPER_CUBE',
-            bn=use_batch_norm, act=act
+            bn=use_batch_norm, act=None
         )
 
         self.conv_c = ConvBlock(
@@ -420,7 +430,7 @@ class EncoderForGeoLossLess(nn.Module):
             hidden_channels,
             2, 2,
             region_type='HYPER_CUBE',
-            bn=use_batch_norm, act=act
+            bn=use_batch_norm, act=None
         )
 
         self.conv_out = ConvBlock(
@@ -479,7 +489,7 @@ class EncoderForGeoLossLess(nn.Module):
             in_gate, forget_gate, cell_gate, out_gate = gates.F.chunk(4, 1)
             in_gate = torch.sigmoid(in_gate)
             forget_gate = torch.sigmoid(forget_gate)
-            cell_gate = torch.sigmoid(cell_gate)
+            cell_gate = torch.tanh(cell_gate)
             out_gate = torch.sigmoid(out_gate)
 
             cx = ME.SparseTensor(
@@ -495,16 +505,14 @@ class EncoderForGeoLossLess(nn.Module):
             strided_fea_list.append(hx)
 
         for idx, fea in enumerate(strided_fea_list):
-            strided_fea_list[idx] = minkowski_tensor_wrapped_op(
-                self.conv_out(fea),
-                lambda _: _ * self.value_scaler[idx]
-            )
+            strided_fea_list[idx] = self.conv_out(fea)
 
-        for idx, fea in enumerate(strided_fea_for_coord_list):
-            strided_fea_for_coord_list[idx] = minkowski_tensor_wrapped_op(
-                fea,
-                lambda _: _ * self.value_scaler[idx]
-            )
+        for idx, value_scaler in enumerate(self.value_scaler):
+            if value_scaler != 1:
+                strided_fea_list[idx] = minkowski_tensor_wrapped_op(
+                    strided_fea_list[idx],
+                    lambda _: _ * value_scaler
+                )
 
         return strided_fea_for_coord_list, strided_fea_list
 
@@ -514,6 +522,7 @@ class DecoderForGeoLossLess(nn.Module):
                  in_channels,
                  hidden_channels,
                  coder_num: int,
+                 value_scaler: Union[float, Tuple[float, ...]],
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -521,6 +530,11 @@ class DecoderForGeoLossLess(nn.Module):
                  act: Optional[str]):
         super(DecoderForGeoLossLess, self).__init__()
         self.blocks_num = coder_num
+        if isinstance(value_scaler, float):
+            self.value_scaler = [value_scaler] * self.blocks_num
+        else:
+            assert isinstance(value_scaler, List) or isinstance(value_scaler, Tuple)
+            self.value_scaler = value_scaler
         gate_channels = 4 * hidden_channels
 
         self.conv_i = ConvTransBlock(
@@ -528,7 +542,7 @@ class DecoderForGeoLossLess(nn.Module):
             gate_channels,
             2, 2,
             region_type='HYPER_CUBE',
-            bn=use_batch_norm, act=act
+            bn=use_batch_norm, act=None
         )
 
         self.conv_h = ConvTransBlock(
@@ -536,7 +550,7 @@ class DecoderForGeoLossLess(nn.Module):
             gate_channels,
             2, 2,
             region_type='HYPER_CUBE',
-            bn=use_batch_norm, act=act
+            bn=use_batch_norm, act=None
         )
 
         self.conv_c = ConvTransBlock(
@@ -544,13 +558,18 @@ class DecoderForGeoLossLess(nn.Module):
             hidden_channels,
             2, 2,
             region_type='HYPER_CUBE',
-            bn=use_batch_norm, act=act
+            bn=use_batch_norm, act=None
         )
 
         self.hidden_channels = hidden_channels
 
     def forward(self, x_list: List[Union[ME.SparseTensor, ME.CoordinateMapKey]]):
         assert len(x_list) == self.blocks_num + 1
+        for idx, value_scaler in enumerate(self.value_scaler):
+            if value_scaler != 1:
+                x_list[idx] = minkowski_tensor_wrapped_op(
+                    x_list[idx], lambda _: _ * value_scaler
+                )
 
         cm = x_list[0].coordinate_manager
         coordinate_map_key = x_list[0].coordinate_map_key
@@ -580,7 +599,7 @@ class DecoderForGeoLossLess(nn.Module):
             in_gate, forget_gate, cell_gate, out_gate = gates.F.chunk(4, 1)
             in_gate = torch.sigmoid(in_gate)
             forget_gate = torch.sigmoid(forget_gate)
-            cell_gate = torch.sigmoid(cell_gate)
+            cell_gate = torch.tanh(cell_gate)
             out_gate = torch.sigmoid(out_gate)
 
             cx = ME.SparseTensor(

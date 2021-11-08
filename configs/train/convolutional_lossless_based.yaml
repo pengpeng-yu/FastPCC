@@ -14,7 +14,8 @@ model:
   hyper_compressed_channels: 8
   hyper_decoder_channels: [32, 32]
   prior_indexes_range: [16, 16, 16, 16]
-  hyper_encoder_scaler: 10.0
+  hyper_encoder_scaler: 100.0
+  prior_indexes_scaler: 100.0
   lossless_compression_based: True
   lossless_coder_channels: 64
   lossless_coder_num: 3
