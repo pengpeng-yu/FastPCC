@@ -31,13 +31,14 @@ class ModelConfig(SimpleConfig):
     lossless_coder_channels: int = 64
     lossless_coder_num: int = 3
     lossless_prior_indexes_range: Tuple[int, ...] = (8, 8, 8, 8)
+    lossless_intermediate_supervision: bool = False
 
     reconstruct_loss_type: str = 'BCE'  # BCE or Dist or Focal
     dist_upper_bound = 2.0
     adaptive_pruning: bool = True
     adaptive_pruning_num_scaler: float = 1.0
     bpp_loss_factor: float = 0.2
-    reconstruct_loss_factor: float = 1.0
+    reconstruct_loss_factor: Union[float, Tuple[float, ...]] = 1.0
     warmup_steps: int = 0
     warmup_bpp_loss_factor: float = 0.2
 

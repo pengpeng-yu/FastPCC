@@ -1,7 +1,10 @@
 from typing import Tuple, List, Dict, Union, Callable, Optional
 
 import torch
-from pytorch3d.ops import knn_points
+try:
+    from pytorch3d.ops import knn_points
+except ImportError:
+    knn_points = None
 import MinkowskiEngine as ME
 from torch import nn as nn
 

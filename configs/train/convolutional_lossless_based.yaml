@@ -6,23 +6,25 @@ model:
   activation: 'relu'
   conv_trans_near_pruning: False
   encoder_channels: [4, 16, 64, 64]
-  compressed_channels: 8
+  compressed_channels: 16
   decoder_channels: [64, 16, 4]
   encoder_scaler: 10.0
   hyperprior: NoisyDeepFactorized
   hyper_encoder_channels: [32, 32]
-  hyper_compressed_channels: 8
+  hyper_compressed_channels: 16
   hyper_decoder_channels: [32, 32]
   prior_indexes_range: [16, 16, 16, 16]
   hyper_encoder_scaler: 100.0
   prior_indexes_scaler: 100.0
   lossless_compression_based: True
   lossless_coder_channels: 64
-  lossless_coder_num: 3
+  lossless_coder_num: 2
   lossless_prior_indexes_range: [4, 4, 4, 4]
+  lossless_intermediate_supervision: True
   bpp_loss_factor: 0.2
-  warmup_steps: 5000
-  warmup_bpp_loss_factor: 0.0
+  reconstruct_loss_factor: [1.0, 0.1, 0.1]
+  warmup_steps: 3000
+  warmup_bpp_loss_factor: 0.01
 
 
 train:

@@ -106,7 +106,7 @@ class GeoLosslessEntropyModel(nn.Module):
     def forward(self, y_top: ME.SparseTensor):
         if self.training:
             cm = y_top.coordinate_manager
-            strided_fea_for_coord_list, strided_fea_list = self.encoder(y_top)
+            strided_fea_for_coord_list, (top_fea, *strided_fea_list) = self.encoder(y_top)
             strided_fea_list = [self.hyper_encoder_post_op(_) for _ in strided_fea_list]
             coder_num = len(strided_fea_list)
 
@@ -142,7 +142,11 @@ class GeoLosslessEntropyModel(nn.Module):
                 )
                 concat_loss_dicts(loss_dict, coord_loss_dict, lambda k: 'coord_' + k)
 
-            strided_fea_tilde_list.append(y_top.coordinate_map_key)
+            fea_tilde, fea_loss_dict = self.fea_entropy_model(
+                top_fea, return_aux_loss=False
+            )
+            strided_fea_tilde_list.append(fea_tilde)
+            concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: 'fea_top_' + k)
 
             return self.decoder(strided_fea_tilde_list), loss_dict
 
@@ -168,7 +172,7 @@ class GeoLosslessEntropyModel(nn.Module):
         # thus all the inputs of entropy models are supposed to
         # have batch size == 1.
 
-        strided_fea_for_coord_list, strided_fea_list = self.encoder(y_top)
+        strided_fea_for_coord_list, (top_fea, *strided_fea_list) = self.encoder(y_top)
         strided_fea_list = [self.hyper_encoder_post_op(_) for _ in strided_fea_list]
         coder_num = len(strided_fea_list)
 
@@ -231,9 +235,25 @@ class GeoLosslessEntropyModel(nn.Module):
             if idx == coder_num - 1:
                 bottom_rounded_fea = rounded_fea
 
-        concat_string = self.concat_strings(
+        permutation_kernel_map = cm.kernel_map(
+            coord_target_key,
+            coord_recon_key,
+            kernel_size=1)[0][0].to(torch.long)
+        top_fea = ME.SparseTensor(
+            features=top_fea.F[permutation_kernel_map],
+            coordinate_map_key=coord_recon_key,
+            coordinate_manager=cm
+        )
+        (top_fea_string,), coding_batch_shape, rounded_top_fea = \
+            self.fea_entropy_model.compress(top_fea)
+
+        partial_concat_string = self.concat_strings(
             [fea_strings, coord_prior_strings, coord_strings],
             [self.fea_bytes_num_bytes, self.coord_prior_bytes_num_bytes, self.coord_bytes_num_bytes]
+        )
+        concat_string = self.concat_strings(
+            [[top_fea_string], [partial_concat_string]],
+            [self.fea_bytes_num_bytes, 0]
         )
 
         return concat_string, bottom_rounded_fea, coder_num
@@ -244,12 +264,14 @@ class GeoLosslessEntropyModel(nn.Module):
                    sparse_tensor_coords_tuple: Tuple[ME.CoordinateMapKey, ME.CoordinateManager],
                    coder_num: int) \
             -> ME.SparseTensor:
+        (top_fea_string,), (partial_concat_string,) = self.split_strings(
+            concat_string, 1, [self.fea_bytes_num_bytes, 0]
+        )
         fea_strings, coord_prior_strings, coord_strings = self.split_strings(
-            concat_string, coder_num,
+            partial_concat_string, coder_num,
             [self.fea_bytes_num_bytes, self.coord_prior_bytes_num_bytes, self.coord_bytes_num_bytes]
         )
 
-        coord_recon_key = None
         strided_fea_recon_list = []
         cm = sparse_tensor_coords_tuple[1]
         gen_conv_trans = ME.MinkowskiGenerativeConvolutionTranspose(
@@ -296,7 +318,11 @@ class GeoLosslessEntropyModel(nn.Module):
 
             sparse_tensor_coords_tuple = coord_recon_key, cm
 
-        strided_fea_recon_list.append(coord_recon_key)
+        top_fea = self.fea_entropy_model.decompress(
+            [top_fea_string], torch.Size([1]), target_device,
+            sparse_tensor_coords_tuple=sparse_tensor_coords_tuple
+        )
+        strided_fea_recon_list.append(top_fea)
 
         return self.decoder(strided_fea_recon_list)
 

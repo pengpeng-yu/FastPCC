@@ -76,7 +76,8 @@ class PCC(nn.Module):
             cfg.adaptive_pruning,
             cfg.adaptive_pruning_num_scaler,
             cfg.encoder_scaler if not cfg.lossless_compression_based else 1,
-            *basic_block_args
+            *basic_block_args,
+            None if not cfg.lossless_compression_based else cfg.activation
         )
 
         self.decoder = Decoder(
@@ -169,6 +170,7 @@ class PCC(nn.Module):
                 cfg.lossless_coder_num,
                 1 / cfg.encoder_scaler if isinstance(cfg.encoder_scaler, float)
                 else [1 / _ for _ in cfg.encoder_scaler[::-1]],
+                cfg.lossless_intermediate_supervision,
                 *basic_block_args
             )
             hyper_encoder_coord_geo_lossless = HyperEncoderForGeoLossLess(
@@ -289,11 +291,19 @@ class PCC(nn.Module):
                          else self.cfg.bpp_loss_factor) / sparse_pc.shape[0]
                 )
 
+        # For lossless_intermediate_supervision
         if not isinstance(bottleneck_feature, List):
             bottleneck_feature = [bottleneck_feature]
 
+        if len(bottleneck_feature) != 1:
+            assert len(bottleneck_feature) == \
+                   len(self.decoder) == \
+                   len(self.cfg.reconstruct_loss_factor)
+
         for idx, sub_bn_fea in enumerate(bottleneck_feature):
-            decoder_message = self.decoder(
+            if idx != 0 and idx != len(bottleneck_feature) - 1:
+                continue  # debug
+            decoder_message = self.decoder[: len(self.decoder) - idx](  # debug
                 GenerativeUpsampleMessage(
                     fea=sub_bn_fea,
                     target_key=sparse_pc.coordinate_map_key,
@@ -303,7 +313,8 @@ class PCC(nn.Module):
 
             loss_dict[f'reconstruct_{idx}_loss'] = self.get_reconstruct_loss(
                 decoder_message.cached_pred_list,
-                decoder_message.cached_target_list
+                decoder_message.cached_target_list,
+                idx
             )
 
         loss_dict['loss'] = sum(loss_dict.values())
@@ -473,7 +484,7 @@ class PCC(nn.Module):
 
         return pc_recon
 
-    def get_reconstruct_loss(self, cached_pred_list, cached_target_list):
+    def get_reconstruct_loss(self, cached_pred_list, cached_target_list, factor_idx):
         if self.cfg.reconstruct_loss_type == 'BCE':
             loss_func = F.binary_cross_entropy_with_logits
         elif self.cfg.reconstruct_loss_type == 'Focal':
@@ -493,8 +504,12 @@ class PCC(nn.Module):
 
         reconstruct_loss = sum(reconstruct_loss_list) / len(reconstruct_loss_list)
 
-        if self.cfg.reconstruct_loss_factor != 1:
-            reconstruct_loss *= self.cfg.reconstruct_loss_factor
+        if isinstance(self.cfg.reconstruct_loss_factor, float):
+            factor = self.cfg.reconstruct_loss_factor
+        else:
+            factor = self.cfg.reconstruct_loss_factor[factor_idx]
+        if factor != 1:
+            reconstruct_loss *= factor
 
         return reconstruct_loss
 

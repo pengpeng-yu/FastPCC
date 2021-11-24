@@ -9,7 +9,10 @@ import open3d as o3d
 import torch
 
 from lib.data_utils import PCData
-from lib.loss_functions import chamfer_loss
+try:
+    from lib.loss_functions import chamfer_loss
+except ImportError:
+    chamfer_loss = None
 from lib.metrics.misc import batch_image_psnr
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 
