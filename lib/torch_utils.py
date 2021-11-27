@@ -373,8 +373,7 @@ def minkowski_tensor_wrapped_fn(
     return func_decorator
 
 
-def minkowski_tensor_split(x: ME.SparseTensor, split_size: Union[int, List[int]]) \
-        -> List[ME.SparseTensor]:
+def minkowski_tensor_split(x, split_size: Union[int, List[int]]) -> List:
     ret = []
 
     if isinstance(split_size, List):

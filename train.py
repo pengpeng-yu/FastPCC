@@ -7,6 +7,7 @@ import pathlib
 from tqdm import tqdm
 from functools import partial
 from typing import Dict, Union, List, Callable
+import subprocess
 
 import numpy as np
 import torch
@@ -15,8 +16,6 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.cuda import amp
 from torch.utils.tensorboard import SummaryWriter
-import tensorboard
-from tensorboard import program
 
 from test import test
 from lib.config import Config
@@ -76,14 +75,25 @@ def main():
                 logger.info(f'resumed tensorboard log file(s) in {last_tb_dir}')
 
         tb_writer = SummaryWriter(str(tb_logdir))
-        tb_program = program.TensorBoard()
         try:
-            tb_program.configure(argv=[None, '--logdir', str(tb_logdir)])
-            tb_url = tb_program.launch()
+            tb_proc = subprocess.Popen(
+                [os.path.join(os.path.split(sys.executable)[0], 'tensorboard'),
+                 '--logdir', str(tb_logdir)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                encoding='utf-8'
+            )
+            stdout_line = tb_proc.stdout.readline()
+            for _ in range(50):
+                if stdout_line.startswith('TensorBoard '):
+                    logger.info(stdout_line.rsplit('(', 1)[0])
+                    break
+                stdout_line = tb_proc.stdout.readline()
+            else:
+                raise Exception
         except Exception as e:
             logger.error(f'fail to launch Tensorboard')
             raise e
-        logger.info(f'TensorBoard {tensorboard.__version__} at {tb_url}')
 
         train(cfg, local_rank, logger, tb_writer, run_dir, ckpts_dir)
         

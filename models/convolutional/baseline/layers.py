@@ -3,6 +3,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import MinkowskiEngine as ME
 
 from lib.sparse_conv_layers import \
@@ -456,6 +457,7 @@ class EncoderForGeoLossLess(nn.Module):
     def forward(self, x):
         strided_fea_for_coord_list = []
         strided_fea_list = []
+        strided_cx_list = []
 
         cm = x.coordinate_manager
         coordinate_map_key = x.coordinate_map_key
@@ -474,6 +476,8 @@ class EncoderForGeoLossLess(nn.Module):
                 ))
             )
 
+            if self.training:
+                strided_cx_list.append(cx)
             cx = self.conv_c(cx)
             coordinate_map_key = cx.coordinate_map_key
             gates = self.conv_h(hx)
@@ -493,7 +497,10 @@ class EncoderForGeoLossLess(nn.Module):
                     lambda _: _ * value_scaler
                 )
 
-        return strided_fea_for_coord_list, strided_fea_list
+        if self.training:
+            return strided_fea_for_coord_list, strided_fea_list, strided_cx_list
+        else:
+            return strided_fea_for_coord_list, strided_fea_list
 
 
 class DecoderForGeoLossLess(nn.Module):
@@ -502,7 +509,6 @@ class DecoderForGeoLossLess(nn.Module):
                  out_channels,
                  coder_num: int,
                  value_scaler: Union[float, Tuple[float, ...]],
-                 intermediate_supervision: bool,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -515,7 +521,6 @@ class DecoderForGeoLossLess(nn.Module):
         else:
             assert self.value_scaler == self.blocks_num + 1
             self.value_scaler = value_scaler
-        self.intermediate_supervision = intermediate_supervision
 
         self.up_block = make_upsample_block(
             False,
@@ -540,7 +545,7 @@ class DecoderForGeoLossLess(nn.Module):
             bn=use_batch_norm, act=act
         )
 
-    def forward(self, x_list: List[Union[ME.SparseTensor, ME.CoordinateMapKey]]):
+    def forward(self, x_list: List[Union[ME.SparseTensor, ME.CoordinateMapKey]], *args):
         assert len(x_list) == self.blocks_num + 1
         for idx, value_scaler in enumerate(self.value_scaler):
             if value_scaler != 1:
@@ -551,26 +556,24 @@ class DecoderForGeoLossLess(nn.Module):
         trans_list = [self.transition_block(x_list[idx])
                       for idx in range(self.blocks_num + 1)]
 
-        if self.training and self.intermediate_supervision:
-            intra_results: List[List[torch.Tensor]] = [[trans_list[0]]]
-
-            for x in trans_list[1:]:
-                intra_result = []
-                for idx in range(len(intra_results[-1])):
-                    tmp = self.up_block(intra_results[-1][idx], x.coordinate_map_key)
-                    if idx == 0:
-                        intra_result.append(tmp + x)
-                    intra_result.append(tmp)
-                intra_results.append(intra_result)
-
-            rets: List[torch.Tensor] = []
-            for x in intra_results[-1]:
-                rets.append(self.out_block(x))
-            return rets
+        if self.training:
+            assert len(args) == 1
+            strided_cx_list = args[0]
+            loss_dict = {}
+            recon = trans_list[0]
+            for idx, x in enumerate(trans_list[1:]):
+                inverse_idx = self.blocks_num - 1 - idx
+                recon = self.up_block(recon, x.coordinate_map_key) + x
+                loss_dict[f'fea_recon_dist_{inverse_idx}_loss'] = F.l1_loss(
+                    recon.F, strided_cx_list[inverse_idx].F.detach()
+                )
+                recon = strided_cx_list[inverse_idx]  # Teacher forcing
+            recon = self.out_block(recon)
+            return recon, loss_dict
 
         else:
-            ret = trans_list[0]
-            for idx, x in enumerate(trans_list[1:]):
-                ret = self.up_block(ret, x.coordinate_map_key) + x
-            ret = self.out_block(ret)
-            return ret
+            recon = trans_list[0]
+            for x in trans_list[1:]:
+                recon = self.up_block(recon, x.coordinate_map_key) + x
+            recon = self.out_block(recon)
+            return recon

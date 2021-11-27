@@ -106,7 +106,7 @@ class GeoLosslessEntropyModel(nn.Module):
     def forward(self, y_top: ME.SparseTensor):
         if self.training:
             cm = y_top.coordinate_manager
-            strided_fea_for_coord_list, (top_fea, *strided_fea_list) = self.encoder(y_top)
+            strided_fea_for_coord_list, (top_fea, *strided_fea_list), *encoder_args = self.encoder(y_top)
             strided_fea_list = [self.hyper_encoder_post_op(_) for _ in strided_fea_list]
             coder_num = len(strided_fea_list)
 
@@ -148,7 +148,9 @@ class GeoLosslessEntropyModel(nn.Module):
             strided_fea_tilde_list.append(fea_tilde)
             concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: 'fea_top_' + k)
 
-            return self.decoder(strided_fea_tilde_list), loss_dict
+            y_top_recon, decoder_loss_dict = self.decoder(strided_fea_tilde_list, *encoder_args)
+            concat_loss_dicts(loss_dict, decoder_loss_dict)
+            return y_top_recon, loss_dict
 
         else:
             concat_string, bottom_rounded_fea, coder_num = self.compress(y_top)

@@ -8,21 +8,20 @@ model:
   encoder_channels: [4, 16, 64, 64]
   compressed_channels: 16
   decoder_channels: [64, 16, 4]
-  encoder_scaler: 10.0
+  encoder_scaler: 1.0
   hyperprior: NoisyDeepFactorized
   hyper_encoder_channels: [32, 32]
   hyper_compressed_channels: 16
   hyper_decoder_channels: [32, 32]
   prior_indexes_range: [16, 16, 16, 16]
-  hyper_encoder_scaler: 100.0
-  prior_indexes_scaler: 100.0
+  hyper_encoder_scaler: 1.0
+  prior_indexes_scaler: 10.0
   lossless_compression_based: True
   lossless_coder_channels: 64
-  lossless_coder_num: 2
+  lossless_coder_num: 3
   lossless_prior_indexes_range: [4, 4, 4, 4]
-  lossless_intermediate_supervision: True
   bpp_loss_factor: 0.2
-  reconstruct_loss_factor: [1.0, 0.1, 0.1]
+  reconstruct_loss_factor: 1.0
   warmup_steps: 3000
   warmup_bpp_loss_factor: 0.01
 
@@ -34,9 +33,9 @@ train:
   more_reproducible: False
   batch_size: 8
   num_workers: 2
-  optimizer: [AdamW, Adam, Adam]
+  optimizer: [AdamW, AdamW, Adam]
   momentum: 0.9
-  weight_decay: [0.0001, 0.0, 0.0]
+  weight_decay: [0.0001, 0.0001, 0.0]
   max_grad_norm: [1.0, 1.0, 0.0]
 
   learning_rate: [0.0005, 0.0001, 0.005]
