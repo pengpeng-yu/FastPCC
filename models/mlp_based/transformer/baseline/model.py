@@ -79,7 +79,7 @@ class PCC(nn.Module):
             loss_dict['loss'] = sum(loss_dict.values())
             for key in loss_dict:
                 if key != 'loss':
-                    loss_dict[key] = loss_dict[key].detach().cpu().item()
+                    loss_dict[key] = loss_dict[key].item()
 
             return loss_dict
 

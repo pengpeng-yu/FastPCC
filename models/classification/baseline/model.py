@@ -85,7 +85,7 @@ class Model(nn.Module):
         if self.training:
             loss = F.cross_entropy(feature, target)
             return {'loss': loss,
-                    'ce_loss': loss.detach().cpu().item()}
+                    'ce_loss': loss.item()}
 
         else:
             pred = torch.argmax(feature, dim=1)

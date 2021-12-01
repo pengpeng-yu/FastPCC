@@ -23,8 +23,8 @@ from lib.entropy_models.hyperprior.sparse_tensor_specialized.noisy_deep_factoriz
 from models.convolutional.baseline.layers import \
     Encoder, Decoder, \
     HyperEncoder, HyperDecoder, \
-    EncoderForGeoLossLess, DecoderForGeoLossLess, \
-    HyperEncoderForGeoLossLess, HyperDecoderForGeoLossLess
+    HyperDecoderCoordForGeoLossLess, HyperDecoderFeaForGeoLossLess, \
+    EncoderForGeoLossLess
 from models.convolutional.baseline.model_config import ModelConfig
 
 
@@ -81,11 +81,10 @@ class PCC(nn.Module):
         )
 
         self.decoder = Decoder(
-            cfg.compressed_channels if not cfg.lossless_compression_based
-            else cfg.lossless_coder_channels,
+            cfg.compressed_channels,
             cfg.decoder_channels,
             cfg.conv_trans_near_pruning,
-            1 / cfg.encoder_scaler if not cfg.lossless_compression_based else 1,
+            1 / cfg.encoder_scaler,
             *basic_block_args,
             loss_type='BCE' if cfg.reconstruct_loss_type == 'Focal'
             else cfg.reconstruct_loss_type,
@@ -100,8 +99,7 @@ class PCC(nn.Module):
 
         else:
             hyper_encoder = HyperEncoder(
-                1 / cfg.encoder_scaler if isinstance(cfg.encoder_scaler, float)
-                else len(cfg.encoder_scaler) / sum(cfg.encoder_scaler),
+                1 / cfg.encoder_scaler,
                 cfg.hyper_encoder_scaler,
                 cfg.compressed_channels,
                 cfg.hyper_compressed_channels,
@@ -162,30 +160,27 @@ class PCC(nn.Module):
                 cfg.compressed_channels,
                 cfg.lossless_coder_num,
                 cfg.encoder_scaler,
+                cfg.lossless_detach_higher_fea,
                 *basic_block_args
             )
-            decoder_geo_lossless = DecoderForGeoLossLess(
-                cfg.compressed_channels,
-                cfg.lossless_coder_channels,
-                cfg.lossless_coder_num,
-                1 / cfg.encoder_scaler if isinstance(cfg.encoder_scaler, float)
-                else [1 / _ for _ in cfg.encoder_scaler[::-1]],
-                *basic_block_args
-            )
-            hyper_encoder_coord_geo_lossless = HyperEncoderForGeoLossLess(
-                1.0,
-                cfg.hyper_encoder_scaler,
-                cfg.lossless_coder_channels,
-                cfg.hyper_compressed_channels,
-                cfg.hyper_encoder_channels,
-                *basic_block_args
-            )
-            hyper_decoder_coord_geo_lossless = HyperDecoderForGeoLossLess(
-                1 / cfg.hyper_encoder_scaler,
+            hyper_decoder_coord_geo_lossless = HyperDecoderCoordForGeoLossLess(
+                1 / cfg.encoder_scaler,
                 cfg.prior_indexes_scaler,
                 cfg.hyper_compressed_channels,
-                1 * len(cfg.lossless_prior_indexes_range),
-                cfg.hyper_decoder_channels,
+                1 * len(cfg.lossless_coord_indexes_range),
+                (cfg.lossless_coder_channels,),
+                *basic_block_args
+            )
+            hyper_decoder_fea_geo_lossless = HyperDecoderFeaForGeoLossLess(
+                1 / cfg.encoder_scaler,
+                cfg.prior_indexes_scaler,
+                cfg.hyper_compressed_channels,
+                cfg.compressed_channels * (
+                    len(cfg.prior_indexes_range)
+                    if not cfg.lossless_hybrid_hyper_decoder_fea
+                    else len(cfg.prior_indexes_range) + 1
+                ),
+                (cfg.lossless_coder_channels,),
                 *basic_block_args
             )
 
@@ -198,20 +193,22 @@ class PCC(nn.Module):
                 )
 
             self.entropy_bottleneck = GeoLosslessNoisyDeepFactorizedEntropyModel(
-                fea_entropy_model=entropy_bottleneck,
+                bottom_fea_entropy_model=entropy_bottleneck,
                 encoder=encoder_geo_lossless,
-                decoder=decoder_geo_lossless,
-                hyper_encoder_coord=hyper_encoder_coord_geo_lossless,
+                detach_higher_fea=cfg.lossless_detach_higher_fea,
                 hyper_decoder_coord=hyper_decoder_coord_geo_lossless,
-                hyperprior_batch_channels=cfg.hyper_compressed_channels,
-                hyperprior_broadcast_channels_bytes=4,  # TODO: lower?
-                fea_bytes_num_bytes=4,
-                coord_prior_bytes_num_bytes=4,
+                hyper_decoder_fea=hyper_decoder_fea_geo_lossless,
+                hybrid_hyper_decoder_fea=cfg.lossless_hybrid_hyper_decoder_fea,
+                fea_bytes_num_bytes=4,  # TODO: lower?
                 coord_bytes_num_bytes=4,
-                index_ranges=cfg.lossless_prior_indexes_range,
-                parameter_fns_type='transform',
-                parameter_fns_factory=parameter_fns_factory,
-                num_filters=(1, 3, 3, 3, 1),
+                coord_index_ranges=cfg.lossless_coord_indexes_range,
+                coord_parameter_fns_type='transform',
+                coord_parameter_fns_factory=parameter_fns_factory,
+                coord_num_filters=(1, 3, 3, 3, 1),
+                fea_index_ranges=cfg.prior_indexes_range,
+                fea_parameter_fns_type='transform',
+                fea_parameter_fns_factory=parameter_fns_factory,
+                fea_num_filters=(1, 3, 3, 3, 3, 1),
                 quantize_indexes=True
             )
 
@@ -306,7 +303,7 @@ class PCC(nn.Module):
         loss_dict['loss'] = sum(loss_dict.values())
         for key in loss_dict:
             if key != 'loss':
-                loss_dict[key] = loss_dict[key].detach().item()
+                loss_dict[key] = loss_dict[key].item()
 
         return loss_dict
 

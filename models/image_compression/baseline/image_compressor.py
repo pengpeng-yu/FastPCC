@@ -185,7 +185,7 @@ class ImageCompressor(nn.Module):
 
             for key in loss_dict:
                 if key != 'loss':
-                    loss_dict[key] = loss_dict[key].detach().item()
+                    loss_dict[key] = loss_dict[key].item()
             loss_dict['mean_psnr'] = -10 * math.log10(
                 loss_dict['reconstruct_loss'] / self.cfg.reconstruct_loss_factor
             )

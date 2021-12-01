@@ -9,20 +9,20 @@ model:
   compressed_channels: 16
   decoder_channels: [64, 16, 4]
   encoder_scaler: 1.0
-  hyperprior: NoisyDeepFactorized
-  hyper_encoder_channels: [32, 32]
+  hyperprior: 'None'
   hyper_compressed_channels: 16
-  hyper_decoder_channels: [32, 32]
   prior_indexes_range: [16, 16, 16, 16]
   hyper_encoder_scaler: 1.0
   prior_indexes_scaler: 10.0
   lossless_compression_based: True
   lossless_coder_channels: 64
-  lossless_coder_num: 3
-  lossless_prior_indexes_range: [4, 4, 4, 4]
+  lossless_coder_num: 4
+  lossless_coord_indexes_range: [8, 8, 8, 8]
+  lossless_detach_higher_fea: False
+  lossless_hybrid_hyper_decoder_fea: True
   bpp_loss_factor: 0.2
   reconstruct_loss_factor: 1.0
-  warmup_steps: 3000
+  warmup_steps: 1000
   warmup_bpp_loss_factor: 0.01
 
 

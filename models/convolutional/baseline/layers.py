@@ -111,9 +111,12 @@ def make_downsample_blocks(
 
 class NNSequentialWithConvTransBlockArgs(nn.Sequential):
     def forward(self, x, *args, **kwargs):
+        used_flag = False
         for m in self:
             if isinstance(m, ConvTransBlock):
+                assert used_flag is False
                 x = m(x, *args, **kwargs)
+                used_flag = True
             else:
                 x = m(x)
         return x
@@ -353,28 +356,42 @@ class HyperCoder(nn.Module):
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
 
-        self.main = nn.Sequential(
-            *[nn.Sequential(
+        main_modules = []
+        for idx in range(len(intra_channels)):
+            if coder_type.startswith('generative_upsample') and idx == 0:
+                main_modules.append(
+                    GenConvTransBlock(
+                        in_channels,
+                        intra_channels[0],
+                        2, 2,
+                        region_type=region_type,
+                        bn=use_batch_norm, act=act
+                    )
+                )
+            elif coder_type.startswith('upsample') and idx == 0:
+                main_modules.append(
+                    ConvTransBlock(
+                        in_channels,
+                        intra_channels[0],
+                        2, 2,
+                        region_type=region_type,
+                        bn=use_batch_norm, act=act
+                    )
+                )
+            else:
+                main_modules.append(
+                    ConvBlock(
+                        intra_channels[idx - 1] if idx != 0 else in_channels,
+                        intra_channels[idx],
+                        3, 1,
+                        region_type=region_type,
+                        bn=use_batch_norm, act=act
+                    )
+                )
+            for _ in range(basic_block_num):
+                main_modules.append(basic_block(intra_channels[idx]))
 
-                GenConvTransBlock(
-                    intra_channels[idx - 1] if idx != 0 else in_channels,
-                    intra_channels[idx],
-                    2, 2,
-                    region_type=region_type,
-                    bn=use_batch_norm, act=act
-                ) if coder_type.startswith('generative_upsample') and idx == 0 else
-                ConvBlock(
-                    intra_channels[idx - 1] if idx != 0 else in_channels,
-                    intra_channels[idx],
-                    3, 1,
-                    region_type=region_type,
-                    bn=use_batch_norm, act=act
-                ),
-
-                *[basic_block(intra_channels[idx]) for _ in range(basic_block_num)]
-
-            ) for idx in range(len(intra_channels))],
-
+        main_modules.append(
             ConvBlock(
                 intra_channels[-1],
                 out_channels,
@@ -384,11 +401,12 @@ class HyperCoder(nn.Module):
                 act=None
             )
         )
+        self.main = NNSequentialWithConvTransBlockArgs(*main_modules)
 
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         if self.pre_value_scaler != 1:
             x = minkowski_tensor_wrapped_op(x, lambda _: _ * self.pre_value_scaler)
-        x = self.main(x)
+        x = self.main(x, *args, **kwargs)
         if self.post_value_scaler != 1:
             x = minkowski_tensor_wrapped_op(x, lambda _: _ * self.post_value_scaler)
         return x
@@ -396,8 +414,8 @@ class HyperCoder(nn.Module):
 
 HyperEncoder = partial(HyperCoder, 'encoder')
 HyperDecoder = partial(HyperCoder, 'decoder')
-HyperEncoderForGeoLossLess = partial(HyperCoder, 'generative_upsample_encoder')
-HyperDecoderForGeoLossLess = HyperDecoder
+HyperDecoderCoordForGeoLossLess = partial(HyperCoder, 'generative_upsample_decoder')
+HyperDecoderFeaForGeoLossLess = partial(HyperCoder, 'upsample_decoder')
 
 
 class EncoderForGeoLossLess(nn.Module):
@@ -406,6 +424,7 @@ class EncoderForGeoLossLess(nn.Module):
                  out_channels,
                  coder_num: int,
                  value_scaler: Union[float, Tuple[float, ...]],
+                 detach_higher_fea: bool,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -445,46 +464,26 @@ class EncoderForGeoLossLess(nn.Module):
             bn=use_batch_norm, act=None
         )
 
-        self.conv_coord = make_downsample_blocks(
-            1, hidden_channels, (hidden_channels,),
-            basic_block_type, region_type, basic_block_num,
-            use_batch_norm, act,
-            use_batch_norm, act
-        )[0]
-
+        self.detach_higher_fea = detach_higher_fea
         self.hidden_channels = hidden_channels
 
     def forward(self, x):
-        strided_fea_for_coord_list = []
         strided_fea_list = []
-        strided_cx_list = []
-
         cm = x.coordinate_manager
-        coordinate_map_key = x.coordinate_map_key
         cx = x
         hx = self.conv_out(cx)
         strided_fea_list.append(hx)
 
         for idx in range(self.blocks_num):
-            strided_fea_for_coord_list.append(
-                self.conv_coord(ME.SparseTensor(
-                    features=torch.ones(
-                        (cx.shape[0], 1), dtype=cx.F.dtype, device=cx.F.device
-                    ),
-                    coordinate_map_key=coordinate_map_key,
-                    coordinate_manager=cm
-                ))
-            )
-
-            if self.training:
-                strided_cx_list.append(cx)
+            if self.detach_higher_fea:
+                cx = minkowski_tensor_wrapped_op(cx, lambda _: _.detach())
+                hx = minkowski_tensor_wrapped_op(hx, lambda _: _.detach())
             cx = self.conv_c(cx)
-            coordinate_map_key = cx.coordinate_map_key
             gates = self.conv_h(hx)
             forget_gate = torch.sigmoid(gates.F)
             cx = ME.SparseTensor(
                 features=(forget_gate * cx.F),
-                coordinate_map_key=coordinate_map_key,
+                coordinate_map_key=cx.coordinate_map_key,
                 coordinate_manager=cm
             )
             hx = self.conv_out(cx)
@@ -497,83 +496,4 @@ class EncoderForGeoLossLess(nn.Module):
                     lambda _: _ * value_scaler
                 )
 
-        if self.training:
-            return strided_fea_for_coord_list, strided_fea_list, strided_cx_list
-        else:
-            return strided_fea_for_coord_list, strided_fea_list
-
-
-class DecoderForGeoLossLess(nn.Module):
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 coder_num: int,
-                 value_scaler: Union[float, Tuple[float, ...]],
-                 basic_block_type: str,
-                 region_type: str,
-                 basic_block_num: int,
-                 use_batch_norm: bool,
-                 act: Optional[str]):
-        super(DecoderForGeoLossLess, self).__init__()
-        self.blocks_num = coder_num
-        if isinstance(value_scaler, float):
-            self.value_scaler = [value_scaler] * (self.blocks_num + 1)
-        else:
-            assert self.value_scaler == self.blocks_num + 1
-            self.value_scaler = value_scaler
-
-        self.up_block = make_upsample_block(
-            False,
-            out_channels, out_channels,
-            basic_block_type, region_type, basic_block_num,
-            use_batch_norm, act,
-            False,
-            use_batch_norm, act
-        )
-
-        self.transition_block = ConvBlock(
-            in_channels, out_channels,
-            3, 1,
-            region_type=region_type,
-            bn=use_batch_norm, act=act
-        )
-
-        self.out_block = ConvBlock(
-            out_channels, out_channels,
-            3, 1,
-            region_type=region_type,
-            bn=use_batch_norm, act=act
-        )
-
-    def forward(self, x_list: List[Union[ME.SparseTensor, ME.CoordinateMapKey]], *args):
-        assert len(x_list) == self.blocks_num + 1
-        for idx, value_scaler in enumerate(self.value_scaler):
-            if value_scaler != 1:
-                x_list[idx] = minkowski_tensor_wrapped_op(
-                    x_list[idx], lambda _: _ * value_scaler
-                )
-
-        trans_list = [self.transition_block(x_list[idx])
-                      for idx in range(self.blocks_num + 1)]
-
-        if self.training:
-            assert len(args) == 1
-            strided_cx_list = args[0]
-            loss_dict = {}
-            recon = trans_list[0]
-            for idx, x in enumerate(trans_list[1:]):
-                inverse_idx = self.blocks_num - 1 - idx
-                recon = self.up_block(recon, x.coordinate_map_key) + x
-                loss_dict[f'fea_recon_dist_{inverse_idx}_loss'] = F.l1_loss(
-                    recon.F, strided_cx_list[inverse_idx].F.detach()
-                )
-                recon = strided_cx_list[inverse_idx]  # Teacher forcing
-            recon = self.out_block(recon)
-            return recon, loss_dict
-
-        else:
-            recon = trans_list[0]
-            for x in trans_list[1:]:
-                recon = self.up_block(recon, x.coordinate_map_key) + x
-            recon = self.out_block(recon)
-            return recon
+        return strided_fea_list
