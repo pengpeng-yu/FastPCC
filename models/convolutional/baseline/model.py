@@ -1,6 +1,7 @@
 import io
 from functools import partial, reduce
-from typing import List, Callable, Union, Tuple, Generator
+from typing import List, Union, Tuple, Generator, Optional
+import math
 
 import torch
 import torch.nn as nn
@@ -158,7 +159,6 @@ class PCC(nn.Module):
             encoder_geo_lossless = EncoderForGeoLossLess(
                 cfg.lossless_coder_channels,
                 cfg.compressed_channels,
-                cfg.lossless_coder_num,
                 cfg.encoder_scaler,
                 cfg.lossless_detach_higher_fea,
                 *basic_block_args
@@ -218,19 +218,20 @@ class PCC(nn.Module):
         self.cfg = cfg
 
     def forward(self, pc_data: PCData):
+        lossless_coder_num = self.get_lossless_coder_num(pc_data.resolution)
         if self.training:
             sparse_pc = self.get_sparse_pc(pc_data.xyz)
-            return self.train_forward(sparse_pc, pc_data.training_step)
+            return self.train_forward(sparse_pc, pc_data.training_step, lossless_coder_num)
 
         else:
             assert pc_data.batch_size == 1, 'Only supports batch size == 1 during testing.'
             if isinstance(pc_data.xyz, torch.Tensor):
                 sparse_pc = self.get_sparse_pc(pc_data.xyz)
-                return self.test_forward(sparse_pc, pc_data)
+                return self.test_forward(sparse_pc, pc_data, lossless_coder_num)
 
             else:
                 sparse_pc_partitions = self.get_sparse_pc_partitions(pc_data.xyz)
-                return self.test_partitions_forward(sparse_pc_partitions, pc_data)
+                return self.test_partitions_forward(sparse_pc_partitions, pc_data, lossless_coder_num)
 
     def get_sparse_pc(self, xyz: torch.Tensor,
                       tensor_stride: int = 1,
@@ -274,11 +275,17 @@ class PCC(nn.Module):
         for sub_xyz in xyz[1:]:
             yield self.get_sparse_pc(sub_xyz)
 
-    def train_forward(self, sparse_pc: ME.SparseTensor, training_step: int):
+    def train_forward(self, sparse_pc: ME.SparseTensor, training_step: int,
+                      lossless_coder_num: Optional[int]):
         warmup_forward = training_step < self.cfg.warmup_steps
 
         encoder_feature, cached_encoder_fea_list, points_num_list = self.encoder(sparse_pc)
-        bottleneck_feature, loss_dict = self.entropy_bottleneck(encoder_feature)
+        if self.cfg.lossless_compression_based:
+            bottleneck_feature, loss_dict = self.entropy_bottleneck(
+                encoder_feature, lossless_coder_num
+            )
+        else:
+            bottleneck_feature, loss_dict = self.entropy_bottleneck(encoder_feature)
 
         for key in loss_dict:
             if key.endswith('bits_loss'):
@@ -307,8 +314,9 @@ class PCC(nn.Module):
 
         return loss_dict
 
-    def test_forward(self, sparse_pc: ME.SparseTensor, pc_data: PCData):
-        compressed_string, sparse_tensor_coords = self.compress(sparse_pc)
+    def test_forward(self, sparse_pc: ME.SparseTensor, pc_data: PCData,
+                     lossless_coder_num: Optional[int]):
+        compressed_string, sparse_tensor_coords = self.compress(sparse_pc, lossless_coder_num)
 
         del sparse_pc
         ME.clear_global_coordinate_manager()
@@ -325,8 +333,11 @@ class PCC(nn.Module):
 
         return ret
 
-    def test_partitions_forward(self, sparse_pc_partitions: Generator, pc_data: PCData):
-        compressed_string, sparse_tensor_coords_list = self.compress_partitions(sparse_pc_partitions)
+    def test_partitions_forward(self, sparse_pc_partitions: Generator, pc_data: PCData,
+                                lossless_coder_num: Optional[int]):
+        compressed_string, sparse_tensor_coords_list = self.compress_partitions(
+            sparse_pc_partitions, lossless_coder_num
+        )
         pc_recon = self.decompress_partitions(compressed_string, sparse_tensor_coords_list)
 
         ret = self.evaluator.log_batch(
@@ -338,14 +349,17 @@ class PCC(nn.Module):
 
         return ret
 
-    def compress(self, sparse_pc: ME.SparseTensor) -> Tuple[bytes, torch.Tensor]:
+    def compress(self, sparse_pc: ME.SparseTensor,
+                 lossless_coder_num: Optional[int]) -> Tuple[bytes, Optional[torch.Tensor]]:
         feature, cached_feature_list, points_num_list = self.encoder(sparse_pc)
 
         if self.cfg.lossless_compression_based:
-            em_string, bottom_rounded_fea, _ = \
-                self.entropy_bottleneck.compress(feature)
-
-            sparse_tensor_coords = bottom_rounded_fea.C
+            assert isinstance(self.entropy_bottleneck, GeoLosslessNoisyDeepFactorizedEntropyModel)
+            em_string, bottom_fea_recon = self.entropy_bottleneck.compress(
+                feature, lossless_coder_num
+            )
+            assert bottom_fea_recon.C.shape[0] == 1
+            sparse_tensor_coords = None
 
         else:
             em_strings, coding_batch_shape, _ = \
@@ -353,7 +367,6 @@ class PCC(nn.Module):
             assert coding_batch_shape == torch.Size([1])
 
             sparse_tensor_coords = feature.C
-
             em_string = em_strings[0]
 
         with io.BytesIO() as bs:
@@ -363,23 +376,23 @@ class PCC(nn.Module):
                     [_[0].to_bytes(4, 'little', signed=False)
                      for _ in points_num_list]
                 ))
+            if self.cfg.lossless_compression_based:
+                bs.write(lossless_coder_num.to_bytes(1, 'little', signed=False))
 
             bs.write(len(em_string).to_bytes(4, 'little', signed=False))
             bs.write(em_string)
-
-            # TODO: sparse_tensor_coords_list -> strings
-
             compressed_string = bs.getvalue()
 
         return compressed_string, sparse_tensor_coords
 
-    def compress_partitions(self, sparse_pc_partitions: Generator) \
+    def compress_partitions(self, sparse_pc_partitions: Generator,
+                            lossless_coder_num: Optional[int]) \
             -> Tuple[bytes, List[torch.Tensor]]:
         compressed_string_list = []
         sparse_tensor_coords_list = []
 
         for sparse_pc in sparse_pc_partitions:
-            compressed_string, sparse_tensor_coords = self.compress(sparse_pc)
+            compressed_string, sparse_tensor_coords = self.compress(sparse_pc, lossless_coder_num)
 
             del sparse_pc
             ME.clear_global_coordinate_manager()
@@ -389,13 +402,13 @@ class PCC(nn.Module):
             sparse_tensor_coords_list.append(sparse_tensor_coords)
 
         # Log bytes of each partitions.
-        concat_string = reduce(lambda i, j: i + j,
+        concat_string = reduce(lambda i, j: i + j,  # TODO: lower?
                                (len(s).to_bytes(4, 'little', signed=False) + s
                                 for s in compressed_string_list))
 
         return concat_string, sparse_tensor_coords_list
 
-    def decompress(self, compressed_string: bytes, sparse_tensor_coords: torch.Tensor) -> torch.Tensor:
+    def decompress(self, compressed_string: bytes, sparse_tensor_coords: Optional[torch.Tensor]) -> torch.Tensor:
         device = next(self.parameters()).device
 
         with io.BytesIO(compressed_string) as bs:
@@ -405,6 +418,10 @@ class PCC(nn.Module):
                     points_num_list.append([int.from_bytes(bs.read(4), 'little', signed=False)])
             else:
                 points_num_list = None
+            if self.cfg.lossless_compression_based:
+                lossless_coder_num = int.from_bytes(bs.read(1), 'little', signed=False)
+            else:
+                lossless_coder_num = None
 
             em_string_len = int.from_bytes(bs.read(4), 'little', signed=False)
             em_string = bs.read(em_string_len)
@@ -416,12 +433,12 @@ class PCC(nn.Module):
                 em_string,
                 device,
                 self.get_sparse_pc(
-                    sparse_tensor_coords,
+                    torch.tensor([[0, 0, 0, 0]], dtype=torch.int32, device=device),
                     tensor_stride=2 ** (
                             len(self.cfg.decoder_channels)
-                            + self.cfg.lossless_coder_num),
+                            + lossless_coder_num),
                     only_return_coords=True),
-                self.cfg.lossless_coder_num
+                lossless_coder_num
             )
 
         else:
@@ -448,7 +465,7 @@ class PCC(nn.Module):
         return pc_recon
 
     def decompress_partitions(self, concat_string: bytes,
-                              sparse_tensor_coords_list: List[torch.Tensor]) \
+                              sparse_tensor_coords_list: List[Optional[torch.Tensor]]) \
             -> torch.Tensor:
         pc_recon_list = []
         concat_string_len = len(concat_string)
@@ -466,6 +483,20 @@ class PCC(nn.Module):
         pc_recon = torch.cat([pc_recon for pc_recon in pc_recon_list], 0)
 
         return pc_recon
+
+    def get_lossless_coder_num(self, resolution: Union[int, List[int]]) -> Optional[int]:
+        assert len(self.cfg.encoder_channels) == len(self.cfg.decoder_channels) + 1
+        if self.cfg.lossless_compression_based is True:
+            if not isinstance(resolution, int):
+                for r in resolution[1:]:
+                    assert r == resolution[0]
+                resolution = resolution[0]
+            lossless_coder_num = math.ceil(
+                math.log2(resolution)
+            ) - len(self.cfg.decoder_channels)
+        else:
+            lossless_coder_num = None
+        return lossless_coder_num
 
     def get_reconstruct_loss(self, cached_pred_list, cached_target_list):
         if self.cfg.reconstruct_loss_type == 'BCE':

@@ -422,7 +422,6 @@ class EncoderForGeoLossLess(nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 coder_num: int,
                  value_scaler: Union[float, Tuple[float, ...]],
                  detach_higher_fea: bool,
                  basic_block_type: str,
@@ -431,13 +430,6 @@ class EncoderForGeoLossLess(nn.Module):
                  use_batch_norm: bool,
                  act: Optional[str]):
         super(EncoderForGeoLossLess, self).__init__()
-        self.blocks_num = coder_num
-        if isinstance(value_scaler, float):
-            self.value_scaler = [value_scaler] * (self.blocks_num + 1)
-        else:
-            assert len(value_scaler) == self.blocks_num + 1
-            self.value_scaler = value_scaler
-
         hidden_channels = in_channels
         gate_channels = 1 * hidden_channels
 
@@ -464,17 +456,18 @@ class EncoderForGeoLossLess(nn.Module):
             bn=use_batch_norm, act=None
         )
 
+        self.value_scaler = value_scaler
         self.detach_higher_fea = detach_higher_fea
         self.hidden_channels = hidden_channels
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor, coder_num: int):
         strided_fea_list = []
         cm = x.coordinate_manager
         cx = x
         hx = self.conv_out(cx)
         strided_fea_list.append(hx)
 
-        for idx in range(self.blocks_num):
+        for idx in range(coder_num):
             if self.detach_higher_fea:
                 cx = minkowski_tensor_wrapped_op(cx, lambda _: _.detach())
                 hx = minkowski_tensor_wrapped_op(hx, lambda _: _.detach())
@@ -489,7 +482,9 @@ class EncoderForGeoLossLess(nn.Module):
             hx = self.conv_out(cx)
             strided_fea_list.append(hx)
 
-        for idx, value_scaler in enumerate(self.value_scaler):
+        for idx in range(coder_num + 1):
+            value_scaler = self.value_scaler \
+                if isinstance(self.value_scaler, float) else self.value_scaler[idx]
             if value_scaler != 1:
                 strided_fea_list[idx] = minkowski_tensor_wrapped_op(
                     strided_fea_list[idx],

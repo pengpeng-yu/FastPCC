@@ -16,7 +16,6 @@ model:
   prior_indexes_scaler: 10.0
   lossless_compression_based: True
   lossless_coder_channels: 64
-  lossless_coder_num: 4
   lossless_coord_indexes_range: [8, 8, 8, 8]
   lossless_detach_higher_fea: False
   lossless_hybrid_hyper_decoder_fea: True

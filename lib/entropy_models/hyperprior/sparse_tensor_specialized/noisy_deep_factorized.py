@@ -100,12 +100,12 @@ class GeoLosslessEntropyModel(nn.Module):
         else:
             return self.hyper_decoder_fea
 
-    def forward(self, y_top: ME.SparseTensor):
+    def forward(self, y_top: ME.SparseTensor, coder_num: int):
         if self.training:
             cm = y_top.coordinate_manager
-            strided_fea_list = self.encoder(y_top)
+            strided_fea_list = self.encoder(y_top, coder_num)
             *strided_fea_list, bottom_fea = strided_fea_list
-            coder_num = len(strided_fea_list)
+            assert len(strided_fea_list) == coder_num
 
             loss_dict = {}
             strided_fea_tilde_list = []
@@ -175,7 +175,7 @@ class GeoLosslessEntropyModel(nn.Module):
             return strided_fea_tilde_list[-1], loss_dict
 
         else:
-            concat_string, bottom_fea_recon, coder_num = self.compress(y_top)
+            concat_string, bottom_fea_recon = self.compress(y_top, coder_num)
 
             # You can clear the shared coordinate manager in a upper module
             # after compression to save memory.
@@ -189,16 +189,16 @@ class GeoLosslessEntropyModel(nn.Module):
             )
             return bottom_fea_recon, recon, concat_string
 
-    def compress(self, y_top: ME.SparseTensor) -> \
-            Tuple[bytes, ME.SparseTensor, int]:
+    def compress(self, y_top: ME.SparseTensor, coder_num: int) -> \
+            Tuple[bytes, ME.SparseTensor]:
         # Batch dimension of sparse tensor feature is supposed to
         # be added in minkowski_tensor_wrapped_fn(),
         # thus all the inputs of entropy models are supposed to
         # have batch size == 1.
 
-        strided_fea_list = self.encoder(y_top)
+        strided_fea_list = self.encoder(y_top, coder_num)
         *strided_fea_list, bottom_fea = strided_fea_list
-        coder_num = len(strided_fea_list)
+        assert len(strided_fea_list) == coder_num
 
         fea_strings = []
         coord_strings = []
@@ -284,7 +284,7 @@ class GeoLosslessEntropyModel(nn.Module):
             [self.fea_bytes_num_bytes, 0]
         )
 
-        return concat_string, bottom_fea_recon, coder_num
+        return concat_string, bottom_fea_recon
 
     def decompress(self,
                    concat_string: bytes,
@@ -436,26 +436,24 @@ class GeoLosslessEntropyModel(nn.Module):
 
 class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
     def __init__(self,
-                 fea_entropy_model:
+                 bottom_fea_entropy_model:
                  Union[ContinuousBatchedEntropyModel, HyperPriorEntropyModel],
                  encoder: nn.Module,
-                 decoder: nn.Module,
+                 detach_higher_fea: bool,
 
-                 hyper_encoder_coord: Union[nn.Module, nn.ModuleList],
                  hyper_decoder_coord: Union[nn.Module, nn.ModuleList],
+                 hyper_decoder_fea: Union[nn.Module, nn.ModuleList],
+                 hybrid_hyper_decoder_fea: bool,
 
-                 hyperprior_batch_channels: int,
-
-                 hyperprior_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
-                 hyperprior_init_scale: int = 10,
-                 hyperprior_tail_mass: float = 2 ** -8,
-                 hyperprior_broadcast_channels_bytes: int = 2,
                  fea_bytes_num_bytes: int = 2,
-                 coord_prior_bytes_num_bytes: int = 2,
                  coord_bytes_num_bytes: int = 2,
-                 num_scales: int = 64,
-                 scale_min: float = 0.11,
-                 scale_max: float = 256,
+
+                 coord_index_num_scales: int = 64,
+                 coord_index_scale_min: float = 0.11,
+                 coord_index_scale_max: float = 256,
+                 fea_index_num_scales: int = 64,
+                 fea_index_scale_min: float = 0.11,
+                 fea_index_scale_max: float = 256,
 
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
@@ -463,25 +461,30 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16
                  ):
-        offset = math.log(scale_min)
-        factor = (math.log(scale_max) - math.log(scale_min)) / (num_scales - 1)
+        coord_index_offset = math.log(coord_index_scale_min)
+        coord_index_factor = (math.log(coord_index_scale_max) -
+                              math.log(coord_index_scale_min)) / (coord_index_num_scales - 1)
+        fea_index_offset = math.log(fea_index_scale_min)
+        fea_index_factor = (math.log(fea_index_scale_max) -
+                            math.log(fea_index_scale_min)) / (fea_index_num_scales - 1)
 
         super(GeoLosslessScaleNoisyNormalEntropyModel, self).__init__(
-            fea_entropy_model, encoder, decoder,
-            hyper_encoder_coord, hyper_decoder_coord,
-            hyperprior_batch_channels,
-            NoisyNormal, (num_scales,), {'loc': lambda _: 0,
-                                         'scale': lambda i: torch.exp(offset + factor * i)},
+            bottom_fea_entropy_model, encoder, detach_higher_fea,
+            hyper_decoder_coord, hyper_decoder_fea, hybrid_hyper_decoder_fea,
+            NoisyNormal, (coord_index_num_scales,), {
+                'loc': lambda _: 0,
+                'scale': lambda i: torch.exp(coord_index_offset + coord_index_factor * i)},
+            NoisyNormal, (fea_index_num_scales,), {
+                'loc': lambda _: 0,
+                'scale': lambda i: torch.exp(fea_index_offset + fea_index_factor * i)},
             lambda x: x, lambda x: x,
-            hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
-            hyperprior_broadcast_channels_bytes,
-            fea_bytes_num_bytes, coord_prior_bytes_num_bytes, coord_bytes_num_bytes,
+            fea_bytes_num_bytes, coord_bytes_num_bytes,
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )
 
     def forward(self, y_top, *args, **kwargs):
-        y_top = minkowski_tensor_wrapped_op(y_top, torch.abs_)
+        y_top = minkowski_tensor_wrapped_op(y_top, torch.abs)
         return super(GeoLosslessScaleNoisyNormalEntropyModel, self).forward(y_top, *args, **kwargs)
 
 

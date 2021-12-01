@@ -29,7 +29,6 @@ class ModelConfig(SimpleConfig):
 
     lossless_compression_based: bool = False
     lossless_coder_channels: int = 64
-    lossless_coder_num: int = 3
     lossless_coord_indexes_range: Tuple[int, ...] = (8, 8, 8, 8)
     lossless_detach_higher_fea: bool = False
     lossless_hybrid_hyper_decoder_fea: bool = False
