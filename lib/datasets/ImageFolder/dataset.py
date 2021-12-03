@@ -14,7 +14,6 @@ from lib.datasets.ImageFolder.dataset_config import DatasetConfig
 class ImageFolder(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(ImageFolder, self).__init__()
-
         assert len(cfg.target_shapes) % 2 == 0 and \
                all([_ > 0 and isinstance(_, int) for _ in cfg.target_shapes])
 
@@ -28,7 +27,6 @@ class ImageFolder(torch.utils.data.Dataset):
         # define files list path
         for root, filelist_path, file_path_pattern in zip(roots, filelist_paths, file_path_patterns):
             filelist_abs_path = os.path.join(root, filelist_path)
-
             # generate files list
             if not os.path.exists(filelist_abs_path):
                 logger.info(f'no filelist of {root} is given. Trying to generate using {file_path_pattern}...')
@@ -67,22 +65,22 @@ class ImageFolder(torch.utils.data.Dataset):
         elif self.cfg.channels_order != 'BGR':
             raise NotImplementedError
 
-        return IMData(im=im,
-                      file_path=file_path)
+        return IMData(im=im, file_path=file_path)
 
     def collate_fn(self, batch):
-        return im_data_collate_fn(batch,
-                                  target_shapes=self.cfg.target_shapes,
-                                  resize_strategy=self.cfg.resize_strategy,
-                                  channel_last_to_channel_first=True)
+        return im_data_collate_fn(
+            batch,
+            target_shapes=self.cfg.target_shapes,
+            resize_strategy=self.cfg.resize_strategy,
+            channel_last_to_channel_first=True
+        )
 
 
 if __name__ == '__main__':
-    from loguru import logger
-
     config = DatasetConfig()
-    dataset = ImageFolder(config, False, logger)
 
+    from loguru import logger
+    dataset = ImageFolder(config, False, logger)
     dataloader = torch.utils.data.DataLoader(dataset, 4, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
     sample = next(dataloader)

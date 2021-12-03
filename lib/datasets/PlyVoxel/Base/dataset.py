@@ -29,7 +29,6 @@ class PlyVoxel(torch.utils.data.Dataset):
         file_path_patterns = get_collections(cfg.file_path_pattern, len(roots))
         ori_resolutions = get_collections(cfg.ori_resolution, len(roots))
         resolutions = get_collections(cfg.resolution, len(roots))
-
         assert all([ori == tgt or tgt == 0 for ori, tgt in zip(ori_resolutions, resolutions)])
 
         if sum(resolutions) == 0:
@@ -40,7 +39,6 @@ class PlyVoxel(torch.utils.data.Dataset):
         # define files list path
         for root, filelist_path, file_path_pattern in zip(roots, filelist_paths, file_path_patterns):
             filelist_abs_path = os.path.join(root, filelist_path)
-
             # generate files list
             if not os.path.exists(filelist_abs_path):
                 logger.info(f'no filelist of {root} is given. Trying to generate using {file_path_pattern}...')
@@ -117,15 +115,12 @@ if __name__ == '__main__':
     config.with_file_path = True
 
     from loguru import logger
-
     dataset = PlyVoxel(config, False, logger)
-
     dataloader = torch.utils.data.DataLoader(dataset, 4, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
     sample: PCData = next(dataloader)
 
     from lib.vis import plt_batched_sparse_xyz
-
     sample_coords = sample.xyz
     plt_batched_sparse_xyz(sample_coords, 0, False)
     plt_batched_sparse_xyz(sample_coords, 1, False)

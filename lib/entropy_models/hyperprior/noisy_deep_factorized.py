@@ -50,13 +50,11 @@ class EntropyModel(nn.Module):
                  range_coder_precision: int = 16,
                  ):
         super(EntropyModel, self).__init__()
-
         self.hyper_encoder = hyper_encoder
         self.hyper_decoder = hyper_decoder
         self.hyper_encoder_post_op = hyper_encoder_post_op
         self.hyper_decoder_post_op = hyper_decoder_post_op
         self.prior_bytes_num_bytes = prior_bytes_num_bytes
-
         self.hyperprior_entropy_model = NoisyDeepFactorizedPriorEntropyModel(
             batch_shape=hyperprior_batch_shape,
             coding_ndim=coding_ndim,
@@ -66,7 +64,6 @@ class EntropyModel(nn.Module):
             range_coder_precision=range_coder_precision,
             broadcast_shape_bytes=hyperprior_broadcast_shape_bytes
         )
-
         self.prior_entropy_model = ContinuousIndexedEntropyModel(
             prior_fn=prior_fn,
             index_ranges=index_ranges,
@@ -85,14 +82,12 @@ class EntropyModel(nn.Module):
             z_tilde, hyperprior_loss_dict = self.hyperprior_entropy_model(z, return_aux_loss)
             indexes = self.hyper_decoder_post_op(self.hyper_decoder(z_tilde))
             y_tilde, prior_loss_dict = self.prior_entropy_model(y, indexes, return_aux_loss)
-
             loss_dict = concat_loss_dicts(prior_loss_dict, hyperprior_loss_dict, lambda k: 'hyper_' + k)
             return y_tilde, loss_dict
 
         else:
             concat_strings, coding_batch_shape, rounded_y = self.compress(y)
             sparse_tensor_coords_tuple = get_minkowski_tensor_coords_tuple(y)
-
             y_recon = self.decompress(
                 concat_strings,
                 coding_batch_shape,
@@ -115,7 +110,6 @@ class EntropyModel(nn.Module):
                 y, indexes, return_dequantized=return_dequantized, estimate_bits=estimate_bits
             )
         concat_strings = self.concat_strings(prior_strings, strings)
-
         if estimated_bits:
             return concat_strings, coding_batch_shape, rounded_y_or_dequantized_y, \
                    estimated_prior_bits[0] + estimated_bits[0]
@@ -132,10 +126,8 @@ class EntropyModel(nn.Module):
             prior_strings, coding_batch_shape, target_device, False,
             sparse_tensor_coords_tuple=sparse_tensor_coords_tuple
         )
-
         pre_indexes = self.hyper_decoder(z_recon)
         sparse_tensor_coords_tuple = get_minkowski_tensor_coords_tuple(pre_indexes)
-
         indexes = self.hyper_decoder_post_op(pre_indexes)
         y_recon = self.prior_entropy_model.decompress(
             strings, indexes, target_device, False,
@@ -191,7 +183,6 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
                  ):
         offset = math.log(scale_min)
         factor = (math.log(scale_max) - math.log(scale_min)) / (num_scales - 1)
-
         super(ScaleNoisyNormalEntropyModel, self).__init__(
             hyper_encoder, hyper_decoder,
             hyperprior_batch_shape, coding_ndim,
@@ -221,15 +212,12 @@ def _noisy_deep_factorized_entropy_model_init(index_ranges, parameter_fns_type, 
     factors_param_numel = num_filters[1:-1]
 
     if parameter_fns_type == 'split':
-
         weights_param_cum_numel = torch.cumsum(torch.tensor([0, *weights_param_numel]), dim=0)
         biases_param_cum_numel = \
             torch.cumsum(torch.tensor([0, *biases_param_numel]), dim=0) + weights_param_cum_numel[-1]
         factors_param_cum_numel = \
             torch.cumsum(torch.tensor([0, *factors_param_numel]), dim=0) + biases_param_cum_numel[-1]
-
         assert index_channels == factors_param_cum_numel[-1]
-
         parameter_fns = {
             'batch_shape': lambda i: i.shape[:-1],
             'weights': lambda i: [i[..., weights_param_cum_numel[_]: weights_param_cum_numel[_ + 1]].view
@@ -244,9 +232,7 @@ def _noisy_deep_factorized_entropy_model_init(index_ranges, parameter_fns_type, 
                                   (-1, factors_param_numel[_], 1) / 3 - 0.5
                                   for _ in range(len(factors_param_numel))],
         }
-
     elif parameter_fns_type == 'transform':
-
         prior_indexes_weights_transforms = nn.ModuleList(
             [parameter_fns_factory(index_channels, out_channels)
              for out_channels in weights_param_numel]
@@ -259,7 +245,6 @@ def _noisy_deep_factorized_entropy_model_init(index_ranges, parameter_fns_type, 
             [parameter_fns_factory(index_channels, out_channels)
              for out_channels in factors_param_numel]
         )
-
         parameter_fns = {
             'batch_shape': lambda i: i.shape[:-1],
             'weights': lambda i: [transform(i).view(-1, num_filters[_ + 1], num_filters[_])
@@ -271,7 +256,6 @@ def _noisy_deep_factorized_entropy_model_init(index_ranges, parameter_fns_type, 
             'factors': lambda i: [transform(i).view(-1, factors_param_numel[_], 1)
                                   for _, transform in enumerate(prior_indexes_factors_transforms)],
         }
-
     else:
         raise NotImplementedError
 
@@ -295,7 +279,6 @@ def _noisy_deep_factorized_entropy_model_init(index_ranges, parameter_fns_type, 
         ret.append({'prior_indexes_weights_transforms': prior_indexes_weights_transforms,
                     'prior_indexes_biases_transforms': prior_indexes_biases_transforms,
                     'prior_indexes_factors_transforms': prior_indexes_factors_transforms})
-
     return tuple(ret)
 
 
@@ -323,12 +306,10 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16
                  ):
-
         parameter_fns, indexes_view_fn, modules_to_add = \
             _noisy_deep_factorized_entropy_model_init(
                 index_ranges, parameter_fns_type, parameter_fns_factory, num_filters
             )
-
         super(NoisyDeepFactorizedEntropyModel, self).__init__(
             hyper_encoder, hyper_decoder,
             hyperprior_batch_shape, coding_ndim,
@@ -339,6 +320,5 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )
-
         for module_name, module in modules_to_add.items():
             setattr(self, module_name, module)

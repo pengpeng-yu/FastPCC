@@ -1,5 +1,4 @@
 import os
-import pathlib
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -18,7 +17,6 @@ from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coor
 class ShapeNetCorev2(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(ShapeNetCorev2, self).__init__()
-
         if cfg.data_format in ['.solid.binvox', '.surface.binvox'] or \
                 cfg.data_format == ['.solid.binvox', '.surface.binvox'] or \
                 cfg.data_format == ['.surface.binvox', '.solid.binvox']:
@@ -26,6 +24,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 raise NotImplementedError
         elif cfg.data_format != '.obj':
             raise NotImplementedError
+        data_format = [cfg.data_format] if isinstance(cfg.data_format, str) else cfg.data_format
 
         # define files list path and cache path
         if is_training:
@@ -36,24 +35,22 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         # generate files list
         if not os.path.exists(filelist_abs_path):
             logger.info('no filelist is given. Trying to generate...')
-
             file_list = []
             with open(os.path.join(cfg.root, cfg.shapenet_all_csv)) as f:
                 f.readline()
                 for line in f:
                     _, synset_id, _, model_id, split = line.strip().split(',')
-                    file_paths = [os.path.join(synset_id, model_id, 'models', 'model_normalized' + d_format)
-                                  for d_format in ([cfg.data_format]
-                                  if isinstance(cfg.data_format, str) else cfg.data_format)
-                                  if model_id != '7edb40d76dff7455c2ff7551a4114669']
-                    # 7edb40d76dff7455c2ff7551a4114669 seems to be problematic
-
+                    file_paths = [
+                        os.path.join(synset_id, model_id, 'models', 'model_normalized' + d_format)
+                        for d_format in data_format
+                        if model_id != '7edb40d76dff7455c2ff7551a4114669'
+                        # 7edb40d76dff7455c2ff7551a4114669 seems to be problematic
+                    ]
                     for file_path in file_paths:
                         if os.path.exists(os.path.join(cfg.root, file_path)):
                             if (is_training and split == 'train') or \
                                     not is_training and split == 'test':
                                 file_list.append(file_path)
-
             with open(filelist_abs_path, 'w') as f:
                 f.writelines([_ + '\n' for _ in file_list])
 
@@ -85,7 +82,6 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         except AssertionError as e:
             logger.info('wrong number of files.')
             raise e
-
         self.cfg = cfg
 
     def __len__(self):
@@ -93,7 +89,6 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         file_path = self.file_list[index]
-
         if self.cfg.data_format != '.obj':
             with open(file_path, 'rb') as f:
                 xyz = binvox_rw.read_as_coord_array(f).data.astype(np.float32).T
@@ -126,10 +121,10 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         return PCData(
             xyz=xyz if isinstance(xyz, torch.Tensor) else torch.from_numpy(xyz),
             file_path=file_path if self.cfg.with_file_path else None,
-            ori_resolution=None if
-            not self.cfg.with_ori_resolution or self.cfg.data_format == '.obj'
-            else 128,
-            resolution=self.cfg.resolution if self.cfg.with_resolution else None)
+            ori_resolution=
+            None if not self.cfg.with_ori_resolution or self.cfg.data_format == '.obj' else 128,
+            resolution=self.cfg.resolution if self.cfg.with_resolution else None
+        )
 
     def collate_fn(self, batch):
         return pc_data_collate_fn(batch, sparse_collate=self.cfg.resolution != 0)
@@ -142,7 +137,6 @@ if __name__ == '__main__':
 
     from loguru import logger
     dataset = ShapeNetCorev2(config, True, logger)
-
     dataloader = torch.utils.data.DataLoader(dataset, 4, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
     sample: PCData = next(dataloader)

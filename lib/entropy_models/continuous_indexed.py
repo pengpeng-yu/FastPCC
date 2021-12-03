@@ -41,7 +41,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             self.additional_indexes_dim = False
         else:
             self.additional_indexes_dim = True
-
         self.prior_fn = prior_fn
         self.parameter_fns = parameter_fns
         self.index_ranges = index_ranges
@@ -50,7 +49,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         range_coding_prior_indexes = self.make_range_coding_prior()
         with torch.no_grad():
             prior = self.make_prior(range_coding_prior_indexes)
-
         super(ContinuousIndexedEntropyModel, self).__init__(
             prior=prior,
             coding_ndim=coding_ndim,
@@ -58,7 +56,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
         )
-
         self.register_buffer('range_coding_prior_indexes',
                              range_coding_prior_indexes, persistent=False)
 
@@ -82,7 +79,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             indexes = [torch.arange(r) for r in self.index_ranges]
             indexes = torch.meshgrid(indexes)
             indexes = torch.stack(indexes, dim=-1)
-
         indexes = indexes.to(torch.float)
         return indexes
 
@@ -134,7 +130,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         else:
             strings, _ = self.compress(x, indexes)
             decompressed = self.decompress(strings, indexes, x.device)
-
             return decompressed, strings
 
     @torch.no_grad()
@@ -212,7 +207,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         if estimate_bits:
             estimated_bits = prior.log_prob(quantized_x).sum() / (-math.log(2))
             return strings, rounded_x_or_dequantized_x, estimated_bits
-
         else:
             return strings, rounded_x_or_dequantized_x
 
@@ -227,7 +221,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
 
         input_shape = flat_indexes.shape
         coding_unit_shape = input_shape[-self.coding_ndim:]
-
         flat_indexes = flat_indexes.reshape(-1, *coding_unit_shape)
 
         symbols = []
@@ -245,7 +238,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             symbols = symbols.to(torch.float)
         else:
             symbols = self.dequantize(symbols, offset=quantization_offset(self.make_prior(indexes)))
-
         symbols = symbols.reshape(input_shape)
         return symbols
 

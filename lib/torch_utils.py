@@ -130,18 +130,14 @@ class MLPBlock(nn.Module):
             if len(ori_shape) > 3:
                 x = x.contiguous().view(ori_shape[0], -1, ori_shape[-1])
             x = self.mlp(x)
-
             if isinstance(self.bn, nn.BatchNorm1d):
                 x = x.permute(0, 2, 1)
                 x = self.bn(x)
                 x = x.permute(0, 2, 1)
             elif self.bn is not None: x = self.bn(x)
-
             if self.act is not None: x = self.act(x)
-
             if len(ori_shape) != 3:
                 x = x.view(*ori_shape[:-1], self.out_channels)
-
             if self.skip_connection is None:
                 pass
             elif self.skip_connection == 'sum':
@@ -154,13 +150,10 @@ class MLPBlock(nn.Module):
             if len(ori_shape) > 3:
                 x = x.view(ori_shape[0], ori_shape[1], -1)
             x = self.mlp(x)
-
             if self.bn is not None: x = self.bn(x)
             if self.act is not None: x = self.act(x)
-
             if len(ori_shape) != 3:
                 x = x.view(ori_shape[0], self.out_channels, *ori_shape[2:])
-
             if self.skip_connection is None:
                 pass
             elif self.skip_connection == 'sum':
@@ -216,14 +209,12 @@ class BatchNorm1dChnlLast(nn.Module):
             if self.track_running_stats:
                 self.running_mean = self.running_mean * (1 - self.momentum) + mean * self.momentum
                 self.running_var = self.running_var * (1 - self.momentum) + var * self.momentum
-
         else:
             if self.track_running_stats:
                 x = (x - self.running_mean) / torch.sqrt(self.running_var + self.eps)
             else:
                 var, mean = torch.var_mean(x, dim=[0, 1], keepdim=True, unbiased=False)
                 x = (x - mean) / torch.sqrt(var + self.eps)
-
         if self.affine:
             x = self.weight * x + self.bias
         return x
@@ -274,20 +265,16 @@ def get_minkowski_tensor_coords_tuple(x):
 def minkowski_tensor_wrapped_fn(
         inout_mapping_dict: Dict[Union[int, str], Union[int, List[int], None]] = None,
         add_batch_dim: bool = True):
-
     inout_mapping_dict = inout_mapping_dict or {}
 
     def func_decorator(func):
         @wraps(func)
         def wrapped_func(*args, **kwargs):
-
             ret_coords: Dict[int, Union[Tuple, List]] = {}
-
             args = list(args)
 
             if ME is None or inout_mapping_dict == {}:
                 needs_recover = False
-
             else:
                 needs_recover = True
                 for in_key, out_idx in inout_mapping_dict.items():
@@ -298,36 +285,29 @@ def minkowski_tensor_wrapped_fn(
                         in_key = in_key[flag_end + 1:]
                     else:
                         flag = None
-
                     try:
                         in_key = int(in_key)
                     except ValueError: pass
-
                     if isinstance(in_key, int):
                         collection = args
                     elif isinstance(in_key, str):
                         collection = kwargs
                     else:
                         raise NotImplementedError
-
                     try:
                         obj = collection[in_key]
                     except (IndexError, KeyError):
                         # If designated var is not provided, ignore it.
                         continue
-
                     if isinstance(obj, ME.SparseTensor):
                         collection[in_key] = obj.F
-
                         if add_batch_dim:
                             collection[in_key] = collection[in_key][None]
-
                         if out_idx is not None:
                             if not isinstance(out_idx, list):
                                 out_idx = [out_idx]
                             for i in out_idx:
                                 ret_coords[i] = (obj.coordinate_map_key, obj.coordinate_manager)
-
                     elif isinstance(obj, tuple) or isinstance(obj, list):
                         assert len(obj) == 2
                         assert isinstance(obj[0], ME.CoordinateMapKey)
@@ -337,18 +317,15 @@ def minkowski_tensor_wrapped_fn(
                                 out_idx = [out_idx]
                             for i in out_idx:
                                 ret_coords[i] = obj
-
                     else:
                         # If designated var is not a ME.SparseTensor
                         # or a tuple of a CoordinateMapKey and a CoordinateManager,
                         # ignore it.
                         pass
-
                     if flag == 'del':
                         del collection[in_key]
                     elif flag is None: pass
                     else: raise NotImplementedError
-
             if ret_coords == {}: needs_recover = False
 
             ret = func(*args, **kwargs)
@@ -362,12 +339,10 @@ def minkowski_tensor_wrapped_fn(
                         coordinate_map_key=coords_key,
                         coordinate_manager=coords_mg
                     )
-
                 if len(ret) == 1:
                     ret = ret[0]
                 else:
                     ret = tuple(ret)
-
             return ret
         return wrapped_func
     return func_decorator
@@ -375,13 +350,11 @@ def minkowski_tensor_wrapped_fn(
 
 def minkowski_tensor_split(x, split_size: Union[int, List[int]]) -> List:
     ret = []
-
     if isinstance(split_size, List):
         points = torch.empty(len(split_size), 2, dtype=torch.long)
         points[:, 1] = torch.cumsum(torch.tensor(split_size), dim=0)
         points[1:, 0] = points[:-1, 1]
         points[0, 0] = 0
-
     elif isinstance(split_size, int):
         block_num = math.ceil(x.F.shape[1] / split_size)
         assert block_num > 1
@@ -390,7 +363,6 @@ def minkowski_tensor_split(x, split_size: Union[int, List[int]]) -> List:
         points[:, 0] = torch.arange(0, block_num, dtype=torch.long) * split_size
         points[:-1, 1] = points[1:, 0]
         points[-1, 1] = x.F.shape[1]
-
     else: raise NotImplementedError
 
     for start, end in points:
@@ -406,7 +378,6 @@ def gumbel_sigmoid(logits, tau=1, hard=False):
         logits, memory_format=torch.legacy_contiguous_format).exponential_().log()  # ~Gumbel(0,1)
     gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
     y_soft = gumbels.sigmoid()
-
     if hard:
         # Straight through.
         y_hard = y_soft.round()
@@ -428,8 +399,10 @@ class GumbelSigmoidMLPBlock(MLPBlock):
     """
     def __init__(self, in_channels, batchnorm='nn.bn1d', version='linear',
                  skip_connection=None, tau=1, hard=False):
-        super(GumbelSigmoidMLPBlock, self).__init__(in_channels=in_channels, out_channels=1, bn=batchnorm, act=None,
-                                                    version=version, skip_connection=skip_connection)
+        super(GumbelSigmoidMLPBlock, self).__init__(
+            in_channels=in_channels, out_channels=1, bn=batchnorm, act=None,
+            version=version, skip_connection=skip_connection
+        )
         self.tau = tau
         self.hard = hard
 
@@ -456,11 +429,10 @@ def create_kd_tree(data: torch.Tensor, max_num: int = 1) -> Union[KDNode, torch.
 
     point_index = len(data) // 2
     point = data_sorted[point_index]
-    kd_node = KDNode(point)
 
+    kd_node = KDNode(point)
     kd_node.left = create_kd_tree(data_sorted[:point_index], max_num)
     kd_node.right = create_kd_tree(data_sorted[point_index:], max_num)
-
     return kd_node
 
 
@@ -483,7 +455,6 @@ def kd_tree_partition_base(data: torch.Tensor, max_num: int) \
     index_point = len(data) // 2
     left_partitions = kd_tree_partition_base(data_sorted[:index_point], max_num)
     right_partitions = kd_tree_partition_base(data_sorted[index_point:], max_num)
-
     left_partitions.extend(right_partitions)
 
     return left_partitions
@@ -509,7 +480,6 @@ def kd_tree_partition_extended(data: torch.Tensor, max_num: int, extras: List[to
     right_partitions, right_extra_partitions = kd_tree_partition_extended(
         data_sorted[index_point:], max_num, [extra[index_point:] for extra in extras]
     )
-
     left_partitions.extend(right_partitions)
     for idx, p in enumerate(right_extra_partitions):
         left_extra_partitions[idx].extend(p)

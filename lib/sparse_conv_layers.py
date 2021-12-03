@@ -152,24 +152,17 @@ class GenerativeUpsample(nn.Module):
                  use_cached_feature=False,
                  cached_feature_fusion_method='Cat'):
         super(GenerativeUpsample, self).__init__()
-
-        assert loss_type in ['BCE', 'Dist']
-        assert cached_feature_fusion_method in ['Add', 'Cat']
-
         self.upsample_block = upsample_block
         # classify_block should not change coordinates of upsample_block's output
         self.classify_block = classify_block
-
         self.mapping_target_kernel_size = mapping_target_kernel_size
         self.mapping_target_region_type = getattr(ME.RegionType, mapping_target_region_type)
-
         self.loss_type = loss_type
         self.square_dist_upper_bound = dist_upper_bound ** 2
         self.is_last_layer = is_last_layer
         self.requires_metric_during_testing = requires_metric_during_testing
         self.use_cached_feature = use_cached_feature
         self.cached_feature_fusion_method = cached_feature_fusion_method
-
         self.pruning = ME.MinkowskiPruning()
 
     def forward(self, message: GenerativeUpsampleMessage):
@@ -193,7 +186,6 @@ class GenerativeUpsample(nn.Module):
             if message.cached_fea_module_list:
                 cached_fea_module = message.cached_fea_module_list.pop()
                 cached_feature = cached_fea_module(cached_feature, coordinates=fea.coordinate_map_key)
-
             if self.cached_feature_fusion_method == 'Cat':
                 fea = ME.cat(fea, cached_feature)
             elif self.cached_feature_fusion_method == 'Add':
@@ -201,35 +193,27 @@ class GenerativeUpsample(nn.Module):
             else: raise NotImplementedError
 
         pred = self.classify_block(fea)
-
         keep = self.get_keep(pred, message.points_num_list)
 
         if self.training:
             keep_target, loss_target = self.get_target(fea, pred, message.target_key, True)
-
             keep |= keep_target
-
             message.cached_target_list.append(loss_target)
             message.cached_pred_list.append(pred)
-
             if not self.is_last_layer:
                 message.fea = self.pruning(fea, keep)
             else:
                 message.fea = None
-
         elif not self.training:
             if self.requires_metric_during_testing:
                 keep_target = self.get_target(fea, pred, message.target_key, False)
                 message.cached_metric_list.append(
                     precision_recall(pred=keep, tgt=keep_target))
-
             if not self.is_last_layer:
                 message.fea = self.pruning(fea, keep)
             else:
                 message.fea = None
-
             message.cached_pred_list.append(self.pruning(pred, keep))
-
         return message
 
     @torch.no_grad()
@@ -246,7 +230,6 @@ class GenerativeUpsample(nn.Module):
                         sample_threshold.append(torch.finfo(sample.dtype).min)
                 threshold = torch.tensor(sample_threshold, device=pred.F.device, dtype=pred.F.dtype)
                 threshold = threshold[pred.C[:, 0].to(torch.long)]
-
             else:
                 threshold = 0
             keep = (pred.F.squeeze(dim=1) > threshold)
@@ -262,14 +245,12 @@ class GenerativeUpsample(nn.Module):
                         sample_threshold.append(torch.finfo(sample.dtype).max)
                 threshold = torch.tensor(sample_threshold, device=pred.F.device, dtype=pred.F.dtype)
                 threshold = threshold[pred.C[:, 0].to(torch.long)]
-
             else:
                 threshold = 0.5
             keep = (pred.F.squeeze(dim=1) <= threshold)
 
         else:
             raise NotImplementedError
-
         return keep
 
     @torch.no_grad()
@@ -280,12 +261,13 @@ class GenerativeUpsample(nn.Module):
                    requires_loss_target: bool) \
             -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         cm = fea.coordinate_manager
-
         strided_target_key = cm.stride(target_key, fea.tensor_stride)
-        kernel_map = cm.kernel_map(fea.coordinate_map_key,
-                                   strided_target_key,
-                                   kernel_size=self.mapping_target_kernel_size,
-                                   region_type=self.mapping_target_region_type)
+        kernel_map = cm.kernel_map(
+            fea.coordinate_map_key,
+            strided_target_key,
+            kernel_size=self.mapping_target_kernel_size,
+            region_type=self.mapping_target_region_type
+        )
         keep_target = torch.zeros(fea.shape[0], dtype=torch.bool, device=fea.device)
         for _, curr_in in kernel_map.items():
             keep_target[curr_in[0].type(torch.long)] = 1
@@ -300,10 +282,8 @@ class GenerativeUpsample(nn.Module):
 
                 for sample_idx in range(strided_target[:, 0].max().item() + 1):
                     strided_target_one_sample = strided_target[strided_target[:, 0] == sample_idx][:, 1:]
-
                     sample_mapping = fea.C[:, 0] == sample_idx
                     pred_coord_one_sample = pred.C[sample_mapping][:, 1:]
-
                     dists = knn_points(pred_coord_one_sample[None].type(torch.float),
                                        strided_target_one_sample[None].type(torch.float),
                                        K=1, return_sorted=False).dists[0, :, 0]
@@ -318,7 +298,6 @@ class GenerativeUpsample(nn.Module):
 
             else:
                 raise NotImplementedError
-
             return keep_target, loss_target
 
         else:
@@ -351,7 +330,6 @@ def generative_upsample_t():
                 ConvBlock(16, 16, 2, 2),
                 ConvBlock(16, 16, 3, 1),
             )
-
             self.decoder = nn.Sequential(
                 DecoderBlock(), DecoderBlock()
             )
@@ -374,7 +352,6 @@ def generative_upsample_t():
     xyz_f = [torch.ones((_.shape[0], 1), dtype=torch.float32) for _ in xyz_c]
     xyz = ME.utils.sparse_collate(coords=xyz_c, feats=xyz_f)
     xyz = ME.SparseTensor(coordinates=xyz[0], features=xyz[1], tensor_stride=1)
-
     out = model(xyz)
     print('Done')
 

@@ -83,7 +83,6 @@ class ChannelLastPermutation(nn.Module):
 class ImageCompressor(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super(ImageCompressor, self).__init__()
-
         self.encoder = nn.Sequential(
             *[Conv2dBlock(
                 3 if idx == 0 else cfg.encoder_channels[idx - 1], ch,
@@ -92,7 +91,6 @@ class ImageCompressor(nn.Module):
                 act=cfg.activation if idx != len(cfg.encoder_channels) - 1 else None
             ) for idx, ch in enumerate(cfg.encoder_channels)]
         )
-
         self.decoder = nn.Sequential(
             *[ConvTrans2dBlock(
                 cfg.encoder_channels[-1] if idx == 0
@@ -103,7 +101,6 @@ class ImageCompressor(nn.Module):
             ) for idx, ch in enumerate(cfg.decoder_channels)],
             Conv2dBlock(cfg.decoder_channels[-1], 3, 3, 1, 1, bn=False, act=cfg.activation)
         )
-
         assert cfg.hyper_decoder_channels[-1] == cfg.encoder_channels[-1] * len(cfg.prior_indexes_range)
         hyper_encoder = nn.Sequential(
             ChannelFirstPermutation(),
@@ -116,7 +113,6 @@ class ImageCompressor(nn.Module):
             ) for idx, ch in enumerate(cfg.hyper_encoder_channels)],
             ChannelLastPermutation()
         )
-
         hyper_decoder = nn.Sequential(
             ChannelFirstPermutation(),
             *[ConvTrans2dBlock(
@@ -138,7 +134,6 @@ class ImageCompressor(nn.Module):
                 nn.Linear(out_channels, out_channels,
                           bias=True)
             )
-
         self.entropy_bottleneck = \
             HyperPriorNoisyDeepFactorizedEntropyModel(
                 hyper_encoder=hyper_encoder,
@@ -154,21 +149,17 @@ class ImageCompressor(nn.Module):
                 quantize_indexes=True
             )
         self.evaluator = ImageCompressionEvaluator()
-
         self.cfg = cfg
 
     def forward(self, im_data: IMData):
         batch_im = im_data.im
-
         pixels_num = batch_im.shape[0] * batch_im.shape[2] * batch_im.shape[3]
-
         feature = self.encoder(batch_im)
         feature = channel_last_permutation(feature)
 
         if self.training:
             fea_tilde, loss_dict = self.entropy_bottleneck(feature)
             fea_tilde = channel_first_permutation(fea_tilde)
-
             im_recon = self.decoder(fea_tilde)
 
             for key in loss_dict:
@@ -176,26 +167,21 @@ class ImageCompressor(nn.Module):
                     loss_dict[key] = loss_dict[key] * (
                             self.cfg.bpp_loss_factor / pixels_num
                     )
-
             loss_dict['reconstruct_loss'] = F.mse_loss(
                 im_recon, batch_im
             ) * self.cfg.reconstruct_loss_factor
-
             loss_dict['loss'] = sum(loss_dict.values())
-
             for key in loss_dict:
                 if key != 'loss':
                     loss_dict[key] = loss_dict[key].item()
             loss_dict['mean_psnr'] = -10 * math.log10(
                 loss_dict['reconstruct_loss'] / self.cfg.reconstruct_loss_factor
             )
-
             return loss_dict
 
         elif not self.training:
             fea_recon, compressed_strings, coding_batch_shape = self.entropy_bottleneck(feature)
             fea_recon = channel_first_permutation(fea_recon)
-
             im_recon = self.decoder(fea_recon)
             im_recon = (im_recon * 255).round_().clip(None, 255)
             batch_im = (batch_im * 255).round_()
@@ -207,7 +193,6 @@ class ImageCompressor(nn.Module):
                 im_data.valid_range,
                 im_data.results_dir
             )
-
             return ret
 
     def train(self, mode: bool = True):

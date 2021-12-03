@@ -38,7 +38,6 @@ def main():
     cfg = Config()
     cfg.merge_with_dotlist(sys.argv[1:])
     cfg.check()
-
     from loguru import logger
     logger.remove()
 
@@ -48,13 +47,11 @@ def main():
                         ' <cyan>{name}</cyan>:<cyan>{line}</cyan>  ' \
                         '<level>{message}</level>'
         logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
-
         os.makedirs('runs', exist_ok=True)
         run_dir = pathlib.Path(utils.autoindex_obj(os.path.join('runs', cfg.train.rundir_name)))
         ckpts_dir = run_dir / 'ckpts'
         utils.make_new_dirs(run_dir, logger)
         utils.make_new_dirs(ckpts_dir, logger)
-
         logger.add(run_dir / 'log.txt', format=loguru_format, level=0, mode='w')
         logger.info('preparing for training...')
         with open(run_dir / 'config.yaml', 'w') as f:
@@ -73,7 +70,6 @@ def main():
                 raise e
             else:
                 logger.info(f'resumed tensorboard log file(s) in {last_tb_dir}')
-
         tb_writer = SummaryWriter(str(tb_logdir))
         try:
             tb_proc = subprocess.Popen(
@@ -130,7 +126,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         Model = importlib.import_module(cfg.model_path).Model
     except Exception as e:
         raise ImportError(*e.args)
-
     model = Model(cfg.model)
 
     if hasattr(model, 'params_divider'):
@@ -172,10 +167,12 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     if hasattr(dataset, 'gen_cache') and dataset.gen_cache is True:
         datacache_sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=False) \
             if global_rank != -1 else None
-        datacache_loader = torch.utils.data.DataLoader(dataset, process_batch_size,
-                                                       sampler=datacache_sampler,
-                                                       num_workers=cfg.train.num_workers * 2, drop_last=False,
-                                                       collate_fn=lambda batch: None)
+        datacache_loader = torch.utils.data.DataLoader(
+            dataset, process_batch_size,
+            sampler=datacache_sampler,
+            num_workers=cfg.train.num_workers * 2, drop_last=False,
+            collate_fn=lambda batch: None
+        )
         for _ in tqdm(datacache_loader):
             pass
         with open(os.path.join(dataset.cache_root, 'train_all_cached'), 'w') as f:
@@ -186,20 +183,20 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
     dataset_sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=cfg.train.shuffle) \
         if global_rank != -1 else None
-    dataloader = torch.utils.data.DataLoader(dataset, process_batch_size,
-                                             cfg.train.shuffle if dataset_sampler is None else None,
-                                             sampler=dataset_sampler, num_workers=cfg.train.num_workers, drop_last=True,
-                                             pin_memory=True, collate_fn=dataset.collate_fn)
+    dataloader = torch.utils.data.DataLoader(
+        dataset, process_batch_size,
+        cfg.train.shuffle if dataset_sampler is None else None,
+        sampler=dataset_sampler, num_workers=cfg.train.num_workers, drop_last=True,
+        pin_memory=True, collate_fn=dataset.collate_fn
+    )
     steps_one_epoch = len(dataloader)
 
     # Initialize optimizers and schedulers
     params_list: List[List[torch.nn.Parameter]] = [[] for _ in range(len(cfg.train.optimizer))]
-
     for param_name, param in model.named_parameters():
         division_idx = params_divider(param_name)
         assert division_idx >= 0
         params_list[division_idx].append(param)
-
     optimizer_list = []
     scheduler_list = []
 
@@ -220,19 +217,17 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             optimizer_list.append(None)
             scheduler_list.append(None)
             continue
-
         optimizer = get_optimizer_class(cfg.train.optimizer[idx], cfg.train.momentum[idx])(
                 params=params,
                 lr=cfg.train.learning_rate[idx],
                 weight_decay=cfg.train.weight_decay[idx]
             )
-
         if cfg.train.scheduler[idx] == 'Step':
             scheduler = torch.optim.lr_scheduler.StepLR(
                 optimizer,
                 step_size=cfg.train.lr_step_size[idx],
-                gamma=cfg.train.lr_step_gamma[idx])
-
+                gamma=cfg.train.lr_step_gamma[idx]
+            )
         elif cfg.train.scheduler[idx] == 'OneCycle':
             scheduler = torch.optim.lr_scheduler.OneCycleLR(
                 optimizer,
@@ -242,13 +237,11 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 div_factor=cfg.train.lr_init_div_factor[idx],
                 base_momentum=cfg.train.momentum[idx] - 0.05,
                 max_momentum=cfg.train.momentum[idx] + 0.05,
-                final_div_factor=cfg.train.lr_final_div_factor[idx])
-
+                final_div_factor=cfg.train.lr_final_div_factor[idx]
+            )
         else: raise NotImplementedError
-
         optimizer_list.append(optimizer)
         scheduler_list.append(scheduler)
-
     assert not all([optimizer is None for optimizer in optimizer_list])
 
     # Resume checkpoint
@@ -256,7 +249,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     if cfg.train.resume_from_ckpt != '':
         ckpt_path = utils.autoindex_obj(cfg.train.resume_from_ckpt)
         ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
-
         if 'state_dict' in cfg.train.resume_items:
             try:
                 if torch_utils.is_parallel(model):
@@ -268,31 +260,24 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             logger.info('resumed model_state_dict from checkpoint "{}"'.format(ckpt_path))
             if incompatible_keys[0] != [] or incompatible_keys[1] != []:
                 logger.warning(incompatible_keys)
-
-        if 'start_epoch' in cfg.train.resume_items:
-            for idx, scheduler in enumerate(scheduler_list):
-                scheduler.last_epoch = int(
-                    ckpt['scheduler_state_dict'][idx]['last_epoch']
-                )
-            logger.info('start training from epoch {}'.format(start_epoch))
-
         if 'scheduler_state_dict' in cfg.train.resume_items:
+            start_epoch = int(ckpt['scheduler_state_dict'][0]['last_epoch'])
             for idx, scheduler in enumerate(scheduler_list):
                 scheduler.load_state_dict(ckpt['scheduler_state_dict'][idx])
+                assert scheduler.last_epoch == start_epoch
             logger.warning('resuming scheduler_state_dict, '
                            'hyperparameters of scheduler defined in yaml file will be overridden')
-
+            logger.info('start training from epoch {}'.format(start_epoch))
         if 'optimizer_state_dict' in cfg.train.resume_items:
             for idx, optimizer in enumerate(optimizer_list):
                 optimizer.load_state_dict(ckpt['optimizer_state_dict'][idx])
             logger.warning('resuming optimizer_state_dict, '
                            'hyperparameters of optimizer defined in yaml file will be overridden')
-
         del ckpt
 
     # Training loop
     logger.info('start training...')
-    total_steps = (cfg.train.epochs - start_epoch) * steps_one_epoch
+    total_steps = cfg.train.epochs * steps_one_epoch
     global_step = steps_one_epoch * start_epoch
     ave_time_onestep = None
     if cfg.train.amp:
@@ -320,13 +305,10 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             if cfg.train.amp:
                 with amp.autocast():
                     loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
-
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
                         optimizer.zero_grad()
-
                 scaler.scale(loss_dict['loss']).backward()
-
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
                         if cfg.train.max_grad_norm[idx] != 0:
@@ -335,18 +317,13 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                                 cfg.train.max_grad_norm[idx]
                             )
                         scaler.step(optimizer)
-
                 scaler.update()
-
             else:
                 loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
-
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
                         optimizer.zero_grad()
-
                 loss_dict['loss'].backward()
-
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
                         if cfg.train.max_grad_norm[idx] != 0:
@@ -360,18 +337,18 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             time_this_step = time.time() - start_time
             ave_time_onestep = time_this_step if ave_time_onestep is None else \
                 ave_time_onestep * 0.9 + time_this_step * 0.1
-
             if cfg.train.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.train.log_frequency == 0):
                 expected_total_time, eta = utils.eta_by_seconds((total_steps - global_step - 1) * ave_time_onestep)
-                logger.info(f'step '
-                            f'{step_idx}/{steps_one_epoch - 1} of epoch {epoch}/{cfg.train.epochs - 1}, '
-                            f'speed: '
-                            f'{utils.totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/epoch, '
-                            f'eta(current): '
-                            f'{utils.eta_by_seconds((steps_one_epoch - step_idx - 1) * ave_time_onestep)[1]}, '
-                            f'eta(total): '
-                            f'{eta} in {expected_total_time}')
-
+                logger.info(
+                    f'step '
+                    f'{step_idx}/{steps_one_epoch - 1} of epoch {epoch}/{cfg.train.epochs - 1}, '
+                    f'speed: '
+                    f'{utils.totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/epoch, '
+                    f'eta(current): '
+                    f'{utils.eta_by_seconds((steps_one_epoch - step_idx - 1) * ave_time_onestep)[1]}, '
+                    f'eta(total): '
+                    f'{eta} in {expected_total_time}'
+                )
                 # tensorboard items
                 if local_rank in (-1, 0):
                     for idx, optimizer in enumerate(optimizer_list):
@@ -379,7 +356,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                             f'Train/Learning_rate_{idx}',
                             optimizer.param_groups[0]['lr'], global_step
                         )
-
                     total_wo_aux = 0.0
                     for item_name, item in loss_dict.items():
                         if item_name != 'loss':
@@ -387,11 +363,9 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                             tb_writer.add_scalar(f'Train/{item_category}/{item_name}', item, global_step)
                             if item_category == 'Loss' and not item_name.endswith('aux_loss'):
                                 total_wo_aux += loss_dict[item_name]
-
                     tb_writer.add_scalar('Train/Loss/total_wo_aux', total_wo_aux, global_step)
 
             global_step += 1
-
             for idx, scheduler in enumerate(scheduler_list):
                 if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
                     scheduler.step()
@@ -426,7 +400,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             test_items = test(cfg, logger, run_dir, model)
             for item_name, item in test_items.items():
                 tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
-
         torch.cuda.empty_cache()
 
     dist.destroy_process_group()

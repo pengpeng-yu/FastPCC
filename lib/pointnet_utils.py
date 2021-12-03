@@ -35,9 +35,11 @@ def index_points(points, idx):
 
 def knn_points(p1, p2, k, return_sorted=False, version='pytorch3d', pytorch3d_version=-1, **kwargs):
     if version == 'pytorch3d':  # square distance
-        return pytorch3d_knn_points(p1, p2, K=k,
-                                    return_sorted=return_sorted,
-                                    version=pytorch3d_version, **kwargs)
+        return pytorch3d_knn_points(
+            p1, p2, K=k,
+            return_sorted=return_sorted,
+            version=pytorch3d_version, **kwargs
+        )
 
     elif version == 'pytorch':  # distance
         if not pytorch3d_version == -1 and kwargs == {}: raise NotImplementedError
@@ -213,11 +215,13 @@ class PointNetSetAbstraction(nn.Module):
         if self.group_all:
             sampled_xyz, sampled_points = sample_and_group_all(xyz, points_fea)
         else:
-            sampled_xyz, sampled_points = sample_and_group(self.nsample,
-                                                           self.group_radius,
-                                                           self.ngroup,
-                                                           xyz, points_fea,
-                                                           knn=self.knn)
+            sampled_xyz, sampled_points = sample_and_group(
+                self.nsample,
+                self.group_radius,
+                self.ngroup,
+                xyz, points_fea,
+                knn=self.knn
+            )
         # sampled_xyz: sampled points position data, [B, npoint, C]
         # sampled_points: sampled points data, [B, nsample, ngroup, C+D]
         sampled_points = sampled_points.permute(0, 3, 2, 1)  # [B, C+D, ngroup, nsample]
@@ -225,6 +229,5 @@ class PointNetSetAbstraction(nn.Module):
             sampled_points = F.relu(bn(conv(sampled_points)))
 
         sampled_points = torch.max(sampled_points, 2)[0].transpose(1, 2)  # [B, nsample, last_channel]
-        # maximum for each channel for each points group of sampled point
         return sampled_xyz, sampled_points
 

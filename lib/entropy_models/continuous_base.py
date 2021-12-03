@@ -18,11 +18,13 @@ def batched_pmf_to_quantized_cdf(pmf: torch.Tensor,
                                  max_length: int,
                                  entropy_coder_precision: int = 16):
     """
-    :param pmf: (channels, max_length) float
-    :param pmf_length: (channels, ) int32
-    :param max_length: max length of pmf, int
-    :param entropy_coder_precision
-    :return: quantized cdf (channels, max_length + 2)
+    Args:
+        pmf: (channels, max_length) float
+        pmf_length: (channels, ) int32
+        max_length: max length of pmf, int
+        entropy_coder_precision:
+    Returns:
+        quantized cdf (channels, max_length + 2)
     """
     cdf = torch.zeros((len(pmf_length), max_length + 2),
                       dtype=torch.int32, device=pmf.device)
@@ -116,7 +118,6 @@ class DistributionQuantizedCDFTable(nn.Module):
                            fill_value=-self.init_scale,
                            dtype=torch.float))
             self.e_input_values.append(self.lower_tail_aux_param)
-
             if hasattr(self.base, 'logits_cdf_for_estimation'):
                 self.e_functions.append(
                     lambda *args, **kwargs: self.base.logits_cdf_for_estimation(*args, **kwargs)
@@ -124,13 +125,11 @@ class DistributionQuantizedCDFTable(nn.Module):
                 self.e_target_values.append(
                     math.log(self.tail_mass / 2 / (1 - self.tail_mass / 2))
                 )
-
             elif hasattr(self.base, 'log_cdf_for_estimation'):
                 self.e_functions.append(
                     lambda *args, **kwargs: self.base.log_cdf_for_estimation(*args, **kwargs)
                 )
                 self.e_target_values.append(math.log(self.tail_mass / 2))
-
             else: raise NotImplementedError
 
         # Upper tail estimation.
@@ -149,7 +148,6 @@ class DistributionQuantizedCDFTable(nn.Module):
                            fill_value=self.init_scale,
                            dtype=torch.float))
             self.e_input_values.append(self.upper_tail_aux_param)
-
             if hasattr(self.base, 'logits_cdf_for_estimation'):
                 self.e_functions.append(
                     lambda *args, **kwargs: self.base.logits_cdf_for_estimation(*args, **kwargs)
@@ -157,13 +155,11 @@ class DistributionQuantizedCDFTable(nn.Module):
                 self.e_target_values.append(
                     -math.log(self.tail_mass / 2 / (1 - self.tail_mass / 2))
                 )
-
             elif hasattr(self.base, 'log_survival_function_for_estimation'):
                 self.e_functions.append(
                     lambda *args, **kwargs: self.base.log_survival_function_for_estimation(*args, **kwargs)
                 )
                 self.e_target_values.append(math.log(self.tail_mass / 2))
-
             else: raise NotImplementedError
 
     def lower_tail(self):
@@ -275,7 +271,6 @@ class DistributionQuantizedCDFTable(nn.Module):
             self.cached_cdf_table = cdf
             self.cached_cdf_length[...] = cdf_length
             self.cached_cdf_offset[...] = cdf_offset
-
             self.update_quantized_cdf_list()
             self.requires_updating_cdf_table[:] = False
 
@@ -295,7 +290,6 @@ class DistributionQuantizedCDFTable(nn.Module):
         to use precomputed cdf table latter.
         """
         flag_key = prefix + 'requires_updating_cdf_table'
-
         if flag_key not in state_dict or state_dict[flag_key]:
             # Delete invalid values in state dict.
             # Those values are supposed to be rebuilt via "model.eval()".
@@ -316,21 +310,17 @@ class DistributionQuantizedCDFTable(nn.Module):
             print('Warning: cached cdf table in state dict requires updating.\n'
                   'You need to call model.eval() to build it after loading state dict '
                   'before any inference.')
-
             super(DistributionQuantizedCDFTable, self)._load_from_state_dict(
                 state_dict, prefix, local_metadata, strict,
                 missing_keys, unexpected_keys, error_msgs)
-
         else:
             # Placeholder
             self.cached_cdf_table = torch.empty_like(
                 state_dict[prefix + 'cached_cdf_table'],
                 device=self.cached_cdf_table.device)
-
             super(DistributionQuantizedCDFTable, self)._load_from_state_dict(
                 state_dict, prefix, local_metadata, strict,
                 missing_keys, unexpected_keys, error_msgs)
-
             self.update_quantized_cdf_list()
 
     def train(self, mode: bool = True):
@@ -349,7 +339,6 @@ class DistributionQuantizedCDFTable(nn.Module):
         """
         Code from nn.Module._apply function.
         """
-
         def compute_should_use_set_data(tensor, tensor_applied):
             # noinspection PyUnresolvedReferences,PyProtectedMember
             if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
@@ -359,7 +348,6 @@ class DistributionQuantizedCDFTable(nn.Module):
 
         def distribution_param_apply(obj):
             for var_name, var in obj.__dict__.items():
-
                 if isinstance(var, nn.Parameter):
                     with torch.no_grad():
                         param_applied = fn(var)
@@ -383,7 +371,6 @@ class DistributionQuantizedCDFTable(nn.Module):
                             assert var.grad.is_leaf
                             obj.__dict__[var_name].grad = \
                                 grad_applied.requires_grad_(var.grad.requires_grad)
-
                     obj.__dict__[var_name].data = param_applied
 
                 elif isinstance(var, torch.Tensor):
@@ -398,7 +385,6 @@ class DistributionQuantizedCDFTable(nn.Module):
                     distribution_param_apply(var)
 
         distribution_param_apply(self.base)
-
         super(DistributionQuantizedCDFTable, self)._apply(fn)
 
 
@@ -422,7 +408,6 @@ class ContinuousEntropyModelBase(nn.Module):
         self.range_coder_precision = range_coder_precision
         self.range_encoder = ans.RansEncoder()
         self.range_decoder = ans.RansDecoder()
-
         if self.range_coder_precision != 16:
             raise NotImplementedError
 

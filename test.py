@@ -23,10 +23,8 @@ def main():
     os.makedirs('runs', exist_ok=True)
     run_dir = pathlib.Path(utils.autoindex_obj(os.path.join('runs', cfg.test.rundir_name)))
     os.makedirs(run_dir, exist_ok=False)
-
     with open(run_dir / 'config.yaml', 'w') as f:
         f.write(cfg.to_yaml())
-
     from loguru import logger
     logger.remove()
     loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> | ' \
@@ -35,7 +33,6 @@ def main():
                     '<level>{message}</level>'
     logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
     logger.add(run_dir / 'log.txt', format=loguru_format, level=0, mode='w')
-
     print(test(cfg, logger, run_dir))
 
 
@@ -43,7 +40,6 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
     if cfg.test.dataset_path == '':
         cfg.test.dataset_path = cfg.train.dataset_path
         cfg.test.dataset = deepcopy(cfg.train.dataset)
-
     try:
         Dataset = importlib.import_module(cfg.test.dataset_path).Dataset
     except Exception as e:
@@ -56,9 +52,11 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
     # cache
     dataset: torch.utils.data.Dataset = Dataset(cfg.test.dataset, False, logger)
     if hasattr(dataset, 'gen_cache') and dataset.gen_cache is True:
-        datacache_loader = torch.utils.data.DataLoader(dataset, cfg.test.batch_size,
-                                                       num_workers=cfg.test.num_workers * 2, drop_last=False,
-                                                       collate_fn=lambda batch: None)
+        datacache_loader = torch.utils.data.DataLoader(
+            dataset, cfg.test.batch_size,
+            num_workers=cfg.test.num_workers * 2, drop_last=False,
+            collate_fn=lambda batch: None
+        )
         for _ in tqdm(datacache_loader):
             pass
         with open(os.path.join(dataset.cache_root, 'test_all_cached'), 'w') as f:
@@ -67,20 +65,20 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         # rebuild dataset to use cache
         dataset: torch.utils.data.Dataset = Dataset(cfg.test.dataset, False, logger)
 
-    dataloader = torch.utils.data.DataLoader(dataset, cfg.test.batch_size, shuffle=False,
-                                             num_workers=cfg.test.num_workers, drop_last=False, pin_memory=True,
-                                             collate_fn=dataset.collate_fn)
+    dataloader = torch.utils.data.DataLoader(
+        dataset, cfg.test.batch_size, shuffle=False,
+        num_workers=cfg.test.num_workers, drop_last=False, pin_memory=True,
+        collate_fn=dataset.collate_fn
+    )
     if model is not None:
         model.eval()
         device = next(model.parameters()).device
-
     else:
         try:
             Model = importlib.import_module(cfg.model_path).Model
         except Exception as e:
             raise ImportError(*e.args)
         model = Model(cfg.model)
-
         if cfg.test.weights_from_ckpt != '':
             ckpt_path = utils.autoindex_obj(cfg.test.weights_from_ckpt)
             logger.info(f'loading weights from {ckpt_path}')
@@ -93,18 +91,17 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
             logger.info('resumed weights in checkpoint "{}"'.format(ckpt_path))
             if incompatible_keys[0] != [] or incompatible_keys[1] != []:
                 logger.warning(incompatible_keys)
-
         else:
             logger.warning(f'no weight is loaded')
-
-        device = torch_utils.select_device(logger,
-                                           local_rank=-1,
-                                           device=cfg.test.device)
+        device = torch_utils.select_device(
+            logger,
+            local_rank=-1,
+            device=cfg.test.device
+        )
         model.to(device)
         model.eval()
 
     logger.info(f'start testing using device {device}')
-
     steps_one_epoch = len(dataloader)
     for step_idx, batch_data in enumerate(dataloader):
         if isinstance(batch_data, torch.Tensor):
@@ -138,7 +135,6 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
 
     for value in metric_results.values():
         assert isinstance(value, int) or isinstance(value, float)
-
     logger.info(f'test end')
     return metric_results
 

@@ -152,7 +152,6 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         with io.BytesIO(broadcast_shape_string) as bs:
             for bytes_num in self.broadcast_shape_bytes:
                 broadcast_shape.append(int.from_bytes(bs.read(bytes_num), 'little', signed=False))
-
         broadcast_shape = torch.Size(broadcast_shape)
 
         indexes = self.build_indexes(broadcast_shape)
@@ -174,7 +173,6 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             symbols = symbols.to(torch.float)
         else:
             symbols = self.dequantize(symbols)
-
         symbols = symbols.reshape(batch_shape + broadcast_shape + self.prior.batch_shape)
         return symbols
 
@@ -188,13 +186,11 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16,
                  broadcast_shape_bytes: Tuple[int, ...] = (2,)):
-
         prior_weights, prior_biases, prior_factors = \
             DeepFactorized.make_parameters(
                 batch_numel=batch_shape.numel(),
                 init_scale=init_scale,
                 num_filters=num_filters)
-
         super(NoisyDeepFactorizedEntropyModel, self).__init__(
             prior=NoisyDeepFactorized(
                 batch_shape=batch_shape,
@@ -207,7 +203,6 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
             range_coder_precision=range_coder_precision,
             broadcast_shape_bytes=broadcast_shape_bytes
         )
-
         # Keep references to ParameterList objects here to make them a part of state dict.
         self.prior_weights, self.prior_biases, self.prior_factors = \
             prior_weights, prior_biases, prior_factors

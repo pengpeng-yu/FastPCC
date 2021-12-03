@@ -41,15 +41,15 @@ class InceptionResBlock(nn.Module):
         self.bn = bn
         self.act = act
         self.region_type = region_type
-
         self.path_0 = nn.Sequential(
             ConvBlock(channels, channels // 4, 3, 1, region_type=region_type, bn=bn, act=act),
-            ConvBlock(channels // 4, channels // 2, 3, 1, region_type=region_type, bn=bn, act=None))
-
+            ConvBlock(channels // 4, channels // 2, 3, 1, region_type=region_type, bn=bn, act=None)
+        )
         self.path_1 = nn.Sequential(
             ConvBlock(channels, channels // 4, 1, 1, region_type=region_type, bn=bn, act=act),
             ConvBlock(channels // 4, channels // 4, 3, 1, region_type=region_type, bn=bn, act=act),
-            ConvBlock(channels // 4, channels // 2, 1, 1, region_type=region_type, bn=bn, act=None))
+            ConvBlock(channels // 4, channels // 2, 1, 1, region_type=region_type, bn=bn, act=None)
+        )
 
     def forward(self, x):
         out0 = self.path_0(x)
@@ -78,12 +78,10 @@ def make_downsample_blocks(
         act: Optional[str],
         use_bn_for_last: bool,
         act_for_last: Optional[str]) -> nn.ModuleList:
-
     basic_block = partial(BLOCKS_DICT[basic_block_type],
                           region_type=region_type,
                           bn=use_batch_norm, act=act)
     blocks = nn.ModuleList()
-
     for idx in range(len(intra_channels)):
         blocks.append(nn.Sequential(
             ConvBlock(
@@ -105,7 +103,6 @@ def make_downsample_blocks(
                 act=act if idx != len(intra_channels) - 1 else act_for_last
             ),
         ))
-
     return blocks
 
 
@@ -197,19 +194,18 @@ class Encoder(nn.Module):
                  act: Optional[str],
                  last_act: Optional[str]):
         super(Encoder, self).__init__()
-
         self.requires_points_num_list = requires_points_num_list
         self.points_num_scaler = points_num_scaler
         self.value_scaler = value_scaler
-
         if intra_channels[0] != 0:
-            self.first_block = ConvBlock(in_channels, intra_channels[0], 3, 1,
-                                         region_type=region_type,
-                                         bn=use_batch_norm, act=act)
+            self.first_block = ConvBlock(
+                in_channels, intra_channels[0], 3, 1,
+                region_type=region_type,
+                bn=use_batch_norm, act=act
+            )
         else:
             self.first_block = None
             intra_channels = (in_channels, *intra_channels[1:])
-
         self.blocks = make_downsample_blocks(
             intra_channels[0], out_channels, intra_channels[1:],
             basic_block_type, region_type, basic_block_num,
@@ -268,7 +264,6 @@ class DecoderBlock(nn.Module):
             conv_trans_near_pruning,
             use_batch_norm, act
         )
-
         classify_block = ConvBlock(
             classifier_in_channels, 1,
             3, 1,
@@ -276,7 +271,6 @@ class DecoderBlock(nn.Module):
             bn=use_batch_norm,
             act='relu' if kwargs.get('loss_type', None) == 'Dist' else None
         )
-
         self.generative_upsample = GenerativeUpsample(upsample_block, classify_block, **kwargs)
 
     def forward(self, msg: GenerativeUpsampleMessage):
@@ -351,11 +345,9 @@ class HyperCoder(nn.Module):
         self.pre_value_scaler = pre_value_scaler
         self.post_value_scaler = post_value_scaler
         self.coder_type = coder_type
-
         basic_block = partial(BLOCKS_DICT[basic_block_type],
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
-
         main_modules = []
         for idx in range(len(intra_channels)):
             if coder_type.startswith('generative_upsample') and idx == 0:
@@ -432,7 +424,6 @@ class EncoderForGeoLossLess(nn.Module):
         super(EncoderForGeoLossLess, self).__init__()
         hidden_channels = in_channels
         gate_channels = 1 * hidden_channels
-
         self.conv_h = ConvBlock(
             out_channels,
             gate_channels,
@@ -440,14 +431,12 @@ class EncoderForGeoLossLess(nn.Module):
             region_type='HYPER_CUBE',
             bn=use_batch_norm, act=act
         )
-
         self.conv_c = make_downsample_blocks(
             hidden_channels, hidden_channels, (hidden_channels,),
             basic_block_type, region_type, basic_block_num,
             use_batch_norm, act,
             use_batch_norm, None
         )[0]
-
         self.conv_out = ConvBlock(
             hidden_channels,
             out_channels,
@@ -455,12 +444,11 @@ class EncoderForGeoLossLess(nn.Module):
             region_type=region_type,
             bn=use_batch_norm, act=None
         )
-
         self.value_scaler = value_scaler
         self.detach_higher_fea = detach_higher_fea
         self.hidden_channels = hidden_channels
 
-    def forward(self, x: torch.Tensor, coder_num: int):
+    def forward(self, x: ME.SparseTensor, coder_num: int):
         strided_fea_list = []
         cm = x.coordinate_manager
         cx = x
@@ -490,5 +478,4 @@ class EncoderForGeoLossLess(nn.Module):
                     strided_fea_list[idx],
                     lambda _: _ * value_scaler
                 )
-
         return strided_fea_list

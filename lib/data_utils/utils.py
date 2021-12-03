@@ -37,7 +37,6 @@ def im_data_collate_fn(data_list: List[IMData],
                        target_shapes: Union[Tuple[int, ...], List[int]],
                        resize_strategy: str,
                        channel_last_to_channel_first: bool) -> IMData:
-
     shape_idx = np.random.randint(0, len(target_shapes) // 2) * 2
     target_shape = (target_shapes[shape_idx],
                     target_shapes[shape_idx + 1])
@@ -48,22 +47,16 @@ def im_data_collate_fn(data_list: List[IMData],
             if key == 'im':
                 if resize_strategy == 'Expand':
                     im, valid_range = im_resize_with_crop(value, target_shape)
-
                 elif resize_strategy == 'Shrink':
                     im, valid_range = im_resize_with_pad(value, target_shape)
-
                 elif resize_strategy == 'Retain':
                     im, valid_range = im_pad(value, target_shape=target_shape)
-
                 elif resize_strategy == 'Adapt':
                     im, valid_range = im_pad(value, base_length=target_shape)
-
                 else:
                     raise NotImplementedError
-
                 data_dict[key].append(im)
                 data_dict['valid_range'].append(valid_range)
-
             elif value is not None:
                 data_dict[key].append(value)
 
@@ -75,10 +68,8 @@ def im_data_collate_fn(data_list: List[IMData],
                     torch.from_numpy(np.stack(value)).permute(0, 3, 1, 2).contiguous()
             else:
                 batched_data_dict[key] = torch.from_numpy(np.stack(value))
-
         else:
             batched_data_dict[key] = value
-
     return IMData(**batched_data_dict)
 
 
@@ -111,7 +102,6 @@ class PCData(SampleData):
 
     def to(self, device, non_blocking=False):
         super(PCData, self).to(device, non_blocking)
-
         for key in ('xyz', *self.tensor_to_tensor_items):
             value = self.__dict__[key]
             if isinstance(value, List):
@@ -141,7 +131,6 @@ def pc_data_collate_fn(data_list: List[PCData],
                 data_dict[key].append(value)
 
     batched_data_dict = {'batch_size': len(data_list)}
-
     if not use_kd_tree_partition:
         for key, value in data_dict.items():
             if key == 'xyz':
@@ -151,16 +140,13 @@ def pc_data_collate_fn(data_list: List[PCData],
                     batched_data_dict[key] = ME.utils.batched_coordinates(
                         value, dtype=torch.int32
                     )
-
             elif key in PCData.tensor_to_tensor_items:
                 if not sparse_collate:
                     batched_data_dict[key] = torch.stack(value, dim=0)
                 else:
                     batched_data_dict[key] = torch.cat(value, dim=0)
-
             elif key in PCData.list_to_tensor_items:
                 batched_data_dict[key] = torch.tensor(value)
-
             elif key != 'batch_size':
                 batched_data_dict[key] = value
 
@@ -171,7 +157,6 @@ def pc_data_collate_fn(data_list: List[PCData],
         if extras_dict == {}:
             # Retain original coordinates in the head of list.
             batched_data_dict['xyz'] = data_dict['xyz']
-
             batched_data_dict['xyz'].extend(
                 kd_tree_partition(
                     data_dict['xyz'][0], kd_tree_partition_max_points_num,
@@ -182,14 +167,11 @@ def pc_data_collate_fn(data_list: List[PCData],
                 data_dict['xyz'][0], kd_tree_partition_max_points_num,
                 extras=list(extras_dict.values())
             )
-
             batched_data_dict['xyz'] = data_dict['xyz']
             batched_data_dict['xyz'].extend(xyz_partitions)
-
             for idx, key in enumerate(extras_dict):
                 batched_data_dict[key] = [extras_dict[key]]
                 batched_data_dict[key].extend(extras[idx])
-
         for key, value in data_dict.items():
             if key == 'xyz':
                 # Add batch dimension.
@@ -201,15 +183,12 @@ def pc_data_collate_fn(data_list: List[PCData],
                     batched_data_dict[key] = [ME.utils.batched_coordinates([_], dtype=torch.int32)
                                               if idx != 0 else _.to(torch.int32)
                                               for idx, _ in enumerate(batched_data_dict[key])]
-
             elif key in PCData.tensor_to_tensor_items:
                 # Add batch dimension.
                 if not sparse_collate:
                     batched_data_dict[key] = [_[None] for _ in batched_data_dict[key][1:]]
-
             elif key in PCData.list_to_tensor_items:
                 batched_data_dict[key] = torch.tensor(value)
-
             elif key != 'batch_size':
                 batched_data_dict[key] = value
 
@@ -221,10 +200,8 @@ def im_resize_with_crop(
         target_shape: Union[Tuple[int, int], List[int]]
 ) -> Tuple[np.ndarray, np.ndarray]:
     assert len(target_shape) == 2
-
     shape_factor = (target_shape[0] / im.shape[0],
                     target_shape[1] / im.shape[1])
-
     shape_scaler = max(shape_factor)
     im: np.ndarray = cv2.resize(im, (0, 0), fx=shape_scaler, fy=shape_scaler)
     boundary = np.array([im.shape[0] - target_shape[0],
@@ -243,10 +220,8 @@ def im_resize_with_pad(
         target_shape: Union[Tuple[int, int], List[int]]
 ) -> Tuple[np.ndarray, np.ndarray]:
     assert len(target_shape) == 2
-
     shape_factor = (target_shape[0] / im.shape[0],
                     target_shape[1] / im.shape[1])
-
     shape_scaler = min(shape_factor)
     im = cv2.resize(im, (0, 0), fx=shape_scaler, fy=shape_scaler)
     holder = np.zeros_like(im, shape=(*target_shape, 3))
@@ -259,10 +234,8 @@ def im_resize_with_pad(
          [origin[1], origin[1] + im.shape[1]]],
         dtype=np.int
     )
-
     holder[valid_range[0][0]: valid_range[0][1],
            valid_range[1][0]: valid_range[1][1]] = im
-
     return holder, valid_range
 
 
@@ -271,7 +244,6 @@ def im_pad(
         target_shape: Union[Tuple[int, int], List[int]] = None,
         base_length: Union[Tuple[int, int], List[int]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-
     if target_shape is None:
         assert len(base_length) == 2
         target_shape = (math.ceil(im.shape[0] / base_length[0]) * base_length[0],
@@ -285,7 +257,6 @@ def im_pad(
     holder[: im.shape[0], : im.shape[1]] = im
     valid_range = np.array([[0, im.shape[0]],
                             [0, im.shape[1]]], dtype=np.int)
-
     return holder, valid_range
 
 
@@ -293,7 +264,6 @@ def o3d_coords_sampled_from_triangle_mesh(triangle_mesh_path: str, points_num: i
                                           sample_method: str = 'uniform',
                                           dtype=np.float32) -> np.ndarray:
     mesh_object = o3d.io.read_triangle_mesh(triangle_mesh_path)
-
     if sample_method == 'barycentric':
         point_cloud = resample_mesh_by_faces(
             mesh_object,

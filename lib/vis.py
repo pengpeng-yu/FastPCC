@@ -59,7 +59,6 @@ def plt_draw_xyz(xyz: Union[torch.Tensor, np.ndarray],
                  if_draw_voxel: bool = False,
                  figsize: Tuple[int, int] = (8, 8)):
     fig = plt.figure(figsize=figsize)
-
     if if_draw_voxel:
         if isinstance(xyz, np.ndarray):
             xyz = torch.from_numpy(xyz)
@@ -68,16 +67,13 @@ def plt_draw_xyz(xyz: Union[torch.Tensor, np.ndarray],
         xyz = ME.SparseTensor(xyz[1], xyz[0])
         xyz = \
             xyz.dense(min_coordinate=xyz.C.min().expand(3))[0].squeeze(1).squeeze(0).numpy()
-
     else:
         if isinstance(xyz, torch.Tensor):
             xyz = xyz.detach().cpu().numpy()
-
     plt_draw_xyz_with_degree(fig, 221, xyz, (None, None), if_draw_voxel)
     plt_draw_xyz_with_degree(fig, 222, xyz, (0, 0), if_draw_voxel)
     plt_draw_xyz_with_degree(fig, 223, xyz, (0, 90), if_draw_voxel)
     plt_draw_xyz_with_degree(fig, 224, xyz, (90, 0), if_draw_voxel)
-
     plt.show()
     print('Done')
 

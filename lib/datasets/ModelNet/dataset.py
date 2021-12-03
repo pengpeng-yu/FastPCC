@@ -86,7 +86,6 @@ class ModelNetDataset(torch.utils.data.Dataset):
         return len(self.file_list)
 
     def __getitem__(self, index):
-        # load
         file_path = self.file_list[index]
 
         # use cache
@@ -106,11 +105,9 @@ class ModelNetDataset(torch.utils.data.Dataset):
                     point_cloud = point_cloud[uniform_choice]
                 else:
                     raise NotImplementedError
-
         # for original modelnet dataset
         elif file_path.endswith('.off'):
             if self.cfg.with_normal_channel: raise NotImplementedError
-
             # mesh -> points
             point_cloud = o3d_coords_sampled_from_triangle_mesh(
                 file_path,
@@ -118,7 +115,6 @@ class ModelNetDataset(torch.utils.data.Dataset):
                 self.cfg.mesh_sample_point_method,
                 dtype=np.float32
             )
-
         else:
             raise NotImplementedError
 
@@ -146,7 +142,6 @@ class ModelNetDataset(torch.utils.data.Dataset):
                 xyz *= (self.cfg.resolution // 2)
             else:
                 xyz *= self.cfg.resolution
-
             unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True)
             xyz = xyz[unique_map]
             if self.cfg.with_normal_channel:
@@ -159,11 +154,13 @@ class ModelNetDataset(torch.utils.data.Dataset):
             cls_idx = None
 
         # cache and return
-        return_obj = PCData(xyz=torch.from_numpy(xyz),
-                            normals=torch.from_numpy(normals),
-                            class_idx=cls_idx,
-                            file_path=file_path if self.cfg.with_file_path else None,
-                            resolution=self.cfg.resolution if self.cfg.with_resolution else None)
+        return_obj = PCData(
+            xyz=torch.from_numpy(xyz),
+            normals=torch.from_numpy(normals),
+            class_idx=cls_idx,
+            file_path=file_path if self.cfg.with_file_path else None,
+            resolution=self.cfg.resolution if self.cfg.with_resolution else None
+        )
 
         if self.gen_cache is True:
             cache_file_path = file_path.replace(self.cfg.root, self.cache_root, 1).replace('.off', '.pt')
@@ -189,7 +186,6 @@ if __name__ == '__main__':
 
     from loguru import logger
     dataset = ModelNetDataset(config, True, logger, allow_cache=False)
-
     dataloader = torch.utils.data.DataLoader(dataset, 16, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
     sample: PCData = next(dataloader)

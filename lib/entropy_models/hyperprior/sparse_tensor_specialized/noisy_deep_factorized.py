@@ -23,7 +23,6 @@ class GeoLosslessEntropyModel(nn.Module):
         For lossless geometric compression.
         Only supports batch size == 1 during testing.
     """
-
     def __init__(self,
                  bottom_fea_entropy_model:
                  Union[ContinuousBatchedEntropyModel, HyperPriorEntropyModel],
@@ -63,7 +62,6 @@ class GeoLosslessEntropyModel(nn.Module):
         self.hyper_decoder_fea_post_op = hyper_decoder_fea_post_op
         self.fea_bytes_num_bytes = fea_bytes_num_bytes
         self.coord_bytes_num_bytes = coord_bytes_num_bytes
-
         self.indexed_entropy_model_coord = ContinuousIndexedEntropyModel(
             prior_fn=coord_prior_fn,
             index_ranges=coord_index_ranges,
@@ -75,7 +73,6 @@ class GeoLosslessEntropyModel(nn.Module):
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
         )
-
         self.indexed_entropy_model_fea = ContinuousIndexedEntropyModel(
             prior_fn=fea_prior_fn,
             index_ranges=fea_index_ranges,
@@ -106,7 +103,6 @@ class GeoLosslessEntropyModel(nn.Module):
             strided_fea_list = self.encoder(y_top, coder_num)
             *strided_fea_list, bottom_fea = strided_fea_list
             assert len(strided_fea_list) == coder_num
-
             loss_dict = {}
             strided_fea_tilde_list = []
 
@@ -168,7 +164,6 @@ class GeoLosslessEntropyModel(nn.Module):
                         coordinate_map_key=coord_target_key,
                         coordinate_manager=cm
                     )
-
                 strided_fea_tilde_list.append(lower_fea_tilde)
                 concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: f'fea_{idx}_' + k)
 
@@ -176,10 +171,8 @@ class GeoLosslessEntropyModel(nn.Module):
 
         else:
             concat_string, bottom_fea_recon = self.compress(y_top, coder_num)
-
-            # You can clear the shared coordinate manager in a upper module
+            # You can clear the shared coordinate manager in an upper module
             # after compression to save memory.
-
             recon = self.decompress(
                 concat_string,
                 bottom_fea_recon.device,
@@ -199,7 +192,6 @@ class GeoLosslessEntropyModel(nn.Module):
         strided_fea_list = self.encoder(y_top, coder_num)
         *strided_fea_list, bottom_fea = strided_fea_list
         assert len(strided_fea_list) == coder_num
-
         fea_strings = []
         coord_strings = []
         cm = y_top.coordinate_manager
@@ -272,7 +264,6 @@ class GeoLosslessEntropyModel(nn.Module):
                     coordinate_map_key=coord_recon_key,
                     coordinate_manager=cm
                 )
-
             fea_strings.append(fea_string)
 
         partial_concat_string = self.concat_strings(
@@ -283,7 +274,6 @@ class GeoLosslessEntropyModel(nn.Module):
             [[bottom_fea_string], [partial_concat_string]],
             [self.fea_bytes_num_bytes, 0]
         )
-
         return concat_string, bottom_fea_recon
 
     def decompress(self,
@@ -299,7 +289,6 @@ class GeoLosslessEntropyModel(nn.Module):
             partial_concat_string, coder_num,
             [self.fea_bytes_num_bytes, self.coord_bytes_num_bytes]
         )
-
         strided_fea_recon_list = []
         cm = sparse_tensor_coords_tuple[1]
 
@@ -346,7 +335,6 @@ class GeoLosslessEntropyModel(nn.Module):
                     coordinate_map_key=coord_recon_key,
                     coordinate_manager=cm
                 )
-
             else:
                 fea_indexes = self.hyper_decoder_fea_post_op(
                     sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
@@ -356,19 +344,16 @@ class GeoLosslessEntropyModel(nn.Module):
                     sparse_tensor_coords_tuple=(coord_recon_key, cm)
                 )
             strided_fea_recon_list.append(lower_fea_recon)
-
         return strided_fea_recon_list[-1]
 
     @staticmethod
     def concat_strings(strings_lists: List[List[bytes]],
                        length_bytes_numbers: List[int] = None) -> bytes:
-
         strings_lists_num = len(strings_lists)
         if length_bytes_numbers is None:
             length_bytes_numbers = [4] * strings_lists_num
         else:
             assert strings_lists_num == len(length_bytes_numbers)
-
         strings_num_one_list = len(strings_lists[0])
         for strings_list in strings_lists[1:]:
             assert len(strings_list) == strings_num_one_list
@@ -381,14 +366,12 @@ class GeoLosslessEntropyModel(nn.Module):
                     bs.write(string)
 
             concat_string = bs.getvalue()
-
         return concat_string
 
     @staticmethod
     def split_strings(concat_string: bytes,
                       strings_num_one_list: int,
                       length_bytes_numbers: List[int]) -> List[List[bytes]]:
-
         strings_lists_num = len(length_bytes_numbers)
         strings_lists = [[] for _ in range(strings_lists_num)]
 
@@ -410,17 +393,16 @@ class GeoLosslessEntropyModel(nn.Module):
             mapping_target_kernel_size=1,
             mapping_target_region_type='HYPER_CROSS') -> \
             ME.SparseTensor:
-
         mapping_target_region_type = getattr(ME.RegionType, mapping_target_region_type)
-
         cm = y_coords_tuple[1]
         assert cm is indexes.coordinate_manager
-
         target_key = y_coords_tuple[0]
-        kernel_map = cm.kernel_map(indexes.coordinate_map_key,
-                                   target_key,
-                                   kernel_size=mapping_target_kernel_size,
-                                   region_type=mapping_target_region_type)
+        kernel_map = cm.kernel_map(
+            indexes.coordinate_map_key,
+            target_key,
+            kernel_size=mapping_target_kernel_size,
+            region_type=mapping_target_region_type
+        )
         keep_target = torch.zeros(indexes.shape[0], dtype=torch.float, device=indexes.device)
         for _, curr_in in kernel_map.items():
             keep_target[curr_in[0].type(torch.long)] = 1
@@ -430,7 +412,6 @@ class GeoLosslessEntropyModel(nn.Module):
             coordinate_map_key=indexes.coordinate_map_key,
             coordinate_manager=cm
         )
-
         return target
 
 
@@ -467,7 +448,6 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
         fea_index_offset = math.log(fea_index_scale_min)
         fea_index_factor = (math.log(fea_index_scale_max) -
                             math.log(fea_index_scale_min)) / (fea_index_num_scales - 1)
-
         super(GeoLosslessScaleNoisyNormalEntropyModel, self).__init__(
             bottom_fea_entropy_model, encoder, detach_higher_fea,
             hyper_decoder_coord, hyper_decoder_fea, hybrid_hyper_decoder_fea,
@@ -517,7 +497,6 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16
                  ):
-
         coord_parameter_fns, coord_indexes_view_fn, coord_modules_to_add = \
             _noisy_deep_factorized_entropy_model_init(
                 coord_index_ranges, coord_parameter_fns_type,
@@ -528,7 +507,6 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                 fea_index_ranges, fea_parameter_fns_type,
                 fea_parameter_fns_factory, fea_num_filters
             )
-
         super(GeoLosslessNoisyDeepFactorizedEntropyModel, self).__init__(
             bottom_fea_entropy_model, encoder, detach_higher_fea,
             hyper_decoder_coord, hyper_decoder_fea, hybrid_hyper_decoder_fea,
@@ -539,7 +517,6 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )
-
         for module_name, module in coord_modules_to_add.items():
             setattr(self, 'coord_' + module_name, module)
         for module_name, module in fea_modules_to_add.items():

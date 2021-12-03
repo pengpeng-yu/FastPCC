@@ -51,22 +51,16 @@ class TrainConfig(SimpleConfig):
     def merge_setattr(self, key, value):
         if key == 'resume_items':
             if 'all' in value:
-                value = ('start_epoch', 'state_dict', 'optimizer_state_dict', 'scheduler_state_dict')
+                value = ('state_dict', 'optimizer_state_dict', 'scheduler_state_dict')
         super().merge_setattr(key, value)
 
     def check_local_value(self):
-        if 'scheduler_state_dict' in self.resume_items:
-            assert 'start_epoch' in self.resume_items
-
-        all_resume_items = ('start_epoch', 'state_dict', 'optimizer_state_dict', 'scheduler_state_dict')
+        all_resume_items = ('state_dict', 'optimizer_state_dict', 'scheduler_state_dict')
         for item in self.resume_items:
             assert item in all_resume_items
-
         if self.resume_tensorboard:
             assert self.resume_from_ckpt != ''
-
         assert self.ckpt_frequency > 0
-
         if isinstance(self.optimizer, str):
             self.optimizer = (self.optimizer,)
 

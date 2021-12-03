@@ -50,7 +50,6 @@ class SimpleConfig:
         interpreted as Union[List[basic_type], Tuple[basic_type, ...]]
         """
         basic_types = [bool, int, float, str]
-
         assert issubclass(type(self), SimpleConfig), \
             f'this method checks types of {type(self)} obj instead of {type(self)} object'
         assert hasattr(self, '__dict__'), f'object does not have attribute __dict__'
@@ -72,10 +71,8 @@ class SimpleConfig:
                 element_type = value_anno_type.__args__[0]
                 assert element_type in basic_types, \
                     f'unexpected type {element_type} of items in list/tuple {key}'
-
                 assert all([type(i) == element_type for i in value]), \
                     f'items in list/tuple {key} are not exactly the same'
-
                 assert value_anno_type in (List[element_type],
                                            Tuple[element_type, ...],
                                            Union[element_type, List[element_type]],
@@ -167,13 +164,11 @@ class SimpleConfig:
             arg = arg.replace('==', '=')
             try:
                 keys_seq, var = arg.split('=')
-
             except ValueError:
                 try:
                     dotdict_list.append(self.yaml_to_dotdict(arg))
                 except Exception as e:
                     raise ValueError(f'unexpected arg: "{arg}"')
-
             else:
                 if var == '':
                     dotdict_list.append({keys_seq: var})

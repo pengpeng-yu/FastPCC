@@ -17,7 +17,6 @@ from lib.datasets.PCGCv2Data.dataset_config import DatasetConfig
 class PCGCv2Data(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(PCGCv2Data, self).__init__()
-
         if cfg.resolution != 128:
             raise NotImplementedError
 
@@ -31,14 +30,12 @@ class PCGCv2Data(torch.utils.data.Dataset):
         if not os.path.exists(filelist_abs_path):
             logger.info('no filelist is given. Trying to generate...')
             file_list = tuple(pathlib.Path(cfg.root).glob('*.h5'))
-
             assert 0 < cfg.train_split_ratio <= 1.0
             if is_training:
                 file_list = file_list[: int(cfg.train_split_ratio * len(file_list))]
             else:
                 if cfg.train_split_ratio == 1.0: pass
                 else: file_list = file_list[int(cfg.train_split_ratio * len(file_list)):]
-
             with open(filelist_abs_path, 'w') as f:
                 f.writelines([str(_.relative_to(cfg.root)) + '\n' for _ in file_list])
 
@@ -55,7 +52,6 @@ class PCGCv2Data(torch.utils.data.Dataset):
     def __getitem__(self, index):
         file_path = self.file_list[index]
         xyz = h5py.File(file_path)['data'][:, :3]
-
         return PCData(xyz=torch.from_numpy(xyz.astype(np.float32)),
                       file_path=file_path if self.cfg.with_file_path else None,
                       ori_resolution=128 if self.cfg.with_ori_resolution else None,
@@ -70,13 +66,11 @@ if __name__ == '__main__':
 
     from loguru import logger
     dataset = PCGCv2Data(config, True, logger)
-
     dataloader = torch.utils.data.DataLoader(dataset, 4, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
     sample = next(dataloader)
 
     from lib.vis import plt_batched_sparse_xyz
-
     sample_coords = sample.xyz
     plt_batched_sparse_xyz(sample_coords, 0, False)
     plt_batched_sparse_xyz(sample_coords, 1, False)

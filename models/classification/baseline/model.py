@@ -53,16 +53,13 @@ class Model(nn.Module):
             # 0: samples_num, 1: correct_num, 2: wrong_num, 3: correct_rate
             pred_res = torch.zeros((self.cfg.classes_num, 4), dtype=torch.float32)
             self.register_buffer('pred_res', pred_res)
-
         elif mode == 'reset':
             self.pred_res[...] = 0
-
         elif mode == 'log':
             assert not self.training
             assert pred is not None and target is not None
             self.pred_res[:, 0] += torch.bincount(target, minlength=self.cfg.classes_num)
             self.pred_res[:, 1] += torch.bincount(target[pred == target], minlength=self.cfg.classes_num)
-
         elif mode == 'show':
             self.pred_res[:, 2] = self.pred_res[:, 0] - self.pred_res[:, 1]
             self.pred_res[:, 3] = self.pred_res[:, 1] / self.pred_res[:, 0]
