@@ -16,6 +16,7 @@ from lib.sparse_conv_layers import GenerativeUpsampleMessage
 from lib.entropy_models.continuous_batched import \
     NoisyDeepFactorizedEntropyModel as NoisyDeepFactorizedPriorEntropyModel
 from lib.entropy_models.hyperprior.noisy_deep_factorized import \
+    EntropyModel as HyperPriorEntropyModel, \
     ScaleNoisyNormalEntropyModel as HyperPriorScaleNoisyNormalEntropyModel, \
     NoisyDeepFactorizedEntropyModel as HyperPriorNoisyDeepFactorizedEntropyModel
 from lib.entropy_models.hyperprior.sparse_tensor_specialized.noisy_deep_factorized import \
@@ -83,65 +84,69 @@ class PCC(nn.Module):
             dist_upper_bound=cfg.dist_upper_bound
         )
 
-        if cfg.hyperprior == 'None':
-            entropy_bottleneck = NoisyDeepFactorizedPriorEntropyModel(
-                batch_shape=torch.Size([cfg.compressed_channels]),
-                coding_ndim=2,
-                init_scale=2
-            )
-        else:
-            hyper_encoder = HyperEncoder(
-                1 / cfg.encoder_scaler,
-                cfg.hyper_encoder_scaler,
-                cfg.compressed_channels,
-                cfg.hyper_compressed_channels,
-                cfg.hyper_encoder_channels,
-                *basic_block_args
-            )
-            hyper_decoder = HyperDecoder(
-                1 / cfg.hyper_encoder_scaler,
-                cfg.prior_indexes_scaler,
-                cfg.hyper_compressed_channels,
-                cfg.compressed_channels * len(cfg.prior_indexes_range),
-                cfg.hyper_decoder_channels,
-                *basic_block_args
-            )
-            if cfg.hyperprior == 'ScaleNoisyNormal':
-                assert len(cfg.prior_indexes_range) == 1
-                entropy_bottleneck = HyperPriorScaleNoisyNormalEntropyModel(
-                    hyper_encoder=hyper_encoder,
-                    hyper_decoder=hyper_decoder,
-                    hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
-                    prior_bytes_num_bytes=4,
+        if not cfg.lossless_compression_based:
+            if cfg.hyperprior == 'None':
+                self.entropy_bottleneck = NoisyDeepFactorizedPriorEntropyModel(
+                    batch_shape=torch.Size([cfg.compressed_channels]),
+                    broadcast_shape_bytes=(3,),
                     coding_ndim=2,
-                    num_scales=cfg.prior_indexes_range[0],
-                    scale_min=0.11,
-                    scale_max=64
+                    init_scale=2
                 )
-            elif cfg.hyperprior == 'NoisyDeepFactorized':
-                def parameter_fns_factory(in_channels, out_channels):
-                    return nn.Sequential(
-                        MLPBlock(in_channels, out_channels,
-                                 bn=None, act=cfg.activation),
-                        nn.Linear(out_channels, out_channels,
-                                  bias=True)
+            else:
+                hyper_encoder = HyperEncoder(
+                    1 / cfg.encoder_scaler,
+                    cfg.hyper_encoder_scaler,
+                    cfg.compressed_channels,
+                    cfg.hyper_compressed_channels,
+                    cfg.hyper_encoder_channels,
+                    *basic_block_args
+                )
+                hyper_decoder = HyperDecoder(
+                    1 / cfg.hyper_encoder_scaler,
+                    cfg.prior_indexes_scaler,
+                    cfg.hyper_compressed_channels,
+                    cfg.compressed_channels * len(cfg.prior_indexes_range),
+                    cfg.hyper_decoder_channels,
+                    *basic_block_args
+                )
+                if cfg.hyperprior == 'ScaleNoisyNormal':
+                    assert len(cfg.prior_indexes_range) == 1
+                    self.entropy_bottleneck = HyperPriorScaleNoisyNormalEntropyModel(
+                        hyper_encoder=hyper_encoder,
+                        hyper_decoder=hyper_decoder,
+                        hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
+                        hyperprior_broadcast_shape_bytes=(3,),
+                        prior_bytes_num_bytes=3,
+                        coding_ndim=2,
+                        num_scales=cfg.prior_indexes_range[0],
+                        scale_min=0.11,
+                        scale_max=64
                     )
-                entropy_bottleneck = HyperPriorNoisyDeepFactorizedEntropyModel(
-                    hyper_encoder=hyper_encoder,
-                    hyper_decoder=hyper_decoder,
-                    hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
-                    hyperprior_broadcast_shape_bytes=(4,),  # TODO: lower?
-                    prior_bytes_num_bytes=4,
-                    coding_ndim=2,
-                    index_ranges=cfg.prior_indexes_range,
-                    parameter_fns_type='transform',
-                    parameter_fns_factory=parameter_fns_factory,
-                    num_filters=(1, 3, 3, 3, 1),
-                    quantize_indexes=True
-                )
-            else: raise NotImplementedError
+                elif cfg.hyperprior == 'NoisyDeepFactorized':
+                    def parameter_fns_factory(in_channels, out_channels):
+                        return nn.Sequential(
+                            MLPBlock(in_channels, out_channels,
+                                     bn=None, act=cfg.activation),
+                            nn.Linear(out_channels, out_channels,
+                                      bias=True)
+                        )
+                    self.entropy_bottleneck = HyperPriorNoisyDeepFactorizedEntropyModel(
+                        hyper_encoder=hyper_encoder,
+                        hyper_decoder=hyper_decoder,
+                        hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
+                        hyperprior_broadcast_shape_bytes=(3,),
+                        prior_bytes_num_bytes=3,
+                        coding_ndim=2,
+                        index_ranges=cfg.prior_indexes_range,
+                        parameter_fns_type='transform',
+                        parameter_fns_factory=parameter_fns_factory,
+                        num_filters=(1, 3, 3, 3, 1),
+                        quantize_indexes=True
+                    )
+                else: raise NotImplementedError
 
-        if cfg.lossless_compression_based:
+        elif cfg.lossless_compression_based:
+            assert cfg.hyperprior == 'None'
             encoder_geo_lossless = EncoderForGeoLossLess(
                 cfg.lossless_coder_channels,
                 cfg.compressed_channels,
@@ -152,7 +157,7 @@ class PCC(nn.Module):
             hyper_decoder_coord_geo_lossless = HyperDecoderCoordForGeoLossLess(
                 1 / cfg.encoder_scaler,
                 cfg.prior_indexes_scaler,
-                cfg.hyper_compressed_channels,
+                cfg.compressed_channels,
                 1 * len(cfg.lossless_coord_indexes_range),
                 (cfg.lossless_coder_channels,),
                 *basic_block_args
@@ -160,7 +165,7 @@ class PCC(nn.Module):
             hyper_decoder_fea_geo_lossless = HyperDecoderFeaForGeoLossLess(
                 1 / cfg.encoder_scaler,
                 cfg.prior_indexes_scaler,
-                cfg.hyper_compressed_channels,
+                cfg.compressed_channels,
                 cfg.compressed_channels * (
                     len(cfg.prior_indexes_range)
                     if not cfg.lossless_hybrid_hyper_decoder_fea
@@ -177,15 +182,21 @@ class PCC(nn.Module):
                     nn.Linear(out_channels, out_channels,
                               bias=True)
                 )
+            bottom_fea_entropy_model = NoisyDeepFactorizedPriorEntropyModel(
+                batch_shape=torch.Size([cfg.compressed_channels]),
+                broadcast_shape_bytes=(0,),
+                coding_ndim=2,
+                init_scale=2
+            )
             self.entropy_bottleneck = GeoLosslessNoisyDeepFactorizedEntropyModel(
-                bottom_fea_entropy_model=entropy_bottleneck,
+                bottom_fea_entropy_model=bottom_fea_entropy_model,
                 encoder=encoder_geo_lossless,
                 detach_higher_fea=cfg.lossless_detach_higher_fea,
                 hyper_decoder_coord=hyper_decoder_coord_geo_lossless,
                 hyper_decoder_fea=hyper_decoder_fea_geo_lossless,
                 hybrid_hyper_decoder_fea=cfg.lossless_hybrid_hyper_decoder_fea,
-                fea_bytes_num_bytes=4,  # TODO: lower?
-                coord_bytes_num_bytes=4,
+                fea_bytes_num_bytes=3,
+                coord_bytes_num_bytes=3,
                 coord_index_ranges=cfg.lossless_coord_indexes_range,
                 coord_parameter_fns_type='transform',
                 coord_parameter_fns_factory=parameter_fns_factory,
@@ -196,8 +207,6 @@ class PCC(nn.Module):
                 fea_num_filters=(1, 3, 3, 3, 3, 1),
                 quantize_indexes=True
             )
-        else:
-            self.entropy_bottleneck = entropy_bottleneck
         self.cfg = cfg
 
     def forward(self, pc_data: PCData):
@@ -329,6 +338,8 @@ class PCC(nn.Module):
             assert bottom_fea_recon.C.shape[0] == 1
             sparse_tensor_coords = None
         else:
+            assert isinstance(self.entropy_bottleneck, HyperPriorEntropyModel) or \
+                   isinstance(self.entropy_bottleneck, NoisyDeepFactorizedPriorEntropyModel)
             em_strings, coding_batch_shape, _ = \
                 self.entropy_bottleneck.compress(feature)
             assert coding_batch_shape == torch.Size([1])
@@ -339,12 +350,11 @@ class PCC(nn.Module):
             if self.cfg.adaptive_pruning:
                 bs.write(reduce(
                     lambda i, j: i + j,
-                    [_[0].to_bytes(4, 'little', signed=False)
+                    [_[0].to_bytes(3, 'little', signed=False)
                      for _ in points_num_list]
                 ))
             if self.cfg.lossless_compression_based:
                 bs.write(lossless_coder_num.to_bytes(1, 'little', signed=False))
-            bs.write(len(em_string).to_bytes(4, 'little', signed=False))
             bs.write(em_string)
             compressed_string = bs.getvalue()
         return compressed_string, sparse_tensor_coords
@@ -363,8 +373,8 @@ class PCC(nn.Module):
             sparse_tensor_coords_list.append(sparse_tensor_coords)
 
         # Log bytes of each partition.
-        concat_string = reduce(lambda i, j: i + j,  # TODO: lower?
-                               (len(s).to_bytes(4, 'little', signed=False) + s
+        concat_string = reduce(lambda i, j: i + j,
+                               (len(s).to_bytes(3, 'little', signed=False) + s
                                 for s in compressed_string_list))
         return concat_string, sparse_tensor_coords_list
 
@@ -374,15 +384,14 @@ class PCC(nn.Module):
             if self.cfg.adaptive_pruning:
                 points_num_list = []
                 for idx in range(len(self.cfg.decoder_channels)):
-                    points_num_list.append([int.from_bytes(bs.read(4), 'little', signed=False)])
+                    points_num_list.append([int.from_bytes(bs.read(3), 'little', signed=False)])
             else:
                 points_num_list = None
             if self.cfg.lossless_compression_based:
                 lossless_coder_num = int.from_bytes(bs.read(1), 'little', signed=False)
             else:
                 lossless_coder_num = None
-            em_string_len = int.from_bytes(bs.read(4), 'little', signed=False)
-            em_string = bs.read(em_string_len)
+            em_string = bs.read()
 
         if self.cfg.lossless_compression_based:
             assert isinstance(self.entropy_bottleneck,
@@ -399,6 +408,8 @@ class PCC(nn.Module):
                 lossless_coder_num
             )
         else:
+            assert isinstance(self.entropy_bottleneck, HyperPriorEntropyModel) or \
+                isinstance(self.entropy_bottleneck, NoisyDeepFactorizedPriorEntropyModel)
             fea_recon = self.entropy_bottleneck.decompress(
                 [em_string],
                 torch.Size([1]),
@@ -428,7 +439,7 @@ class PCC(nn.Module):
 
         with io.BytesIO(concat_string) as bs:
             while bs.tell() != concat_string_len:
-                length = int.from_bytes(bs.read(4), 'little', signed=False)
+                length = int.from_bytes(bs.read(3), 'little', signed=False)
                 pc_recon_list.append(self.decompress(
                     bs.read(length), sparse_tensor_coords_list.pop(0)
                 ))

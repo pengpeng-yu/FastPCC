@@ -125,13 +125,14 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
 
         # Log broadcast shape.
         assert len(self.broadcast_shape_bytes) == len(broadcast_shape)
-        broadcast_shape_encoded = reduce(
-            lambda i, j: i + j,
-            (length.to_bytes(bytes_num, 'little', signed=False)
-             for bytes_num, length in zip(self.broadcast_shape_bytes, broadcast_shape))
-        )
-        # All the samples in a batch share the same broadcast_shape.
-        strings = [broadcast_shape_encoded + s for s in strings]
+        if sum(self.broadcast_shape_bytes) != 0:
+            broadcast_shape_encoded = reduce(
+                lambda i, j: i + j,
+                (length.to_bytes(bytes_num, 'little', signed=False)
+                 for bytes_num, length in zip(self.broadcast_shape_bytes, broadcast_shape))
+            )
+            # All the samples in a batch share the same broadcast_shape.
+            strings = [broadcast_shape_encoded + s for s in strings]
 
         if estimate_bits is True:
             estimated_bits = self.prior.log_prob(quantized_x).sum() / (-math.log(2))
@@ -146,13 +147,18 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                    batch_shape: torch.Size,
                    target_device: torch.device,
                    skip_dequantization: bool = False):
-        broadcast_shape = []
-        broadcast_shape_total_bytes = sum(self.broadcast_shape_bytes)
-        broadcast_shape_string = strings[0][:broadcast_shape_total_bytes]
-        with io.BytesIO(broadcast_shape_string) as bs:
-            for bytes_num in self.broadcast_shape_bytes:
-                broadcast_shape.append(int.from_bytes(bs.read(bytes_num), 'little', signed=False))
-        broadcast_shape = torch.Size(broadcast_shape)
+        if sum(self.broadcast_shape_bytes) != 0:
+            broadcast_shape = []
+            broadcast_shape_total_bytes = sum(self.broadcast_shape_bytes)
+            broadcast_shape_string = strings[0][:broadcast_shape_total_bytes]
+            with io.BytesIO(broadcast_shape_string) as bs:
+                for bytes_num in self.broadcast_shape_bytes:
+                    broadcast_shape.append(int.from_bytes(bs.read(bytes_num), 'little', signed=False))
+            broadcast_shape = torch.Size(broadcast_shape)
+        else:
+            broadcast_shape = torch.Size([1] * len(self.broadcast_shape_bytes))
+            broadcast_shape_total_bytes = 0
+            broadcast_shape_string = b''
 
         indexes = self.build_indexes(broadcast_shape)
         indexes = indexes.reshape(-1).tolist()

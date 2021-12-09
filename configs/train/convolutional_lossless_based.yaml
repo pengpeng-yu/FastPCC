@@ -10,7 +10,6 @@ model:
   decoder_channels: [64, 16, 4]
   encoder_scaler: 1.0
   hyperprior: 'None'
-  hyper_compressed_channels: 16
   prior_indexes_range: [16, 16, 16, 16]
   hyper_encoder_scaler: 1.0
   prior_indexes_scaler: 10.0
