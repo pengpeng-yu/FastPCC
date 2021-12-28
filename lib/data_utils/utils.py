@@ -5,7 +5,10 @@ from typing import Tuple, List, Optional, Union, Dict
 
 import numpy as np
 import cv2
-import open3d as o3d
+from plyfile import PlyData, PlyElement
+try:
+    import open3d as o3d
+except ImportError: o3d = None
 import torch
 try:
     import MinkowskiEngine as ME
@@ -258,6 +261,37 @@ def im_pad(
     valid_range = np.array([[0, im.shape[0]],
                             [0, im.shape[1]]], dtype=np.int)
     return holder, valid_range
+
+
+def write_xyz_to_ply_file(
+        xyz: Union[torch.Tensor, np.ndarray],
+        file_path: str,
+        ply_dtype: str = '<f4',
+        write_ascii: bool = True,
+        make_dirs: bool = False) -> None:
+    if make_dirs:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    if isinstance(xyz, torch.Tensor):
+        xyz = xyz.cpu().numpy()
+    assert xyz.shape[1] == 3 and xyz.dtype in (np.int32, np.int64)
+    xyz_with_properties = np.empty(
+        len(xyz), dtype=[('x', ply_dtype), ('y', ply_dtype), ('z', ply_dtype)]
+    )
+    xyz_with_properties['x'] = xyz[:, 0].astype(ply_dtype)
+    xyz_with_properties['y'] = xyz[:, 1].astype(ply_dtype)
+    xyz_with_properties['z'] = xyz[:, 2].astype(ply_dtype)
+    el = PlyElement.describe(xyz_with_properties, 'vertex')
+    PlyData([el], text=write_ascii).write(file_path)
+
+
+def read_xyz_from_ply_file(file_path: str):
+    ply_data = PlyData.read(file_path)
+    xyz = np.stack([
+        ply_data.elements[0].data['x'],
+        ply_data.elements[0].data['y'],
+        ply_data.elements[0].data['z'],
+    ])
+    return xyz
 
 
 def o3d_coords_sampled_from_triangle_mesh(triangle_mesh_path: str, points_num: int,

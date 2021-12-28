@@ -487,5 +487,15 @@ def kd_tree_partition_extended(data: torch.Tensor, max_num: int, extras: List[to
     return left_partitions, left_extra_partitions
 
 
+class TorchCudaMaxMemoryAllocated:
+    def __enter__(self, device=None):
+        torch.cuda.reset_peak_memory_stats(device=device)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.max_memory_allocated = torch.cuda.max_memory_allocated(device=None)
+        return False
+
+
 if __name__ == '__main__':
     pass

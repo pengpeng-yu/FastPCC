@@ -87,7 +87,7 @@ class TrainConfig(SimpleConfig):
 @dataclass
 class TestConfig(SimpleConfig):
     rundir_name: str = 'test_<autoindex>'
-    device: str = '3'  # 0 or 1 or cpu (only single gpu supported)
+    device: str = '0'  # 0 or 1 or cpu (only single gpu supported)
     batch_size: int = 8
     num_workers: int = 4
     weights_from_ckpt: str = ''

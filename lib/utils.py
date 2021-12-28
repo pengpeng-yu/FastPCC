@@ -1,6 +1,7 @@
 import os
 import re
 import datetime
+import time
 
 import numpy as np
 
@@ -63,6 +64,16 @@ def entropy(*num_list: int) -> float:
     num_list_non_zero = num_list[num_list.nonzero()]
     freq_list = num_list_non_zero / num_list_non_zero.sum()
     return ((-freq_list * np.log2(freq_list)).sum() * num_list.sum()).item()
+
+
+class Timer:
+    def __enter__(self):
+        self.start_time = time.time()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.elapsed_time = time.time() - self.start_time
+        return False
 
 
 if __name__ == '__main__':

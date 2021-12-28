@@ -1,5 +1,6 @@
 model_path: models.convolutional.baseline
 model:
+  input_feature_type: 'Occupation'
   basic_block_type: 'InceptionResBlock'
   basic_block_num: 3
   use_batch_norm: False
@@ -8,20 +9,19 @@ model:
   encoder_channels: [4, 16, 64, 64]
   compressed_channels: 8
   decoder_channels: [64, 16, 4]
-  hyperprior: NoisyDeepFactorized
-  hyper_encoder_channels: [32, 32]
-  hyper_compressed_channels: 8
-  hyper_decoder_channels: [32, 32]
-  prior_indexes_range: [8, 8, 8, 8]
+  reconstruct_loss_type: 'BCE'
+  adaptive_pruning: True
+  adaptive_pruning_num_scaler: 1.0
   bpp_loss_factor: 0.2
   warmup_steps: 1000
   warmup_bpp_loss_factor: 0.01
 
+
 train:
   rundir_name: 'train_convolutional_<autoindex>'
-  device: '2,3'
+  device: '0'
   amp: False
-  more_reproducible: False
+  more_reproducible: True
   batch_size: 8
   num_workers: 2
   optimizer: [AdamW, AdamW, Adam]
@@ -30,13 +30,13 @@ train:
   max_grad_norm: [1.0, 1.0, 0.0]
 
   learning_rate: [0.0005, 0.0001, 0.005]
-  epochs: 20
+  epochs: 40
 
   scheduler: Step
-  lr_step_size: 4
+  lr_step_size: 12
   lr_step_gamma: 0.3
 
-  ckpt_frequency: 2
+  ckpt_frequency: 1
   resume_from_ckpt: ''
   resume_items: ['state_dict']
   test_frequency: 4

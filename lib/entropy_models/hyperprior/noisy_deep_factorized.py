@@ -188,7 +188,8 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
             hyperprior_batch_shape, coding_ndim,
             NoisyNormal, (num_scales,), {'loc': lambda _: 0,
                                          'scale': lambda i: torch.exp(offset + factor * i)},
-            lambda x: x, lambda x: x,
+            lambda x: x, lambda x: minkowski_tensor_wrapped_op(
+                x, lambda x: x, needs_recover=False, add_batch_dim=True),
             hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
             hyperprior_broadcast_shape_bytes, prior_bytes_num_bytes,
             indexes_bound_gradient, quantize_indexes,
@@ -196,8 +197,14 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
         )
 
     def forward(self, y, return_aux_loss: bool = True):
-        y = minkowski_tensor_wrapped_op(y, torch.abs_)
+        y = minkowski_tensor_wrapped_op(y, torch.abs)
         return super(ScaleNoisyNormalEntropyModel, self).forward(y, return_aux_loss)
+
+    def compress(self, y, return_dequantized: bool = False, estimate_bits: bool = False) \
+            -> Union[Tuple[List[bytes], torch.Size, torch.Tensor],
+                     Tuple[List[bytes], torch.Size, torch.Tensor, torch.Tensor]]:
+        y = minkowski_tensor_wrapped_op(y, torch.abs)
+        return super(ScaleNoisyNormalEntropyModel, self).compress(y, return_dequantized, estimate_bits)
 
 
 def _noisy_deep_factorized_entropy_model_init(index_ranges, parameter_fns_type, parameter_fns_factory, num_filters):

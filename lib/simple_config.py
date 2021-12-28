@@ -166,7 +166,7 @@ class SimpleConfig:
                 keys_seq, var = arg.split('=')
             except ValueError:
                 try:
-                    dotdict_list.append(self.yaml_to_dotdict(arg))
+                    self.merge_with_yaml(arg)
                 except Exception as e:
                     raise ValueError(f'unexpected arg: "{arg}"')
             else:
@@ -211,7 +211,22 @@ class SimpleConfig:
         return self.merge_with_dotdict(dotdict)
 
     def merge_with_yaml(self, yaml_path):
-        return self.merge_with_dotdict(self.yaml_to_dotdict(yaml_path))
+        try:
+            f = open(yaml_path)
+        except FileNotFoundError:
+            f = open(yaml_path + '.yaml')
+        f_left = ''
+        for line in f:
+            if line.startswith('include'):
+                sub_yaml_path = self.format_str(line.rstrip().split(' ', 1)[1])
+                self.merge_with_yaml(sub_yaml_path)
+            elif line.strip() == '' or line.lstrip()[0] == '#':
+                pass
+            else:
+                f_left = line + f.read()
+                break
+        f.close()
+        return self.merge_with_dotdict(self.yaml_str_to_dotdict(f_left))
 
     def to_dict(self):
         dict_obj = {}
@@ -222,8 +237,8 @@ class SimpleConfig:
                 dict_obj[key] = var
         return dict_obj
 
-    def yaml_to_dotdict(self, yaml_path):
-        yaml_dict = yaml.safe_load(open(yaml_path))
+    def yaml_str_to_dotdict(self, yaml_str):
+        yaml_dict = yaml.safe_load(yaml_str) or {}
         dotdict = self.dict_to_dotdict(yaml_dict)
         return dotdict
 

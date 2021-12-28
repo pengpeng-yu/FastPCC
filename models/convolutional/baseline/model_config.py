@@ -18,6 +18,7 @@ class ModelConfig(SimpleConfig):
     compressed_channels: int = 8
     decoder_channels: Tuple[int, ...] = (64, 32, 16)
     encoder_scaler: float = 1.0
+    mpeg_gpcc_command: str = 'tmc3'
 
     hyperprior: str = 'None'
     hyper_compressed_channels: int = 8

@@ -1,0 +1,5 @@
+include "configs/train/convolutional/hyperprior_factorized.yaml"
+
+model:
+  hyperprior: ScaleNoisyNormal
+  prior_indexes_range: [64]

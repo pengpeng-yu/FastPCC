@@ -457,15 +457,12 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
             NoisyNormal, (fea_index_num_scales,), {
                 'loc': lambda _: 0,
                 'scale': lambda i: torch.exp(fea_index_offset + fea_index_factor * i)},
-            lambda x: x, lambda x: x,
+            lambda x: x, lambda x: minkowski_tensor_wrapped_op(
+                x, lambda x: x, needs_recover=False, add_batch_dim=True),
             fea_bytes_num_bytes, coord_bytes_num_bytes,
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )
-
-    def forward(self, y_top, *args, **kwargs):
-        y_top = minkowski_tensor_wrapped_op(y_top, torch.abs)
-        return super(GeoLosslessScaleNoisyNormalEntropyModel, self).forward(y_top, *args, **kwargs)
 
 
 class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):

@@ -1,0 +1,8 @@
+include "configs/train/convolutional/baseline.yaml"
+
+model:
+  hyperprior: NoisyDeepFactorized
+  hyper_encoder_channels: [64]
+  hyper_compressed_channels: 8
+  hyper_decoder_channels: [64]
+  prior_indexes_range: [16, 16, 16, 16]

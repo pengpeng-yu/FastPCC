@@ -2,6 +2,7 @@ import io
 from functools import partial, reduce
 from typing import List, Union, Tuple, Generator, Optional
 import math
+import os
 
 import torch
 import torch.nn as nn
@@ -9,8 +10,10 @@ import torch.nn.functional as F
 from torchvision.ops import sigmoid_focal_loss
 import MinkowskiEngine as ME
 
-from lib.torch_utils import MLPBlock
-from lib.data_utils import PCData
+from lib.utils import Timer
+from lib.mpeg_gpcc_utils import gpcc_octree_lossless_geom_encode, gpcc_decode
+from lib.torch_utils import MLPBlock, TorchCudaMaxMemoryAllocated
+from lib.data_utils import PCData, write_xyz_to_ply_file
 from lib.evaluators import PCGCEvaluator
 from lib.sparse_conv_layers import GenerativeUpsampleMessage
 from lib.entropy_models.continuous_batched import \
@@ -300,30 +303,49 @@ class PCC(nn.Module):
 
     def test_forward(self, sparse_pc: ME.SparseTensor, pc_data: PCData,
                      lossless_coder_num: Optional[int]):
-        compressed_string, sparse_tensor_coords = self.compress(sparse_pc, lossless_coder_num)
+        with Timer() as encoder_t, TorchCudaMaxMemoryAllocated() as encoder_m:
+            compressed_string, sparse_tensor_coords = self.compress(sparse_pc, lossless_coder_num)
         del sparse_pc
         ME.clear_global_coordinate_manager()
         torch.cuda.empty_cache()
-        pc_recon = self.decompress(compressed_string, sparse_tensor_coords)
+        with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
+            pc_recon = self.decompress(compressed_string, sparse_tensor_coords)
         ret = self.evaluator.log_batch(
             preds=[pc_recon],
             targets=[pc_data.xyz[:, 1:]],
             compressed_strings=[compressed_string],
-            pc_data=pc_data
+            pc_data=pc_data,
+            extra_info_dicts=[
+                {'encoder_elapsed_time': encoder_t.elapsed_time,
+                 'encoder_max_cuda_memory_allocated': encoder_m.max_memory_allocated,
+                 'decoder_elapsed_time': decoder_t.elapsed_time,
+                 'decoder_max_cuda_memory_allocated': decoder_m.max_memory_allocated}
+            ]
         )
         return ret
 
     def test_partitions_forward(self, sparse_pc_partitions: Generator, pc_data: PCData,
                                 lossless_coder_num: Optional[int]):
-        compressed_string, sparse_tensor_coords_list = self.compress_partitions(
-            sparse_pc_partitions, lossless_coder_num
-        )
-        pc_recon = self.decompress_partitions(compressed_string, sparse_tensor_coords_list)
+        with Timer() as encoder_t, TorchCudaMaxMemoryAllocated() as encoder_m:
+            compressed_string, sparse_tensor_coords_list = self.compress_partitions(
+                sparse_pc_partitions, lossless_coder_num
+            )
+        del sparse_pc_partitions
+        ME.clear_global_coordinate_manager()
+        torch.cuda.empty_cache()
+        with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
+            pc_recon = self.decompress_partitions(compressed_string, sparse_tensor_coords_list)
         ret = self.evaluator.log_batch(
             preds=[pc_recon],
             targets=[pc_data.xyz[0]],
             compressed_strings=[compressed_string],
-            pc_data=pc_data
+            pc_data=pc_data,
+            extra_info_dicts=[
+                {'encoder_elapsed_time': encoder_t.elapsed_time,
+                 'encoder_max_cuda_memory_allocated': encoder_m.max_memory_allocated,
+                 'decoder_elapsed_time': decoder_t.elapsed_time,
+                 'decoder_max_cuda_memory_allocated': decoder_m.max_memory_allocated}
+            ]
         )
         return ret
 
@@ -345,6 +367,19 @@ class PCC(nn.Module):
             assert coding_batch_shape == torch.Size([1])
             sparse_tensor_coords = feature.C
             em_string = em_strings[0]
+            tmp_file_path = 'tmp'
+            write_xyz_to_ply_file(sparse_tensor_coords[:, 1:], f'{tmp_file_path}.ply')
+            gpcc_octree_lossless_geom_encode(
+                f'{tmp_file_path}.ply', f'{tmp_file_path}.bin',
+                command=self.cfg.mpeg_gpcc_command
+            )
+            with open(f'{tmp_file_path}.bin', 'rb') as f:
+                sparse_tensor_coords_bin = f.read()
+            os.remove(f'{tmp_file_path}.ply')
+            os.remove(f'{tmp_file_path}.bin')
+            em_string = len(sparse_tensor_coords_bin).to_bytes(3, 'little', signed=False) + \
+                sparse_tensor_coords_bin + em_string
+            # TODO: remove sparse_tensor_coords
 
         with io.BytesIO() as bs:
             if self.cfg.adaptive_pruning:
@@ -366,9 +401,7 @@ class PCC(nn.Module):
         sparse_tensor_coords_list = []
         for sparse_pc in sparse_pc_partitions:
             compressed_string, sparse_tensor_coords = self.compress(sparse_pc, lossless_coder_num)
-            del sparse_pc
             ME.clear_global_coordinate_manager()
-            torch.cuda.empty_cache()
             compressed_string_list.append(compressed_string)
             sparse_tensor_coords_list.append(sparse_tensor_coords)
 
@@ -391,6 +424,8 @@ class PCC(nn.Module):
                 lossless_coder_num = int.from_bytes(bs.read(1), 'little', signed=False)
             else:
                 lossless_coder_num = None
+                sparse_tensor_coords_bytes = int.from_bytes(bs.read(3), 'little', signed=False)
+                bs.read(sparse_tensor_coords_bytes)
             em_string = bs.read()
 
         if self.cfg.lossless_compression_based:
@@ -445,7 +480,6 @@ class PCC(nn.Module):
                 ))
 
                 ME.clear_global_coordinate_manager()
-                torch.cuda.empty_cache()
 
         pc_recon = torch.cat([pc_recon for pc_recon in pc_recon_list], 0)
         return pc_recon

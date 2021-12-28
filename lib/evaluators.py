@@ -5,10 +5,9 @@ import os
 
 import cv2
 import numpy as np
-import open3d as o3d
 import torch
 
-from lib.data_utils import PCData
+from lib.data_utils import PCData, write_xyz_to_ply_file
 try:
     from lib.loss_functions import chamfer_loss
 except ImportError:
@@ -44,31 +43,13 @@ class PCGCEvaluator(Evaluator):
     def reset(self):
         self.file_path_to_info: Dict[str, Dict[str, Union[int, float]]] = {}
 
-    @staticmethod
-    def o3d_write_coords(xyz: Union[torch.Tensor, np.ndarray],
-                         file_path: str,
-                         write_ascii: bool = True,
-                         make_dirs: bool = False) -> None:
-        if make_dirs:
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        if isinstance(xyz, torch.Tensor):
-            xyz = xyz.cpu().numpy()
-        assert xyz.shape[1] == 3 and xyz.dtype in (np.int32, np.int64)
-        assert o3d.io.write_point_cloud(
-            file_path,
-            o3d.geometry.PointCloud(
-                o3d.utility.Vector3dVector(
-                    xyz
-                )
-            ), write_ascii=write_ascii
-        )
-
     @torch.no_grad()
     def log_batch(self,
                   preds: Union[List[torch.Tensor], torch.Tensor],
                   targets: Union[List[torch.Tensor], torch.Tensor],
                   compressed_strings: List[bytes],
-                  pc_data: PCData):
+                  pc_data: PCData,
+                  extra_info_dicts: List[Dict[str, Union[str, int, float]]] = None):
         """
         "preds" and "targets" are supposed to be list contains unnormalized discrete
         coordinates with resolution specified in pc_data.resolution.
@@ -120,14 +101,16 @@ class PCGCEvaluator(Evaluator):
                         'bpp': bpp
                     }
                 )
-                self.o3d_write_coords(pred, reconstructed_path)
+                if extra_info_dicts is not None:
+                    file_info_dict.update(extra_info_dicts[idx])
+                write_xyz_to_ply_file(pred, reconstructed_path)
 
                 if self.mpeg_pcc_error_command != '':
                     if not file_path.endswith('.ply') or \
                             pc_data.ori_resolution is None or \
                             pc_data.ori_resolution[idx] != resolution:
                         file_path = out_file_path + '.ply'
-                        self.o3d_write_coords(target, file_path)
+                        write_xyz_to_ply_file(target, file_path)
                     mpeg_pc_error_dict = mpeg_pc_error(
                         os.path.abspath(file_path),
                         os.path.abspath(reconstructed_path),
