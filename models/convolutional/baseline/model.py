@@ -3,6 +3,8 @@ from functools import partial, reduce
 from typing import List, Union, Tuple, Generator, Optional
 import math
 import os
+import time
+import hashlib
 
 import torch
 import torch.nn as nn
@@ -367,7 +369,10 @@ class PCC(nn.Module):
             assert coding_batch_shape == torch.Size([1])
             sparse_tensor_coords = feature.C
             em_string = em_strings[0]
-            tmp_file_path = 'tmp'
+            h = hashlib.md5()
+            h.update(str(time.time()).encode())
+            h.update(str(len(em_string)).encode())
+            tmp_file_path = 'tmp-' + h.hexdigest()
             write_xyz_to_ply_file(sparse_tensor_coords[:, 1:], f'{tmp_file_path}.ply')
             gpcc_octree_lossless_geom_encode(
                 f'{tmp_file_path}.ply', f'{tmp_file_path}.bin',

@@ -213,8 +213,11 @@ class SimpleConfig:
     def merge_with_yaml(self, yaml_path):
         try:
             f = open(yaml_path)
-        except FileNotFoundError:
-            f = open(yaml_path + '.yaml')
+        except FileNotFoundError as e:
+            if not yaml_path.endswith('.yaml'):
+                f = open(yaml_path + '.yaml')
+            else:
+                raise e
         f_left = ''
         for line in f:
             if line.startswith('include'):
