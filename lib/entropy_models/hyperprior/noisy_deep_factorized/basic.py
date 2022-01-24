@@ -6,9 +6,9 @@ import torch
 import torch.nn as nn
 from torch.distributions import Distribution
 
-from ..continuous_batched import NoisyDeepFactorizedEntropyModel as NoisyDeepFactorizedPriorEntropyModel
-from ..continuous_indexed import ContinuousIndexedEntropyModel
-from ..distributions.uniform_noise import NoisyNormal, NoisyDeepFactorized
+from ...continuous_batched import NoisyDeepFactorizedEntropyModel as NoisyDeepFactorizedPriorEntropyModel
+from ...continuous_indexed import ContinuousIndexedEntropyModel
+from ...distributions.uniform_noise import NoisyNormal, NoisyDeepFactorized
 
 from lib.torch_utils import \
     minkowski_tensor_wrapped_op, \

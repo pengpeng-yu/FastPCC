@@ -20,11 +20,11 @@ from lib.evaluators import PCGCEvaluator
 from lib.sparse_conv_layers import GenerativeUpsampleMessage
 from lib.entropy_models.continuous_batched import \
     NoisyDeepFactorizedEntropyModel as NoisyDeepFactorizedPriorEntropyModel
-from lib.entropy_models.hyperprior.noisy_deep_factorized import \
+from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
     EntropyModel as HyperPriorEntropyModel, \
     ScaleNoisyNormalEntropyModel as HyperPriorScaleNoisyNormalEntropyModel, \
     NoisyDeepFactorizedEntropyModel as HyperPriorNoisyDeepFactorizedEntropyModel
-from lib.entropy_models.hyperprior.sparse_tensor_specialized.noisy_deep_factorized import \
+from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
     GeoLosslessNoisyDeepFactorizedEntropyModel
 
 from models.convolutional.baseline.layers import \

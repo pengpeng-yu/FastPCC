@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from lib.data_utils import IMData
 from lib.torch_utils import MLPBlock
 from lib.evaluators import ImageCompressionEvaluator
-from lib.entropy_models.hyperprior.noisy_deep_factorized import \
+from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
     NoisyDeepFactorizedEntropyModel as HyperPriorNoisyDeepFactorizedEntropyModel
 
 from models.image_compression.baseline.image_compressor_config import ModelConfig

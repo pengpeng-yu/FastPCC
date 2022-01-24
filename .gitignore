@@ -6,3 +6,6 @@ __pycache__/
 runs/*
 datasets/*
 weights/*
+scripts/old/*
+/train.sh
+/test.sh

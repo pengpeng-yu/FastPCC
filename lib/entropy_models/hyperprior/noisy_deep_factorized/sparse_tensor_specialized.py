@@ -7,7 +7,7 @@ import torch.nn as nn
 from torch.distributions import Distribution
 import MinkowskiEngine as ME
 
-from ..noisy_deep_factorized import \
+from .basic import \
     _noisy_deep_factorized_entropy_model_init, \
     EntropyModel as HyperPriorEntropyModel
 from ...continuous_batched import ContinuousBatchedEntropyModel

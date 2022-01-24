@@ -402,7 +402,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
         torch.cuda.empty_cache()
 
-    dist.destroy_process_group()
     logger.info('train end')
 
 

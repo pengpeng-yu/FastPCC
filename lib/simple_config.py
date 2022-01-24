@@ -89,8 +89,9 @@ class SimpleConfig:
 
     def local_auto_import(self, keys=None):
         """
-        Called by merge_setattr().
-        You can manually call this function to import SimpleConfig class automatically
+        Automatically called by merge_setattr()
+        to import config object for keys with a corresponding path_key to be merged.
+        You can manually call this function to import SimpleConfig class
         without using merge_setattr().
         """
         if keys is None: keys = self.__dict__
@@ -115,19 +116,22 @@ class SimpleConfig:
             return self.__annotations__[key]
 
     def merge_setattr(self, key, value):
+        """
+        Modifications of values are supposed to be implemented using this function.
+        """
         self.__dict__[key] = value
         self.local_auto_import(key)
 
     def merge_with_dotdict(self, dotdict: Dict):
         """
         Fundamental function for merging configs.
-        dotdict: {'a': 2, 'b.a': 'string', '-b.b.a_a': [1,2,3], '--b.b.b-b': ['1', '2']}
-        Value will not be formatted.
+        A dotdict: {'a': 2, 'b.a': 'string', '-b.b.a_a': [1,2,3], '--b.b.b-b': ['1', '2']}
+        Values will not be formatted.
         """
         for keys_seq, value in dotdict.items():
             assert type(keys_seq) == str, f'unexpected arg format: "{keys_seq}: {value}"'
             if keys_seq.startswith('--'): keys_seq = keys_seq[2:]
-            keys_seq.replace('-', '_')
+            keys_seq = keys_seq.replace('-', '_')
 
             if '.' not in keys_seq:
                 try:
@@ -145,7 +149,62 @@ class SimpleConfig:
 
         return True
 
+    def merge_with_dict(self, dict_obj: Dict):
+        """
+        A dict:
+        {
+            'a': 2,
+            'b': {
+                'a': "string",
+                'b': {
+                    'a_a': [1,2,3],
+                    'b-b': ["1", "2"]
+                }
+            }
+        }
+        Values will not be formatted.
+        """
+        dotdict = self.dict_to_dotdict(dict_obj)
+        return self.merge_with_dotdict(dotdict)
+
+    def merge_with_yaml(self, yaml_path):
+        """
+        # A yaml string:
+        include "path/to/configs/base_config_1.yaml"
+        include "path/to/configs/base_config_2"
+        a: 2
+        b:
+            a: "string",
+            b:
+                a_a: [1, 2, 3]
+        b.b.b-b': ['1', '2']
+        # Values are formatted by pyyaml.
+        """
+        try:
+            f = open(yaml_path)
+        except FileNotFoundError as e:
+            if not yaml_path.endswith('.yaml'):
+                f = open(yaml_path + '.yaml')
+            else:
+                raise e
+        f_left = ''
+        for line in f:
+            if line.startswith('include'):
+                sub_yaml_path = self.format_str(line.rstrip().split(' ', 1)[1])
+                self.merge_with_yaml(sub_yaml_path)
+            elif line.strip() == '' or line.lstrip()[0] == '#':
+                pass
+            else:
+                f_left = line + f.read()
+                break
+        f.close()
+        return self.merge_with_dotdict(self.yaml_str_to_dotdict(f_left))
+
     def merge_with_dotdict_list(self, dotdict_list: List[Dict]):
+        """
+        dotdict_list: sequence of dotdict to be merged in order.
+        Values will not be formatted.
+        """
         ret = True
         for dotdict in dotdict_list:
             ret &= self.merge_with_dotdict(dotdict)
@@ -153,11 +212,11 @@ class SimpleConfig:
 
     def merge_with_dotlist(self, dotlist: List[str]):
         """
-        YAML file paths are supported.
-        Repeated keys are allowed.
         dotlist: ['a==2', 'b.a=string', '-b.b.a_a=[1,2,3]', '--b.b.b-b==["1","2"]']
-        Value will be formatted.
-        dotdict: {'a': 2, 'b.a': 'string', '-b.b.a_a': [1,2,3], '--b.b.b-b': ['1', '2']}
+                sequence of key-value pairs to be merged in order.
+        YAML file paths are supported.
+        Repeated keys are allowed by treating each element in a dotlist as a dotdict.
+        Values will be formatted.
         """
         dotdict_list = []
         for arg in dotlist:
@@ -193,44 +252,6 @@ class SimpleConfig:
 
         return self.merge_with_dotdict_list(dotdict_list)
 
-    def merge_with_dict(self, dict_obj: Dict):
-        """
-        dict:  {
-                'a': 2,
-                'b': {
-                    'a': "string",
-                    'b': {
-                            'a_a': [1,2,3],
-                            'b_b': ["1", "2"]
-                        }
-                    }
-                }
-        Value will not be formatted.
-        """
-        dotdict = self.dict_to_dotdict(dict_obj)
-        return self.merge_with_dotdict(dotdict)
-
-    def merge_with_yaml(self, yaml_path):
-        try:
-            f = open(yaml_path)
-        except FileNotFoundError as e:
-            if not yaml_path.endswith('.yaml'):
-                f = open(yaml_path + '.yaml')
-            else:
-                raise e
-        f_left = ''
-        for line in f:
-            if line.startswith('include'):
-                sub_yaml_path = self.format_str(line.rstrip().split(' ', 1)[1])
-                self.merge_with_yaml(sub_yaml_path)
-            elif line.strip() == '' or line.lstrip()[0] == '#':
-                pass
-            else:
-                f_left = line + f.read()
-                break
-        f.close()
-        return self.merge_with_dotdict(self.yaml_str_to_dotdict(f_left))
-
     def to_dict(self):
         dict_obj = {}
         for key, var in self.__dict__.items():
@@ -240,11 +261,6 @@ class SimpleConfig:
                 dict_obj[key] = var
         return dict_obj
 
-    def yaml_str_to_dotdict(self, yaml_str):
-        yaml_dict = yaml.safe_load(yaml_str) or {}
-        dotdict = self.dict_to_dotdict(yaml_dict)
-        return dotdict
-
     def to_yaml(self):
         return yaml.dump(
             self.to_dict(),
@@ -252,6 +268,11 @@ class SimpleConfig:
             default_flow_style=False,
             sort_keys=False
         )
+
+    def yaml_str_to_dotdict(self, yaml_str):
+        yaml_dict = yaml.safe_load(yaml_str) or {}
+        dotdict = self.dict_to_dotdict(yaml_dict)
+        return dotdict
 
     @classmethod
     def dict_to_dotdict(cls, dict_obj: Dict):
