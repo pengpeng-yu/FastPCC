@@ -91,24 +91,25 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         file_path = self.file_list[index]
         if self.cfg.data_format != '.obj':
             with open(file_path, 'rb') as f:
-                xyz = binvox_rw.read_as_coord_array(f).data.astype(np.float32).T
+                xyz = binvox_rw.read_as_coord_array(f).data.T.astype(np.float64)
                 xyz = np.ascontiguousarray(xyz)
         else:
             xyz = o3d_coords_sampled_from_triangle_mesh(
                 file_path,
                 self.cfg.mesh_sample_points_num,
                 self.cfg.mesh_sample_point_method,
-                dtype=np.float32
+                dtype=np.float64
             )
 
         if self.cfg.random_rotation:
-            xyz = R.random().apply(xyz).astype(np.float32)
+            xyz = R.random().apply(xyz)
 
         xyz = normalize_coords(xyz)
 
         if self.cfg.resolution != 0:
             assert self.cfg.resolution > 1
             xyz *= self.cfg.resolution
+            xyz = np.round(xyz)
             unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True)
             xyz = xyz[unique_map]
 

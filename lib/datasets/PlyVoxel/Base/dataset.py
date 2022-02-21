@@ -75,10 +75,12 @@ class PlyVoxel(torch.utils.data.Dataset):
             raise e
 
         # xyz
-        xyz = np.asarray(point_cloud.points, dtype=np.float32)
+        xyz = np.asarray(point_cloud.points)
 
         if not self.voxelized:
             xyz = xyz / self.file_ori_resolutions[index]
+        else:
+            xyz = np.round(xyz)
 
         if self.cfg.with_color:
             color = torch.from_numpy(np.asarray(point_cloud.colors, dtype=np.float32))

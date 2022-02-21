@@ -19,9 +19,8 @@ from lib.data_utils import PCData, write_xyz_to_ply_file
 from lib.evaluators import PCGCEvaluator
 from lib.sparse_conv_layers import GenerativeUpsampleMessage
 from lib.entropy_models.continuous_batched import \
-    NoisyDeepFactorizedEntropyModel as NoisyDeepFactorizedPriorEntropyModel
+    NoisyDeepFactorizedEntropyModel as PriorEntropyModel
 from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
-    EntropyModel as HyperPriorEntropyModel, \
     ScaleNoisyNormalEntropyModel as HyperPriorScaleNoisyNormalEntropyModel, \
     NoisyDeepFactorizedEntropyModel as HyperPriorNoisyDeepFactorizedEntropyModel
 from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
@@ -38,15 +37,15 @@ from models.convolutional.baseline.model_config import ModelConfig
 class PCC(nn.Module):
 
     def params_divider(self, s: str) -> int:
-        if not self.cfg.lossless_compression_based:
+        if not self.cfg.lossless_based:
             if s.endswith("aux_param"): return 2
             else:
-                if 'entropy_bottleneck' not in s: return 0
+                if 'em' not in s: return 0
                 else: return 1
         else:
             if s.endswith("aux_param"): return 2
             else:
-                if 'entropy_bottleneck' not in s: return 0
+                if 'em' not in s: return 0
                 else:
                     if '.encoder' in s or '.decoder' in s: return 0
                     else: return 1
@@ -69,14 +68,14 @@ class PCC(nn.Module):
         )
         self.encoder = Encoder(
             1 if cfg.input_feature_type == 'Occupation' else 3,
-            cfg.compressed_channels if not cfg.lossless_compression_based
+            cfg.compressed_channels if not cfg.lossless_based
             else cfg.lossless_coder_channels,
             cfg.encoder_channels,
             cfg.adaptive_pruning,
             cfg.adaptive_pruning_num_scaler,
-            cfg.encoder_scaler if not cfg.lossless_compression_based else 1,
+            cfg.encoder_scaler if not cfg.lossless_based else 1,
             *basic_block_args,
-            None if not cfg.lossless_compression_based else cfg.activation
+            None if not cfg.lossless_based else cfg.activation
         )
         self.decoder = Decoder(
             cfg.compressed_channels,
@@ -89,9 +88,9 @@ class PCC(nn.Module):
             dist_upper_bound=cfg.dist_upper_bound
         )
 
-        if not cfg.lossless_compression_based:
+        if not cfg.lossless_based:
             if cfg.hyperprior == 'None':
-                self.entropy_bottleneck = NoisyDeepFactorizedPriorEntropyModel(
+                self.em = PriorEntropyModel(
                     batch_shape=torch.Size([cfg.compressed_channels]),
                     broadcast_shape_bytes=(3,),
                     coding_ndim=2,
@@ -114,9 +113,17 @@ class PCC(nn.Module):
                     cfg.hyper_decoder_channels,
                     *basic_block_args
                 )
+
+                def parameter_fns_factory(in_channels, out_channels):
+                    return nn.Sequential(
+                        MLPBlock(in_channels, out_channels,
+                                 bn=None, act=cfg.activation),
+                        nn.Linear(out_channels, out_channels,
+                                  bias=True)
+                    )
                 if cfg.hyperprior == 'ScaleNoisyNormal':
                     assert len(cfg.prior_indexes_range) == 1
-                    self.entropy_bottleneck = HyperPriorScaleNoisyNormalEntropyModel(
+                    self.em = HyperPriorScaleNoisyNormalEntropyModel(
                         hyper_encoder=hyper_encoder,
                         hyper_decoder=hyper_decoder,
                         hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
@@ -128,14 +135,7 @@ class PCC(nn.Module):
                         scale_max=64
                     )
                 elif cfg.hyperprior == 'NoisyDeepFactorized':
-                    def parameter_fns_factory(in_channels, out_channels):
-                        return nn.Sequential(
-                            MLPBlock(in_channels, out_channels,
-                                     bn=None, act=cfg.activation),
-                            nn.Linear(out_channels, out_channels,
-                                      bias=True)
-                        )
-                    self.entropy_bottleneck = HyperPriorNoisyDeepFactorizedEntropyModel(
+                    self.em = HyperPriorNoisyDeepFactorizedEntropyModel(
                         hyper_encoder=hyper_encoder,
                         hyper_decoder=hyper_decoder,
                         hyperprior_batch_shape=torch.Size([cfg.hyper_compressed_channels]),
@@ -150,13 +150,12 @@ class PCC(nn.Module):
                     )
                 else: raise NotImplementedError
 
-        elif cfg.lossless_compression_based:
+        elif cfg.lossless_based:
             assert cfg.hyperprior == 'None'
             encoder_geo_lossless = EncoderForGeoLossLess(
                 cfg.lossless_coder_channels,
                 cfg.compressed_channels,
                 cfg.encoder_scaler,
-                cfg.lossless_detach_higher_fea,
                 *basic_block_args
             )
             hyper_decoder_coord_geo_lossless = HyperDecoderCoordForGeoLossLess(
@@ -187,16 +186,15 @@ class PCC(nn.Module):
                     nn.Linear(out_channels, out_channels,
                               bias=True)
                 )
-            bottom_fea_entropy_model = NoisyDeepFactorizedPriorEntropyModel(
+            bottom_fea_entropy_model = PriorEntropyModel(
                 batch_shape=torch.Size([cfg.compressed_channels]),
                 broadcast_shape_bytes=(0,),
                 coding_ndim=2,
                 init_scale=2
             )
-            self.entropy_bottleneck = GeoLosslessNoisyDeepFactorizedEntropyModel(
+            self.em_lossless_based = GeoLosslessNoisyDeepFactorizedEntropyModel(
                 bottom_fea_entropy_model=bottom_fea_entropy_model,
                 encoder=encoder_geo_lossless,
-                detach_higher_fea=cfg.lossless_detach_higher_fea,
                 hyper_decoder_coord=hyper_decoder_coord_geo_lossless,
                 hyper_decoder_fea=hyper_decoder_fea_geo_lossless,
                 hybrid_hyper_decoder_fea=cfg.lossless_hybrid_hyper_decoder_fea,
@@ -270,12 +268,12 @@ class PCC(nn.Module):
         warmup_forward = training_step < self.cfg.warmup_steps
 
         encoder_feature, cached_encoder_fea_list, points_num_list = self.encoder(sparse_pc)
-        if self.cfg.lossless_compression_based:
-            bottleneck_feature, loss_dict = self.entropy_bottleneck(
+        if self.cfg.lossless_based:
+            bottleneck_feature, loss_dict = self.em_lossless_based(
                 encoder_feature, lossless_coder_num
             )
         else:
-            bottleneck_feature, loss_dict = self.entropy_bottleneck(encoder_feature)
+            bottleneck_feature, loss_dict = self.em(encoder_feature)
 
         for key in loss_dict:
             if key.endswith('bits_loss'):
@@ -354,18 +352,14 @@ class PCC(nn.Module):
     def compress(self, sparse_pc: ME.SparseTensor,
                  lossless_coder_num: Optional[int]) -> Tuple[bytes, Optional[torch.Tensor]]:
         feature, cached_feature_list, points_num_list = self.encoder(sparse_pc)
-        if self.cfg.lossless_compression_based:
-            assert isinstance(self.entropy_bottleneck, GeoLosslessNoisyDeepFactorizedEntropyModel)
-            em_string, bottom_fea_recon = self.entropy_bottleneck.compress(
+        if self.cfg.lossless_based:
+            em_string, bottom_fea_recon = self.em_lossless_based.compress(
                 feature, lossless_coder_num
             )
             assert bottom_fea_recon.C.shape[0] == 1
             sparse_tensor_coords = None
         else:
-            assert isinstance(self.entropy_bottleneck, HyperPriorEntropyModel) or \
-                   isinstance(self.entropy_bottleneck, NoisyDeepFactorizedPriorEntropyModel)
-            em_strings, coding_batch_shape, _ = \
-                self.entropy_bottleneck.compress(feature)
+            em_strings, coding_batch_shape, _ = self.em.compress(feature)
             assert coding_batch_shape == torch.Size([1])
             sparse_tensor_coords = feature.C
             em_string = em_strings[0]
@@ -393,7 +387,7 @@ class PCC(nn.Module):
                     [_[0].to_bytes(3, 'little', signed=False)
                      for _ in points_num_list]
                 ))
-            if self.cfg.lossless_compression_based:
+            if self.cfg.lossless_based:
                 bs.write(lossless_coder_num.to_bytes(1, 'little', signed=False))
             bs.write(em_string)
             compressed_string = bs.getvalue()
@@ -425,7 +419,7 @@ class PCC(nn.Module):
                     points_num_list.append([int.from_bytes(bs.read(3), 'little', signed=False)])
             else:
                 points_num_list = None
-            if self.cfg.lossless_compression_based:
+            if self.cfg.lossless_based:
                 lossless_coder_num = int.from_bytes(bs.read(1), 'little', signed=False)
             else:
                 lossless_coder_num = None
@@ -433,10 +427,8 @@ class PCC(nn.Module):
                 bs.read(sparse_tensor_coords_bytes)
             em_string = bs.read()
 
-        if self.cfg.lossless_compression_based:
-            assert isinstance(self.entropy_bottleneck,
-                              GeoLosslessNoisyDeepFactorizedEntropyModel)
-            fea_recon = self.entropy_bottleneck.decompress(
+        if self.cfg.lossless_based:
+            fea_recon = self.em_lossless_based.decompress(
                 em_string,
                 device,
                 self.get_sparse_pc(
@@ -448,9 +440,7 @@ class PCC(nn.Module):
                 lossless_coder_num
             )
         else:
-            assert isinstance(self.entropy_bottleneck, HyperPriorEntropyModel) or \
-                isinstance(self.entropy_bottleneck, NoisyDeepFactorizedPriorEntropyModel)
-            fea_recon = self.entropy_bottleneck.decompress(
+            fea_recon = self.em.decompress(
                 [em_string],
                 torch.Size([1]),
                 device,
@@ -491,7 +481,7 @@ class PCC(nn.Module):
 
     def get_lossless_coder_num(self, resolution: Union[int, List[int]]) -> Optional[int]:
         assert len(self.cfg.encoder_channels) == len(self.cfg.decoder_channels) + 1
-        if self.cfg.lossless_compression_based is True:
+        if self.cfg.lossless_based is True:
             if not isinstance(resolution, int):
                 for r in resolution[1:]:
                     assert r == resolution[0]

@@ -8,7 +8,7 @@ from torch.distributions import Distribution
 import MinkowskiEngine as ME
 
 from .basic import \
-    _noisy_deep_factorized_entropy_model_init, \
+    _noisy_deep_factorized_indexed_entropy_model_init, \
     EntropyModel as HyperPriorEntropyModel
 from ...continuous_batched import ContinuousBatchedEntropyModel
 from ...continuous_indexed import ContinuousIndexedEntropyModel
@@ -27,7 +27,6 @@ class GeoLosslessEntropyModel(nn.Module):
                  bottom_fea_entropy_model:
                  Union[ContinuousBatchedEntropyModel, HyperPriorEntropyModel],
                  encoder: nn.Module,
-                 detach_higher_fea: bool,
 
                  hyper_decoder_coord: Union[nn.Module, nn.ModuleList],
                  hyper_decoder_fea: Union[nn.Module, nn.ModuleList],
@@ -54,7 +53,6 @@ class GeoLosslessEntropyModel(nn.Module):
         super(GeoLosslessEntropyModel, self).__init__()
         self.bottom_fea_entropy_model = bottom_fea_entropy_model
         self.encoder = encoder
-        self.detach_higher_fea = detach_higher_fea
         self.hyper_decoder_coord = hyper_decoder_coord
         self.hyper_decoder_fea = hyper_decoder_fea
         self.hybrid_hyper_decoder_fea = hybrid_hyper_decoder_fea
@@ -142,8 +140,7 @@ class GeoLosslessEntropyModel(nn.Module):
                     fea_indexes = self.hyper_decoder_fea_post_op(pre_fea_indexes)[None]
                     fea_pred_res_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
                         (fea.F - fea_pred)[None], fea_indexes,
-                        return_aux_loss=idx == coder_num - 1,
-                        detach_value_for_bits_loss=self.detach_higher_fea
+                        return_aux_loss=idx == coder_num - 1
                     )
                     lower_fea_tilde = ME.SparseTensor(
                         features=fea_pred_res_tilde[0] + fea_pred,
@@ -156,8 +153,7 @@ class GeoLosslessEntropyModel(nn.Module):
                     )
                     fea_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
                         fea.F[None], fea_indexes,
-                        return_aux_loss=idx == coder_num - 1,
-                        detach_value_for_bits_loss=self.detach_higher_fea
+                        return_aux_loss=idx == coder_num - 1
                     )
                     lower_fea_tilde = ME.SparseTensor(
                         features=fea_tilde[0],
@@ -420,7 +416,6 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
                  bottom_fea_entropy_model:
                  Union[ContinuousBatchedEntropyModel, HyperPriorEntropyModel],
                  encoder: nn.Module,
-                 detach_higher_fea: bool,
 
                  hyper_decoder_coord: Union[nn.Module, nn.ModuleList],
                  hyper_decoder_fea: Union[nn.Module, nn.ModuleList],
@@ -449,7 +444,7 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
         fea_index_factor = (math.log(fea_index_scale_max) -
                             math.log(fea_index_scale_min)) / (fea_index_num_scales - 1)
         super(GeoLosslessScaleNoisyNormalEntropyModel, self).__init__(
-            bottom_fea_entropy_model, encoder, detach_higher_fea,
+            bottom_fea_entropy_model, encoder,
             hyper_decoder_coord, hyper_decoder_fea, hybrid_hyper_decoder_fea,
             NoisyNormal, (coord_index_num_scales,), {
                 'loc': lambda _: 0,
@@ -470,7 +465,6 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  bottom_fea_entropy_model:
                  Union[ContinuousBatchedEntropyModel, HyperPriorEntropyModel],
                  encoder: nn.Module,
-                 detach_higher_fea: bool,
 
                  hyper_decoder_coord: Union[nn.Module, nn.ModuleList],
                  hyper_decoder_fea: Union[nn.Module, nn.ModuleList],
@@ -495,17 +489,17 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  range_coder_precision: int = 16
                  ):
         coord_parameter_fns, coord_indexes_view_fn, coord_modules_to_add = \
-            _noisy_deep_factorized_entropy_model_init(
+            _noisy_deep_factorized_indexed_entropy_model_init(
                 coord_index_ranges, coord_parameter_fns_type,
                 coord_parameter_fns_factory, coord_num_filters
             )
         fea_parameter_fns, fea_indexes_view_fn, fea_modules_to_add = \
-            _noisy_deep_factorized_entropy_model_init(
+            _noisy_deep_factorized_indexed_entropy_model_init(
                 fea_index_ranges, fea_parameter_fns_type,
                 fea_parameter_fns_factory, fea_num_filters
             )
         super(GeoLosslessNoisyDeepFactorizedEntropyModel, self).__init__(
-            bottom_fea_entropy_model, encoder, detach_higher_fea,
+            bottom_fea_entropy_model, encoder,
             hyper_decoder_coord, hyper_decoder_fea, hybrid_hyper_decoder_fea,
             NoisyDeepFactorized, coord_index_ranges, coord_parameter_fns,
             NoisyDeepFactorized, fea_index_ranges, fea_parameter_fns,

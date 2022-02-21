@@ -80,7 +80,7 @@ class PCC(nn.Module):
             bn='nn.bn1d', act=None
         )
 
-        self.entropy_bottleneck = NoisyDeepFactorizedEntropyModel(
+        self.em = NoisyDeepFactorizedEntropyModel(
             batch_shape=torch.Size([cfg.compressed_channels]),
             coding_ndim=2,
             init_scale=10
@@ -110,7 +110,7 @@ class PCC(nn.Module):
         feature = feature * self.cfg.bottleneck_scaler
 
         if self.training:
-            fea_tilde, loss_dict = self.entropy_bottleneck(feature)
+            fea_tilde, loss_dict = self.em(feature)
             fea_tilde = fea_tilde / self.cfg.bottleneck_scaler
 
             decoder_msg = self.decoder(
@@ -132,7 +132,7 @@ class PCC(nn.Module):
             return loss_dict
 
         else:
-            fea_recon, compressed_strings, coding_batch_shape = self.entropy_bottleneck(feature)
+            fea_recon, compressed_strings, coding_batch_shape = self.em(feature)
             fea_recon = fea_recon / self.cfg.bottleneck_scaler
             decoder_msg: PointLayerMessage = self.decoder(
                 PointLayerMessage(xyz=encoder_msg.xyz, feature=fea_recon)

@@ -415,7 +415,6 @@ class EncoderForGeoLossLess(nn.Module):
                  in_channels,
                  out_channels,
                  value_scaler: Union[float, Tuple[float, ...]],
-                 detach_higher_fea: bool,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -445,7 +444,6 @@ class EncoderForGeoLossLess(nn.Module):
             bn=use_batch_norm, act=None
         )
         self.value_scaler = value_scaler
-        self.detach_higher_fea = detach_higher_fea
         self.hidden_channels = hidden_channels
 
     def forward(self, x: ME.SparseTensor, coder_num: int):
@@ -456,9 +454,6 @@ class EncoderForGeoLossLess(nn.Module):
         strided_fea_list.append(hx)
 
         for idx in range(coder_num):
-            if self.detach_higher_fea:
-                cx = minkowski_tensor_wrapped_op(cx, lambda _: _.detach())
-                hx = minkowski_tensor_wrapped_op(hx, lambda _: _.detach())
             cx = self.conv_c(cx)
             gates = self.conv_h(hx)
             forget_gate = torch.sigmoid(gates.F)

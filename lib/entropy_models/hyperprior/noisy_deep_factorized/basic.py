@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch.distributions import Distribution
 
-from ...continuous_batched import NoisyDeepFactorizedEntropyModel as NoisyDeepFactorizedPriorEntropyModel
+from ...continuous_batched import NoisyDeepFactorizedEntropyModel as PriorEntropyModel
 from ...continuous_indexed import ContinuousIndexedEntropyModel
 from ...distributions.uniform_noise import NoisyNormal, NoisyDeepFactorized
 
@@ -55,7 +55,7 @@ class EntropyModel(nn.Module):
         self.hyper_encoder_post_op = hyper_encoder_post_op
         self.hyper_decoder_post_op = hyper_decoder_post_op
         self.prior_bytes_num_bytes = prior_bytes_num_bytes
-        self.hyperprior_entropy_model = NoisyDeepFactorizedPriorEntropyModel(
+        self.hyperprior_entropy_model = PriorEntropyModel(
             batch_shape=hyperprior_batch_shape,
             coding_ndim=coding_ndim,
             num_filters=hyperprior_num_filters,
@@ -207,7 +207,8 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
         return super(ScaleNoisyNormalEntropyModel, self).compress(y, return_dequantized, estimate_bits)
 
 
-def _noisy_deep_factorized_entropy_model_init(index_ranges, parameter_fns_type, parameter_fns_factory, num_filters):
+def _noisy_deep_factorized_indexed_entropy_model_init(
+        index_ranges, parameter_fns_type, parameter_fns_factory, num_filters):
     assert len(num_filters) >= 3 and num_filters[0] == num_filters[-1] == 1
     assert parameter_fns_type in ('split', 'transform')
     if not len(index_ranges) > 1:
@@ -314,7 +315,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
                  range_coder_precision: int = 16
                  ):
         parameter_fns, indexes_view_fn, modules_to_add = \
-            _noisy_deep_factorized_entropy_model_init(
+            _noisy_deep_factorized_indexed_entropy_model_init(
                 index_ranges, parameter_fns_type, parameter_fns_factory, num_filters
             )
         super(NoisyDeepFactorizedEntropyModel, self).__init__(

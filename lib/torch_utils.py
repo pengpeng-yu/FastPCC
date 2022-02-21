@@ -2,7 +2,7 @@ import os
 import platform
 import math
 from functools import wraps
-from typing import List, Tuple, Union, Dict, Optional, Callable
+from typing import List, Tuple, Union, Dict, Optional, Callable, Any
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -233,24 +233,35 @@ def concat_loss_dicts(loss_dict_a: Dict[str, torch.Tensor],
     return loss_dict_a
 
 
-def minkowski_tensor_wrapped_op(x, operation: Callable,
-                                needs_recover: bool = True,
-                                add_batch_dim: bool = False):
+def minkowski_tensor_wrapped_op(
+        x: Union[torch.Tensor, ME.SparseTensor],
+        operation: Callable[[torch.Tensor], Any],
+        needs_recover: bool = True,
+        add_batch_dim: bool = False):
+    if needs_recover is True:
+        assert add_batch_dim is False
     if ME is None or isinstance(x, torch.Tensor):
         return operation(x)
-    else:
-        if needs_recover is True:
-            assert add_batch_dim is False
-            return ME.SparseTensor(
-                features=operation(x.F),
-                coordinate_map_key=x.coordinate_map_key,
-                coordinate_manager=x.coordinate_manager
-            )
-        else:
-            ret = operation(x.F)
-            if add_batch_dim is True:
-                ret = ret[None]
-            return ret
+
+    ret = operation(x.F)
+    ret = list(ret) if isinstance(ret, Tuple) else [ret]
+
+    if needs_recover is True:
+        for idx in range(len(ret)):
+            if isinstance(ret[idx], torch.Tensor):
+                ret[idx] = ME.SparseTensor(
+                    features=ret[idx],
+                    coordinate_map_key=x.coordinate_map_key,
+                    coordinate_manager=x.coordinate_manager
+                )
+    elif add_batch_dim is True:
+        for idx in range(len(ret)):
+            if isinstance(ret[idx], torch.Tensor):
+                ret[idx] = ret[idx][None]
+    ret = tuple(ret)
+    if len(ret) == 1:
+        ret = ret[0]
+    return ret
 
 
 def get_minkowski_tensor_coords_tuple(x):

@@ -19,7 +19,6 @@ model:
 
 train:
   rundir_name: 'train_convolutional_<autoindex>'
-  device: '0'
   amp: False
   more_reproducible: True
   batch_size: 8
@@ -50,10 +49,11 @@ train:
 test:
   batch_size: 1
   num_workers: 2
+  log_frequency: 1
   save_results: True
   dataset_path:
     'lib.datasets.PlyVoxel.Owlii_8iVFBv2'
-  log_frequency: 1
   dataset:
     with_resolution: True
     with_ori_resolution: True
+    kd_tree_partition_max_points_num: 1500000

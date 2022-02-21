@@ -134,7 +134,7 @@ class ImageCompressor(nn.Module):
                 nn.Linear(out_channels, out_channels,
                           bias=True)
             )
-        self.entropy_bottleneck = \
+        self.em = \
             HyperPriorNoisyDeepFactorizedEntropyModel(
                 hyper_encoder=hyper_encoder,
                 hyper_decoder=hyper_decoder,
@@ -158,7 +158,7 @@ class ImageCompressor(nn.Module):
         feature = channel_last_permutation(feature)
 
         if self.training:
-            fea_tilde, loss_dict = self.entropy_bottleneck(feature)
+            fea_tilde, loss_dict = self.em(feature)
             fea_tilde = channel_first_permutation(fea_tilde)
             im_recon = self.decoder(fea_tilde)
 
@@ -180,7 +180,7 @@ class ImageCompressor(nn.Module):
             return loss_dict
 
         elif not self.training:
-            fea_recon, compressed_strings, coding_batch_shape = self.entropy_bottleneck(feature)
+            fea_recon, compressed_strings, coding_batch_shape = self.em(feature)
             fea_recon = channel_first_permutation(fea_recon)
             im_recon = self.decoder(fea_recon)
             im_recon = (im_recon * 255).round_().clip(None, 255)

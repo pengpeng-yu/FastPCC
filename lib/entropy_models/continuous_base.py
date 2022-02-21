@@ -294,9 +294,9 @@ class DistributionQuantizedCDFTable(nn.Module):
             # Delete invalid values in state dict.
             # Those values are supposed to be rebuilt via "model.eval()".
             # Warning of "IncompatibleKeys(missing_keys=[
-            # 'entropy_bottleneck.prior.cached_cdf_table',
-            # 'entropy_bottleneck.prior.cached_cdf_length',
-            # 'entropy_bottleneck.prior.cached_cdf_offset'])"
+            # 'entropy_model.prior.cached_cdf_table',
+            # 'entropy_model.prior.cached_cdf_length',
+            # 'entropy_model.prior.cached_cdf_offset'])"
             # is expected.
             try:
                 del state_dict[prefix + 'cached_cdf_table']

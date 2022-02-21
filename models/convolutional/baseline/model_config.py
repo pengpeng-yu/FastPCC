@@ -28,10 +28,9 @@ class ModelConfig(SimpleConfig):
     hyper_encoder_scaler: float = 1.0
     prior_indexes_scaler: float = 1.0
 
-    lossless_compression_based: bool = False
+    lossless_based: bool = False
     lossless_coder_channels: int = 64
     lossless_coord_indexes_range: Tuple[int, ...] = (8, 8, 8, 8)
-    lossless_detach_higher_fea: bool = False
     lossless_hybrid_hyper_decoder_fea: bool = False
 
     reconstruct_loss_type: str = 'BCE'  # BCE or Dist or Focal

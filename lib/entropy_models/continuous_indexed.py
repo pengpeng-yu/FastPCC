@@ -65,7 +65,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                 assert self.training
                 indexes += (indexes.detach().round() - indexes.detach())
             else:
-                indexes.round_()
+                torch.round_(indexes)
         parameters = {k: f(indexes) for k, f in self.parameter_fns.items()}
         return self.prior_fn(**parameters)
 
@@ -101,8 +101,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
     @minkowski_tensor_wrapped_fn({1: 0, 2: None})
     def forward(self, x: torch.Tensor, indexes: torch.Tensor,
                 return_aux_loss: bool = True,
-                additive_uniform_noise: bool = True,
-                detach_value_for_bits_loss: bool = False) \
+                additive_uniform_noise: bool = True) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, List[bytes]]]:
         """
@@ -118,10 +117,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                 x_perturbed = self.perturb(x)
             else:
                 x_perturbed = x
-            log_probs = prior.log_prob(
-                x_perturbed.detach().clone()
-                if detach_value_for_bits_loss else x_perturbed
-            )
+            log_probs = prior.log_prob(x_perturbed)
             loss_dict = {'bits_loss': log_probs.sum() / (-math.log(2))}
             if return_aux_loss:
                 loss_dict['aux_loss'] = self.prior.aux_loss()
