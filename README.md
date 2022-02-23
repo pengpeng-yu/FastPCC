@@ -6,7 +6,6 @@
 - plyfile
 - pytorch≈1.7
 - pytorch3d
-- compressai (https://github.com/InterDigitalInc/CompressAI.git)
 - MinkowskiEngine≈0.5.4 (https://github.com/NVIDIA/MinkowskiEngine)
 
 ### Datasets:

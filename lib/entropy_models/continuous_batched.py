@@ -107,20 +107,17 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             quantized_x, rounded_x_or_dequantized_x = self.quantize(
                 x, return_dequantized=return_dequantized
             )
-        collapsed_x = quantized_x.reshape(-1, *coding_unit_shape)  # collapse batch dimensions
-        indexes = self.build_indexes(broadcast_shape)  # shape: coding_unit_shape
+        # collapse batch dimensions and coding_unit dimensions
+        collapsed_x = quantized_x.reshape(-1, coding_unit_shape.numel())
+        indexes = self.build_indexes(broadcast_shape).reshape(-1).tolist()  # shape: coding_unit_shape.numel()
 
         strings = []
-        indexes = indexes.reshape(-1).tolist()
         for unit_idx in range(collapsed_x.shape[0]):
             strings.append(
-                self.range_encoder.encode_with_indexes(
-                    collapsed_x[unit_idx].reshape(-1).tolist(),
-                    indexes,
-                    self.prior.cached_cdf_table_list,
-                    self.prior.cached_cdf_length_list,
-                    self.prior.cached_cdf_offset_list
-                )
+                self.prior.range_coder.encode_with_indexes(
+                    [collapsed_x[unit_idx].tolist()],
+                    [indexes]
+                )[0]
             )
 
         # Log broadcast shape.
@@ -160,19 +157,15 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             broadcast_shape_total_bytes = 0
             broadcast_shape_string = b''
 
-        indexes = self.build_indexes(broadcast_shape)
-        indexes = indexes.reshape(-1).tolist()
+        indexes = self.build_indexes(broadcast_shape).reshape(-1).tolist()
 
         symbols = []
         for s in strings:
             assert s[:broadcast_shape_total_bytes] == broadcast_shape_string
             symbols.append(
-                self.range_decoder.decode_with_indexes(
-                    s[broadcast_shape_total_bytes:], indexes,
-                    self.prior.cached_cdf_table_list,
-                    self.prior.cached_cdf_length_list,
-                    self.prior.cached_cdf_offset_list
-                )
+                self.prior.range_coder.decode_with_indexes(
+                    [s[broadcast_shape_total_bytes:]], [indexes],
+                )[0]
             )
         symbols = torch.tensor(symbols, device=target_device)
         if skip_dequantization:

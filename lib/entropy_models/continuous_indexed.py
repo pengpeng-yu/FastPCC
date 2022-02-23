@@ -173,8 +173,8 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         flat_indexes = self.flatten_indexes(indexes)
         assert flat_indexes.shape == input_shape
 
-        # collapse batch dimensions
-        flat_indexes = flat_indexes.reshape(-1, *coding_unit_shape)
+        # collapse batch dimensions and coding_unit dimensions
+        flat_indexes = flat_indexes.reshape(-1, coding_unit_shape.numel())
         prior = self.make_prior(indexes)
         if skip_quantization is True:
             if return_dequantized:
@@ -186,19 +186,12 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             quantized_x, rounded_x_or_dequantized_x = self.quantize(
                 x, offset=quantization_offset(prior), return_dequantized=return_dequantized
             )
-        collapsed_x = quantized_x.reshape(-1, *coding_unit_shape)
+        collapsed_x = quantized_x.reshape(-1, coding_unit_shape.numel())
 
-        strings = []
-        for unit_idx in range(collapsed_x.shape[0]):
-            strings.append(
-                self.range_encoder.encode_with_indexes(
-                    collapsed_x[unit_idx].reshape(-1).tolist(),
-                    flat_indexes[unit_idx].reshape(-1).tolist(),
-                    self.prior.cached_cdf_table_list,
-                    self.prior.cached_cdf_length_list,
-                    self.prior.cached_cdf_offset_list
-                )
-            )
+        strings = self.prior.range_coder.encode_with_indexes(
+            collapsed_x.tolist(),
+            flat_indexes.tolist()
+        )
 
         if estimate_bits:
             estimated_bits = prior.log_prob(quantized_x).sum() / (-math.log(2))
@@ -217,18 +210,11 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
 
         input_shape = flat_indexes.shape
         coding_unit_shape = input_shape[-self.coding_ndim:]
-        flat_indexes = flat_indexes.reshape(-1, *coding_unit_shape)
+        flat_indexes = flat_indexes.reshape(-1, coding_unit_shape.numel())
 
-        symbols = []
-        for s, i in zip(strings, flat_indexes):
-            symbols.append(
-                self.range_decoder.decode_with_indexes(
-                    s, i.reshape(-1).tolist(),
-                    self.prior.cached_cdf_table_list,
-                    self.prior.cached_cdf_length_list,
-                    self.prior.cached_cdf_offset_list
-                )
-            )
+        symbols = self.prior.range_coder.decode_with_indexes(
+            strings, flat_indexes.tolist()
+        )
         symbols = torch.tensor(symbols, device=target_device)
         if skip_dequantization:
             symbols = symbols.to(torch.float)
@@ -236,6 +222,16 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             symbols = self.dequantize(symbols, offset=quantization_offset(self.make_prior(indexes)))
         symbols = symbols.reshape(input_shape)
         return symbols
+
+    def train(self, mode: bool = True):
+        """
+        Use model.train() to invalidate cached cdf table.
+        Use model.eval() to update the prior function and the cdf table.
+        """
+        if mode is False and self.prior.requires_updating_cdf_table:
+            with torch.no_grad():
+                self.prior.update_base(self.make_prior(self.range_coding_prior_indexes))
+        return super(ContinuousIndexedEntropyModel, self).train(mode=mode)
 
 
 class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):

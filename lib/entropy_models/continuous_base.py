@@ -5,37 +5,11 @@ import torch
 import torch.nn as nn
 import torch.distributions
 from torch.distributions import Distribution
-from compressai._CXX import pmf_to_quantized_cdf as _pmf_to_quantized_cdf
-from compressai import ans
 
 from .utils import quantization_offset
+from .rans_coder import batched_pmf_to_quantized_cdf, IndexedRansCoder
 
 from lib.torch_utils import minkowski_tensor_wrapped_fn
-
-
-def batched_pmf_to_quantized_cdf(pmf: torch.Tensor,
-                                 pmf_length: torch.Tensor,
-                                 max_length: int,
-                                 entropy_coder_precision: int = 16):
-    """
-    Args:
-        pmf: (channels, max_length) float
-        pmf_length: (channels, ) int32
-        max_length: max length of pmf, int
-        entropy_coder_precision:
-    Returns:
-        quantized cdf (channels, max_length + 2)
-    """
-    cdf = torch.zeros((len(pmf_length), max_length + 2),
-                      dtype=torch.int32, device=pmf.device)
-    for i in range(len(pmf)):
-        p = pmf[i][: pmf_length[i]]
-        overflow = (1 - torch.sum(p)).clip(0)
-        p = p.tolist()
-        p.append(overflow.item())
-        c = _pmf_to_quantized_cdf(p, entropy_coder_precision)
-        cdf[i, : len(c)] = torch.tensor(c, dtype=torch.int32)
-    return cdf
 
 
 class DistributionQuantizedCDFTable(nn.Module):
@@ -62,14 +36,12 @@ class DistributionQuantizedCDFTable(nn.Module):
         self.init_scale = init_scale
         self.tail_mass = tail_mass
         self.cdf_precision = cdf_precision
+        self.float_min_pm = 2 ** -cdf_precision
 
-        self.register_buffer('cached_cdf_table', torch.tensor([], dtype=torch.int32))
-        self.register_buffer('cached_cdf_length', torch.empty(self.batch_numel, dtype=torch.int32))
-        self.register_buffer('cached_cdf_offset', torch.empty(self.batch_numel, dtype=torch.int32))
-        self.register_buffer('requires_updating_cdf_table', torch.tensor([True]))
-        self.cached_cdf_table_list = None
-        self.cached_cdf_length_list = None
-        self.cached_cdf_offset_list = None
+        self.cdf_list: List[List[int]] = [[]]
+        self.cdf_offset_list: List[int] = []
+        self.requires_updating_cdf_table: bool = True
+        self.range_coder = IndexedRansCoder(self.cdf_precision)
 
         if len(base.event_shape) != 0:
             raise NotImplementedError
@@ -263,65 +235,28 @@ class DistributionQuantizedCDFTable(nn.Module):
             # Collapse batch dimensions of distribution.
             pmf = pmf.reshape(max_length, -1).T
             pmf_length = pmf_length.reshape(-1)
-
-            cdf = batched_pmf_to_quantized_cdf(pmf, pmf_length, max_length, self.cdf_precision)
-            cdf_length = pmf_length + 2
             cdf_offset = minima.reshape(-1)
 
-            self.cached_cdf_table = cdf
-            self.cached_cdf_length[...] = cdf_length
-            self.cached_cdf_offset[...] = cdf_offset
-            self.update_quantized_cdf_list()
-            self.requires_updating_cdf_table[:] = False
+            pmf_list = []
+            for i in range(len(pmf_length)):
+                single_pmf = pmf[i][: pmf_length[i]].tolist()
+                pmf_list.append(single_pmf)
+            self.cdf_list = batched_pmf_to_quantized_cdf(pmf_list, self.cdf_precision)
+            self.cdf_offset_list = cdf_offset.tolist()
+            self.requires_updating_cdf_table = False
+            self.range_coder.init_with_quantized_cdfs(self.cdf_list, self.cdf_offset_list)
 
-    def update_quantized_cdf_list(self):
-        """
-        Lists used by range coder.
-        Should be updated once self.cached_cdf_table changes.
-        """
-        self.cached_cdf_table_list = self.cached_cdf_table.tolist()
-        self.cached_cdf_length_list = self.cached_cdf_length.tolist()
-        self.cached_cdf_offset_list = self.cached_cdf_offset.tolist()
+    def get_extra_state(self):
+        return self.cdf_list, self.cdf_offset_list, self.requires_updating_cdf_table
 
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        """
-        Call model.eval() after training before saving state dict
-        to use precomputed cdf table latter.
-        """
-        flag_key = prefix + 'requires_updating_cdf_table'
-        if flag_key not in state_dict or state_dict[flag_key]:
-            # Delete invalid values in state dict.
-            # Those values are supposed to be rebuilt via "model.eval()".
-            # Warning of "IncompatibleKeys(missing_keys=[
-            # 'entropy_model.prior.cached_cdf_table',
-            # 'entropy_model.prior.cached_cdf_length',
-            # 'entropy_model.prior.cached_cdf_offset'])"
-            # is expected.
-            try:
-                del state_dict[prefix + 'cached_cdf_table']
-            except KeyError: pass
-            try:
-                del state_dict[prefix + 'cached_cdf_length']
-            except KeyError: pass
-            try:
-                del state_dict[prefix + 'cached_cdf_offset']
-            except KeyError: pass
+    def set_extra_state(self, state):
+        if state[2]:
             print('Warning: cached cdf table in state dict requires updating.\n'
                   'You need to call model.eval() to build it after loading state dict '
                   'before any inference.')
-            super(DistributionQuantizedCDFTable, self)._load_from_state_dict(
-                state_dict, prefix, local_metadata, strict,
-                missing_keys, unexpected_keys, error_msgs)
         else:
-            # Placeholder
-            self.cached_cdf_table = torch.empty_like(
-                state_dict[prefix + 'cached_cdf_table'],
-                device=self.cached_cdf_table.device)
-            super(DistributionQuantizedCDFTable, self)._load_from_state_dict(
-                state_dict, prefix, local_metadata, strict,
-                missing_keys, unexpected_keys, error_msgs)
-            self.update_quantized_cdf_list()
+            self.cdf_list, self.cdf_offset_list, self.requires_updating_cdf_table = state
+            self.range_coder.init_with_quantized_cdfs(self.cdf_list, self.cdf_offset_list)
 
     def train(self, mode: bool = True):
         """
@@ -329,7 +264,7 @@ class DistributionQuantizedCDFTable(nn.Module):
         Use model.eval() to call build_quantized_cdf_table().
         """
         if mode is True:
-            self.requires_updating_cdf_table[:] = True
+            self.requires_updating_cdf_table = True
         else:
             if self.requires_updating_cdf_table:
                 self.build_quantized_cdf_table()
@@ -405,11 +340,6 @@ class ContinuousEntropyModelBase(nn.Module):
             cdf_precision=range_coder_precision
         )
         self.coding_ndim = coding_ndim
-        self.range_coder_precision = range_coder_precision
-        self.range_encoder = ans.RansEncoder()
-        self.range_decoder = ans.RansDecoder()
-        if self.range_coder_precision != 16:
-            raise NotImplementedError
 
     def perturb(self, x: torch.Tensor) -> torch.Tensor:
         if not hasattr(self, "_noise"):
