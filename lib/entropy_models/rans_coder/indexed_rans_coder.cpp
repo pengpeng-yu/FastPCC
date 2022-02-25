@@ -16,23 +16,23 @@ IndexedRansCoder::IndexedRansCoder(uint32_t precision) : precision(precision)
 
 int IndexedRansCoder::init_with_pmfs(
     std::vector<std::vector<double>> &pmfs,
-    std::vector<int32_t> &offset_list)
+    std::vector<int32_t> &offsets)
 {
-    auto &&quantized_cdfs = batched_pmf_to_quantized_cdf(pmfs, precision);
-    return init_with_quantized_cdfs(quantized_cdfs, offset_list);
+    auto &&ret = batched_pmf_to_quantized_cdf(pmfs, offsets, precision);
+    return init_with_quantized_cdfs(std::get<0>(ret), std::get<1>(ret));
 }
 
 int IndexedRansCoder::init_with_quantized_cdfs(
     std::vector<std::vector<uint32_t>> &cdfs,
-    std::vector<int32_t> &offset_list)
+    std::vector<int32_t> &offsets)
 {
     const uint32_t prob_scale = 1u << precision;
     size_t cdfs_num = cdfs.size();
     esyms_list.resize(cdfs_num);
     dsyms_list.resize(cdfs_num);
     cum2sym_list.resize(cdfs_num);
-    this->offset_list = std::move(offset_list);
-    assert(cdfs_num == this->offset_list.size());
+    this->offsets = std::move(offsets);
+    assert(cdfs_num == this->offsets.size());
 
     for (size_t cdf_idx = 0; cdf_idx < cdfs.size(); ++cdf_idx)
     {
@@ -41,7 +41,8 @@ int IndexedRansCoder::init_with_quantized_cdfs(
         auto &dsyms = dsyms_list[cdf_idx];
         auto &cum2sym = cum2sym_list[cdf_idx];
         assert(cdf[0] == 0 && cdf.back() == prob_scale);
-        const uint16_t symbols_num = cdf.size() - 1;
+        assert((cdf.size() - 1) < (1u << precision));
+        const uint16_t symbols_num = uint16_t(cdf.size() - 1);
 
         esyms.resize(symbols_num);
         dsyms.resize(symbols_num);
@@ -96,7 +97,7 @@ std::vector<py::bytes> IndexedRansCoder::encode_with_indexes(
             const size_t sym_idx = symbols_num - 1 - foward_sym_idx;
             const auto &cdf_idx = indexes[sym_idx];
             const auto &esyms = esyms_list[cdf_idx];
-            const auto &offset = offset_list[cdf_idx];
+            const auto &offset = offsets[cdf_idx];
             int32_t value = symbols[sym_idx] - offset;
             assert(cdf_idx >= 0);
             assert(cdf_idx < esyms_list.size());
@@ -164,7 +165,7 @@ std::vector<std::vector<int32_t>> IndexedRansCoder::decode_with_indexes(
         for (size_t j = 0; j < symbols_num; ++j)
         {
             const auto &cdf_idx = indexes[j];
-            const auto &offset = offset_list[cdf_idx];
+            const auto &offset = offsets[cdf_idx];
             const auto &dsyms = dsyms_list[cdf_idx];
             const auto &cum2sym = cum2sym_list[cdf_idx];
             int32_t value = cum2sym[RansDecGet(&rans, precision)];

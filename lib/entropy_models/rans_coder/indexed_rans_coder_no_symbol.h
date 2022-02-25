@@ -11,11 +11,11 @@ public:
     IndexedRansCoderNoSymbol(uint32_t precision);
     int init_with_pmfs(
         std::vector<std::vector<double>> &pmfs,
-        std::vector<int32_t> &offset_list
+        std::vector<int32_t> &offsets
     );
     int init_with_quantized_cdfs(
         std::vector<std::vector<uint32_t>> &quantized_cdfs,
-        std::vector<int32_t> &offset_list
+        std::vector<int32_t> &offsets
     );
     std::vector<py::bytes> encode_with_indexes(
         const std::vector<std::vector<int32_t>> &symbols_list, 
@@ -30,7 +30,7 @@ private:
     const uint32_t precision;
     
     std::vector<std::vector<uint32_t>> cdfs;
-    std::vector<int32_t> offset_list;
+    std::vector<int32_t> offsets;
     std::vector<std::vector<uint16_t>> cum2sym_list;
 };
 

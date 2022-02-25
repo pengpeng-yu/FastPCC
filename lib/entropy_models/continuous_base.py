@@ -36,7 +36,6 @@ class DistributionQuantizedCDFTable(nn.Module):
         self.init_scale = init_scale
         self.tail_mass = tail_mass
         self.cdf_precision = cdf_precision
-        self.float_min_pm = 2 ** -cdf_precision
 
         self.cdf_list: List[List[int]] = [[]]
         self.cdf_offset_list: List[int] = []
@@ -207,8 +206,9 @@ class DistributionQuantizedCDFTable(nn.Module):
 
             # minima < lower_tail - offset
             # maxima > upper_tail - offset
-            minima = torch.floor(lower_tail - offset).to(torch.int32)
-            maxima = torch.ceil(upper_tail - offset).to(torch.int32)
+            # Sightly increase range of pmfs to generate better cdf tables.
+            minima = torch.floor(lower_tail - offset).to(torch.int32) - 5
+            maxima = torch.ceil(upper_tail - offset).to(torch.int32) + 5
             # For stability.
             maxima.clip_(minima)
 
@@ -241,8 +241,9 @@ class DistributionQuantizedCDFTable(nn.Module):
             for i in range(len(pmf_length)):
                 single_pmf = pmf[i][: pmf_length[i]].tolist()
                 pmf_list.append(single_pmf)
-            self.cdf_list = batched_pmf_to_quantized_cdf(pmf_list, self.cdf_precision)
-            self.cdf_offset_list = cdf_offset.tolist()
+            self.cdf_list, self.cdf_offset_list = batched_pmf_to_quantized_cdf(
+                pmf_list, cdf_offset.tolist(), self.cdf_precision
+            )
             self.requires_updating_cdf_table = False
             self.range_coder.init_with_quantized_cdfs(self.cdf_list, self.cdf_offset_list)
 

@@ -1,13 +1,13 @@
 #include <torch/extension.h>
 
 
-std::vector<uint32_t> pmf_to_quantized_cdf(std::vector<double> &pmf, uint32_t precision)
+std::vector<uint32_t>
+pmf_to_quantized_cdf(std::vector<double> &pmf, int32_t &offset, uint32_t precision)
 {
     assert(precision <= 32);
     const uint32_t prob_scale = 1u << precision;
     std::vector<uint32_t> cdf(pmf.size() + 2);
     cdf[0] = 0u;
-    cdf.back() = prob_scale;
 
 #ifndef	NDEBUG
     for (auto &p : pmf)
@@ -19,14 +19,47 @@ std::vector<uint32_t> pmf_to_quantized_cdf(std::vector<double> &pmf, uint32_t pr
     double overflow = std::max(1. - total, 0.);
     total += overflow;
     pmf.push_back(overflow);
-    std::vector<double> float_cdf(pmf.size());
 
-    std::partial_sum(pmf.begin(), pmf.end(), float_cdf.begin());
-    std::transform(float_cdf.begin(), float_cdf.end(), cdf.begin() + 1,
+    std::partial_sum(pmf.begin(), pmf.end(), pmf.begin());
+    std::transform(pmf.begin(), pmf.end(), cdf.begin() + 1,
                    [prob_scale, total](auto p)
                    { return static_cast<uint32_t>(std::round(prob_scale * (p / total))); });
 
-    for (size_t i = 0; i < pmf.size(); i++)
+    assert(cdf.size() >= 3);
+    size_t cdf_start = 0, cdf_end = 0;
+    for (size_t i = 0; i < cdf.size() - 1; i++)
+    {
+        if (cdf[i + 1] != cdf[i])
+        {
+            cdf_start = i;
+            break;
+        }
+    }
+    for (size_t i = cdf.size() - 2; i > 0; i--)
+    {
+        if (cdf[i - 1] != cdf[i])
+        {
+            cdf_end = i;
+            break;
+        }
+    }
+    offset += cdf_start;
+
+    if (cdf_start > cdf_end)
+    {
+        assert(cdf_start = cdf.size() - 2);
+        cdf_start = cdf.size() - 3;
+        cdf_end = cdf_start + 1;
+    }
+    size_t cdf_size =  cdf_end - cdf_start + 1 + 1;
+    for (size_t i = 0; i < cdf_size - 1; i++)
+    {
+        cdf[i] = cdf[i + cdf_start];
+    }
+    cdf.resize(cdf_size);
+    cdf.back() = prob_scale;
+
+    for (size_t i = 0; i < cdf.size() - 1; i++)
     {
         if (cdf[i + 1] == cdf[i])  // symbol i was set to zero freq
         {
@@ -34,7 +67,7 @@ std::vector<uint32_t> pmf_to_quantized_cdf(std::vector<double> &pmf, uint32_t pr
             uint32_t best_freq = ~0u;
             size_t best_steal = 0;
             bool found_steal = false;
-            for (size_t j = 0; j < pmf.size(); j++)
+            for (size_t j = 0; j < cdf.size() - 1; j++)
             {
                 uint32_t freq = cdf[j + 1] - cdf[j];
                 if (freq > 1 && freq < best_freq)
@@ -64,7 +97,7 @@ std::vector<uint32_t> pmf_to_quantized_cdf(std::vector<double> &pmf, uint32_t pr
 #ifndef	NDEBUG
     // calculate updated freqs and make sure we didn't screw anything up
     assert(cdf[0] == 0 && cdf.back() == prob_scale);
-    for (size_t i = 0; i < pmf.size(); i++)
+    for (size_t i = 0; i < cdf.size() - 1; i++)
     {
         assert(cdf[i + 1] > cdf[i]);
     }
@@ -72,14 +105,19 @@ std::vector<uint32_t> pmf_to_quantized_cdf(std::vector<double> &pmf, uint32_t pr
     return cdf;
 }
 
-std::vector<std::vector<uint32_t>>
-batched_pmf_to_quantized_cdf(std::vector<std::vector<double>> &pmfs, uint32_t precision)
+std::tuple<std::vector<std::vector<uint32_t>>, std::vector<int32_t>>
+batched_pmf_to_quantized_cdf(
+    std::vector<std::vector<double>> &pmfs,
+    std::vector<int32_t> &offsets,
+    uint32_t precision)
 {
     std::vector<std::vector<uint32_t>> cdfs;
     cdfs.reserve(pmfs.size());
-    for (auto &pmf : pmfs)
+    for (size_t i = 0; i < pmfs.size(); ++i)
     {
-        cdfs.push_back(pmf_to_quantized_cdf(pmf, precision));
+        auto &pmf = pmfs[i];
+        auto &offset = offsets[i];
+        cdfs.push_back(pmf_to_quantized_cdf(pmf, offset, precision));
     }
-    return cdfs;
+    return std::make_tuple(cdfs, offsets);
 }
