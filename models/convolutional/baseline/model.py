@@ -198,8 +198,8 @@ class PCC(nn.Module):
                 hyper_decoder_coord=hyper_decoder_coord_geo_lossless,
                 hyper_decoder_fea=hyper_decoder_fea_geo_lossless,
                 hybrid_hyper_decoder_fea=cfg.lossless_hybrid_hyper_decoder_fea,
-                fea_bytes_num_bytes=3,
-                coord_bytes_num_bytes=3,
+                fea_bytes_num_bytes=2,  # TODO: reduce overheads
+                coord_bytes_num_bytes=2,
                 coord_index_ranges=cfg.lossless_coord_indexes_range,
                 coord_parameter_fns_type='transform',
                 coord_parameter_fns_factory=parameter_fns_factory,
