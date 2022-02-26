@@ -1,17 +1,16 @@
 import io
-from typing import List, Tuple, Union, Dict, Any, Callable, Optional
-import math
+from typing import List, Tuple, Union, Dict, Any, Callable
 
 import torch
 import torch.nn as nn
 from torch.distributions import Distribution
 import MinkowskiEngine as ME
 
-from .basic import \
-    _noisy_deep_factorized_indexed_entropy_model_init, \
-    EntropyModel as HyperPriorEntropyModel
+from .basic import EntropyModel as HyperPriorEntropyModel
 from ...continuous_batched import ContinuousBatchedEntropyModel
-from ...continuous_indexed import ContinuousIndexedEntropyModel
+from ...continuous_indexed import ContinuousIndexedEntropyModel, \
+    noisy_deep_factorized_indexed_entropy_model_init, \
+    noisy_scale_normal_indexed_entropy_model_init
 from ...distributions.uniform_noise import NoisyNormal, NoisyDeepFactorized
 
 from lib.torch_utils import minkowski_tensor_wrapped_op, concat_loss_dicts
@@ -437,23 +436,18 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16
                  ):
-        coord_index_offset = math.log(coord_index_scale_min)
-        coord_index_factor = (math.log(coord_index_scale_max) -
-                              math.log(coord_index_scale_min)) / (coord_index_num_scales - 1)
-        fea_index_offset = math.log(fea_index_scale_min)
-        fea_index_factor = (math.log(fea_index_scale_max) -
-                            math.log(fea_index_scale_min)) / (fea_index_num_scales - 1)
+        coord_parameter_fns = noisy_scale_normal_indexed_entropy_model_init(
+            coord_index_scale_min, coord_index_scale_max, coord_index_num_scales
+        )
+        fea_parameter_fns = noisy_scale_normal_indexed_entropy_model_init(
+            fea_index_scale_min, fea_index_scale_max, fea_index_num_scales
+        )
         super(GeoLosslessScaleNoisyNormalEntropyModel, self).__init__(
             bottom_fea_entropy_model, encoder,
             hyper_decoder_coord, hyper_decoder_fea, hybrid_hyper_decoder_fea,
-            NoisyNormal, (coord_index_num_scales,), {
-                'loc': lambda _: 0,
-                'scale': lambda i: torch.exp(coord_index_offset + coord_index_factor * i)},
-            NoisyNormal, (fea_index_num_scales,), {
-                'loc': lambda _: 0,
-                'scale': lambda i: torch.exp(fea_index_offset + fea_index_factor * i)},
-            lambda x: x, lambda x: minkowski_tensor_wrapped_op(
-                x, lambda x: x, needs_recover=False, add_batch_dim=True),
+            NoisyNormal, (coord_index_num_scales,), coord_parameter_fns,
+            NoisyNormal, (fea_index_num_scales,), fea_parameter_fns,
+            lambda x: x, lambda x: x,
             fea_bytes_num_bytes, coord_bytes_num_bytes,
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
@@ -473,14 +467,14 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  fea_bytes_num_bytes: int = 2,
                  coord_bytes_num_bytes: int = 2,
 
-                 coord_index_ranges: Tuple[int, ...] = (4,) * 9,
-                 coord_parameter_fns_type: str = 'split',
+                 coord_index_ranges: Tuple[int, ...] = (8, 8, 8, 8),
+                 coord_parameter_fns_type: str = 'transform',
                  coord_parameter_fns_factory: Callable[..., nn.Module] = None,
-                 coord_num_filters: Tuple[int, ...] = (1, 2, 1),
-                 fea_index_ranges: Tuple[int, ...] = (4,) * 9,
-                 fea_parameter_fns_type: str = 'split',
+                 coord_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1),
+                 fea_index_ranges: Tuple[int, ...] = (16, 16, 16, 16),
+                 fea_parameter_fns_type: str = 'transform',
                  fea_parameter_fns_factory: Callable[..., nn.Module] = None,
-                 fea_num_filters: Tuple[int, ...] = (1, 2, 1),
+                 fea_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1),
 
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
@@ -489,12 +483,12 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  range_coder_precision: int = 16
                  ):
         coord_parameter_fns, coord_indexes_view_fn, coord_modules_to_add = \
-            _noisy_deep_factorized_indexed_entropy_model_init(
+            noisy_deep_factorized_indexed_entropy_model_init(
                 coord_index_ranges, coord_parameter_fns_type,
                 coord_parameter_fns_factory, coord_num_filters
             )
         fea_parameter_fns, fea_indexes_view_fn, fea_modules_to_add = \
-            _noisy_deep_factorized_indexed_entropy_model_init(
+            noisy_deep_factorized_indexed_entropy_model_init(
                 fea_index_ranges, fea_parameter_fns_type,
                 fea_parameter_fns_factory, fea_num_filters
             )

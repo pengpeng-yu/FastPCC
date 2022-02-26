@@ -1,13 +1,13 @@
-import io
 from typing import List, Tuple, Union, Dict, Any, Callable
-import math
 
 import torch
 import torch.nn as nn
 from torch.distributions import Distribution
 
 from ...continuous_batched import NoisyDeepFactorizedEntropyModel as PriorEntropyModel
-from ...continuous_indexed import ContinuousIndexedEntropyModel
+from ...continuous_indexed import ContinuousIndexedEntropyModel, \
+    noisy_deep_factorized_indexed_entropy_model_init, \
+    noisy_scale_normal_indexed_entropy_model_init
 from ...distributions.uniform_noise import NoisyNormal, NoisyDeepFactorized
 
 from lib.torch_utils import \
@@ -181,15 +181,14 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16
                  ):
-        offset = math.log(scale_min)
-        factor = (math.log(scale_max) - math.log(scale_min)) / (num_scales - 1)
+        parameter_fns = noisy_scale_normal_indexed_entropy_model_init(
+            scale_min, scale_max, num_scales
+        )
         super(ScaleNoisyNormalEntropyModel, self).__init__(
             hyper_encoder, hyper_decoder,
             hyperprior_batch_shape, coding_ndim,
-            NoisyNormal, (num_scales,), {'loc': lambda _: 0,
-                                         'scale': lambda i: torch.exp(offset + factor * i)},
-            lambda x: x, lambda x: minkowski_tensor_wrapped_op(
-                x, lambda x: x, needs_recover=False, add_batch_dim=True),
+            NoisyNormal, (num_scales,), parameter_fns,
+            lambda x: x, lambda x: x,
             hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
             hyperprior_broadcast_shape_bytes, prior_bytes_num_bytes,
             indexes_bound_gradient, quantize_indexes,
@@ -207,89 +206,6 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
         return super(ScaleNoisyNormalEntropyModel, self).compress(y, return_dequantized, estimate_bits)
 
 
-def _noisy_deep_factorized_indexed_entropy_model_init(
-        index_ranges, parameter_fns_type, parameter_fns_factory, num_filters):
-    assert len(num_filters) >= 3 and num_filters[0] == num_filters[-1] == 1
-    assert parameter_fns_type in ('split', 'transform')
-    if not len(index_ranges) > 1:
-        raise NotImplementedError
-    index_channels = len(index_ranges)
-
-    weights_param_numel = [num_filters[i] * num_filters[i + 1] for i in range(len(num_filters) - 1)]
-    biases_param_numel = num_filters[1:]
-    factors_param_numel = num_filters[1:-1]
-
-    if parameter_fns_type == 'split':
-        weights_param_cum_numel = torch.cumsum(torch.tensor([0, *weights_param_numel]), dim=0)
-        biases_param_cum_numel = \
-            torch.cumsum(torch.tensor([0, *biases_param_numel]), dim=0) + weights_param_cum_numel[-1]
-        factors_param_cum_numel = \
-            torch.cumsum(torch.tensor([0, *factors_param_numel]), dim=0) + biases_param_cum_numel[-1]
-        assert index_channels == factors_param_cum_numel[-1]
-        parameter_fns = {
-            'batch_shape': lambda i: i.shape[:-1],
-            'weights': lambda i: [i[..., weights_param_cum_numel[_]: weights_param_cum_numel[_ + 1]].view
-                                  (-1, num_filters[_ + 1], num_filters[_]) / 3 - 0.5
-                                  for _ in range(len(weights_param_numel))],
-
-            'biases': lambda i: [i[..., biases_param_cum_numel[_]: biases_param_cum_numel[_ + 1]].view
-                                 (-1, biases_param_numel[_], 1) / 3 - 0.5
-                                 for _ in range(len(biases_param_numel))],
-
-            'factors': lambda i: [i[..., factors_param_cum_numel[_]: factors_param_cum_numel[_ + 1]].view
-                                  (-1, factors_param_numel[_], 1) / 3 - 0.5
-                                  for _ in range(len(factors_param_numel))],
-        }
-    elif parameter_fns_type == 'transform':
-        prior_indexes_weights_transforms = nn.ModuleList(
-            [parameter_fns_factory(index_channels, out_channels)
-             for out_channels in weights_param_numel]
-        )
-        prior_indexes_biases_transforms = nn.ModuleList(
-            [parameter_fns_factory(index_channels, out_channels)
-             for out_channels in biases_param_numel]
-        )
-        prior_indexes_factors_transforms = nn.ModuleList(
-            [parameter_fns_factory(index_channels, out_channels)
-             for out_channels in factors_param_numel]
-        )
-        parameter_fns = {
-            'batch_shape': lambda i: i.shape[:-1],
-            'weights': lambda i: [transform(i).view(-1, num_filters[_ + 1], num_filters[_])
-                                  for _, transform in enumerate(prior_indexes_weights_transforms)],
-
-            'biases': lambda i: [transform(i).view(-1, biases_param_numel[_], 1)
-                                 for _, transform in enumerate(prior_indexes_biases_transforms)],
-
-            'factors': lambda i: [transform(i).view(-1, factors_param_numel[_], 1)
-                                  for _, transform in enumerate(prior_indexes_factors_transforms)],
-        }
-    else:
-        raise NotImplementedError
-
-    def indexes_view_fn(x):
-        return minkowski_tensor_wrapped_op(
-            x,
-            lambda x: x.view(
-                *x.shape[:-1],
-                x.shape[-1] // index_channels,
-                index_channels
-            ),
-            needs_recover=False,
-            add_batch_dim=True
-        )
-
-    ret = [parameter_fns, indexes_view_fn]
-    if parameter_fns_type == 'split':
-        ret.append({})
-    elif parameter_fns_type == 'transform':
-        # noinspection PyUnboundLocalVariable
-        ret.append({'prior_indexes_weights_transforms': prior_indexes_weights_transforms,
-                    'prior_indexes_biases_transforms': prior_indexes_biases_transforms,
-                    'prior_indexes_factors_transforms': prior_indexes_factors_transforms})
-    return tuple(ret)
-
-
 class NoisyDeepFactorizedEntropyModel(EntropyModel):
     def __init__(self,
                  hyper_encoder: nn.Module,
@@ -304,10 +220,10 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
                  prior_bytes_num_bytes: int = 2,
 
-                 index_ranges: Tuple[int, ...] = (4,) * 9,
-                 parameter_fns_type: str = 'split',
+                 index_ranges: Tuple[int, ...] = (16, 16, 16, 16),
+                 parameter_fns_type: str = 'transform',
                  parameter_fns_factory: Callable[..., nn.Module] = None,
-                 num_filters: Tuple[int, ...] = (1, 2, 1),
+                 num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1),
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
@@ -315,7 +231,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
                  range_coder_precision: int = 16
                  ):
         parameter_fns, indexes_view_fn, modules_to_add = \
-            _noisy_deep_factorized_indexed_entropy_model_init(
+            noisy_deep_factorized_indexed_entropy_model_init(
                 index_ranges, parameter_fns_type, parameter_fns_factory, num_filters
             )
         super(NoisyDeepFactorizedEntropyModel, self).__init__(

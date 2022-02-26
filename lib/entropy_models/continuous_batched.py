@@ -1,5 +1,5 @@
 import io
-from typing import List, Tuple, Dict, Union, Sequence, Optional
+from typing import List, Tuple, Dict, Union, Sequence
 import math
 from functools import reduce
 

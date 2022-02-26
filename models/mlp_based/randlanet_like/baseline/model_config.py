@@ -14,7 +14,7 @@ class ModelConfig(SimpleConfig):
     decoder_channels: Tuple[int, ...] = (64, 32, 16)
     decoder_neighbor_feature_channels: Tuple[int, ...] = (32, 16, 8)
 
-    bottleneck_scaler: int = 2 ** 7
+    bottleneck_scaler: int = 2 ** 0
 
     reconstruct_loss_factor: float = 1e4
     bpp_loss_factor: float = 1

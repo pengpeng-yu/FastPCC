@@ -1,14 +1,16 @@
-from typing import List, Tuple, Union, Optional, Dict, Any, Callable
+from typing import List, Tuple, Union, Dict, Any, Callable
 import math
 
 import torch
+import torch.nn as nn
 import torch.distributions
 from torch.distributions import Distribution
 
+from .distributions.uniform_noise import NoisyDeepFactorized
 from .continuous_base import ContinuousEntropyModelBase
 from .utils import lower_bound, upper_bound, quantization_offset
 
-from lib.torch_utils import minkowski_tensor_wrapped_fn
+from lib.torch_utils import minkowski_tensor_wrapped_fn, minkowski_tensor_wrapped_op
 
 
 class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
@@ -200,7 +202,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             return strings, rounded_x_or_dequantized_x
 
     @torch.no_grad()
-    @minkowski_tensor_wrapped_fn({'<del>sparse_tensor_coords_tuple': 0})
+    @minkowski_tensor_wrapped_fn({'<del>sparse_tensor_coords_tuple': 0, 2: None})
     def decompress(self, strings: List[bytes],
                    indexes: torch.Tensor,
                    target_device: torch.device,
@@ -232,6 +234,159 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             with torch.no_grad():
                 self.prior.update_base(self.make_prior(self.range_coding_prior_indexes))
         return super(ContinuousIndexedEntropyModel, self).train(mode=mode)
+
+
+def noisy_scale_normal_indexed_entropy_model_init(scale_min: float, scale_max: float, num_scales: int) -> \
+        Dict[str, Callable[[torch.Tensor], Any]]:
+    offset = math.log(scale_min)
+    factor = (math.log(scale_max) - math.log(scale_min)) / (num_scales - 1)
+    parameter_fns = {
+        'loc': lambda _: 0,
+        'scale': lambda i: torch.exp(offset + factor * i)
+    }
+    return parameter_fns
+
+
+def noisy_deep_factorized_indexed_entropy_model_init(
+        index_ranges: Tuple[int, ...],
+        parameter_fns_type: str,
+        parameter_fns_factory: Callable[..., nn.Module],
+        num_filters: Tuple[int, ...]
+) -> Tuple[Dict[str, Callable[[torch.Tensor], Any]], Callable, Dict[str, nn.Module]]:
+    assert len(num_filters) >= 3 and num_filters[0] == num_filters[-1] == 1
+    assert parameter_fns_type in ('split', 'transform')
+    if not len(index_ranges) > 1:
+        raise NotImplementedError
+    index_channels = len(index_ranges)
+
+    def indexes_view_fn(x):
+        return minkowski_tensor_wrapped_op(
+            x,
+            lambda x: x.view(
+                *x.shape[:-1],
+                x.shape[-1] // index_channels,
+                index_channels
+            ),
+            needs_recover=False,
+            add_batch_dim=True
+        )
+
+    weights_param_numel = [num_filters[i] * num_filters[i + 1] for i in range(len(num_filters) - 1)]
+    biases_param_numel = num_filters[1:]
+    factors_param_numel = num_filters[1:-1]
+
+    if parameter_fns_type == 'split':
+        weights_param_cum_numel = torch.cumsum(torch.tensor([0, *weights_param_numel]), dim=0)
+        biases_param_cum_numel = \
+            torch.cumsum(torch.tensor([0, *biases_param_numel]), dim=0) + weights_param_cum_numel[-1]
+        factors_param_cum_numel = \
+            torch.cumsum(torch.tensor([0, *factors_param_numel]), dim=0) + biases_param_cum_numel[-1]
+        assert index_channels == factors_param_cum_numel[-1]
+        parameter_fns = {
+            'batch_shape': lambda i: i.shape[:-1],
+            'weights': lambda i: [i[..., weights_param_cum_numel[_]: weights_param_cum_numel[_ + 1]].view
+                                  (-1, num_filters[_ + 1], num_filters[_]) / 3 - 0.5
+                                  for _ in range(len(weights_param_numel))],
+
+            'biases': lambda i: [i[..., biases_param_cum_numel[_]: biases_param_cum_numel[_ + 1]].view
+                                 (-1, biases_param_numel[_], 1) / 3 - 0.5
+                                 for _ in range(len(biases_param_numel))],
+
+            'factors': lambda i: [i[..., factors_param_cum_numel[_]: factors_param_cum_numel[_ + 1]].view
+                                  (-1, factors_param_numel[_], 1) / 3 - 0.5
+                                  for _ in range(len(factors_param_numel))],
+        }
+        return parameter_fns, indexes_view_fn, {}
+
+    elif parameter_fns_type == 'transform':
+        prior_indexes_weights_transforms = nn.ModuleList(
+            [parameter_fns_factory(index_channels, out_channels)
+             for out_channels in weights_param_numel]
+        )
+        prior_indexes_biases_transforms = nn.ModuleList(
+            [parameter_fns_factory(index_channels, out_channels)
+             for out_channels in biases_param_numel]
+        )
+        prior_indexes_factors_transforms = nn.ModuleList(
+            [parameter_fns_factory(index_channels, out_channels)
+             for out_channels in factors_param_numel]
+        )
+        parameter_fns = {
+            'batch_shape': lambda i: i.shape[:-1],
+            'weights': lambda i: [transform(i).view(-1, num_filters[_ + 1], num_filters[_])
+                                  for _, transform in enumerate(prior_indexes_weights_transforms)],
+
+            'biases': lambda i: [transform(i).view(-1, biases_param_numel[_], 1)
+                                 for _, transform in enumerate(prior_indexes_biases_transforms)],
+
+            'factors': lambda i: [transform(i).view(-1, factors_param_numel[_], 1)
+                                  for _, transform in enumerate(prior_indexes_factors_transforms)],
+        }
+        return parameter_fns, indexes_view_fn, {
+            'prior_indexes_weights_transforms': prior_indexes_weights_transforms,
+            'prior_indexes_biases_transforms': prior_indexes_biases_transforms,
+            'prior_indexes_factors_transforms': prior_indexes_factors_transforms}
+
+    else:
+        raise NotImplementedError
+
+
+class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyModel):
+    def __init__(self,
+                 index_ranges: Tuple[int, ...],
+                 coding_ndim: int,
+                 parameter_fns_type: str = 'transform',
+                 parameter_fns_factory: Callable[..., nn.Module] = None,
+                 num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1),
+                 indexes_bound_gradient: str = 'identity_if_towards',
+                 quantize_indexes: bool = False,
+                 init_scale: int = 10,
+                 tail_mass: float = 2 ** -8,
+                 range_coder_precision: int = 16):
+        parameter_fns, self.indexes_view_fn, modules_to_add = \
+            noisy_deep_factorized_indexed_entropy_model_init(
+                index_ranges, parameter_fns_type, parameter_fns_factory, num_filters
+            )
+        super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).__init__(
+            NoisyDeepFactorized, index_ranges, parameter_fns,
+            coding_ndim, indexes_bound_gradient, quantize_indexes,
+            init_scale, tail_mass, range_coder_precision
+        )
+        for module_name, module in modules_to_add.items():
+            setattr(self, module_name, module)
+
+    @minkowski_tensor_wrapped_fn({1: 0, 2: None})
+    def forward(self, x: torch.Tensor, indexes: torch.Tensor,
+                return_aux_loss: bool = True,
+                additive_uniform_noise: bool = True) \
+            -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
+                     Tuple[torch.Tensor, List[bytes]]]:
+        return super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).forward(
+            x, self.indexes_view_fn(indexes), return_aux_loss, additive_uniform_noise
+        )
+
+    @torch.no_grad()
+    @minkowski_tensor_wrapped_fn({1: 1, 2: None})
+    def compress(self, x: torch.Tensor,
+                 indexes: torch.Tensor,
+                 skip_quantization: bool = False,
+                 return_dequantized: bool = False,
+                 estimate_bits: bool = False) \
+            -> Union[Tuple[List[bytes], torch.Tensor],
+                     Tuple[List[bytes], torch.Tensor, torch.Tensor]]:
+        return super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).compress(
+            x, self.indexes_view_fn(indexes), skip_quantization, return_dequantized, estimate_bits
+        )
+
+    @torch.no_grad()
+    @minkowski_tensor_wrapped_fn({'<del>sparse_tensor_coords_tuple': 0, 2: None})
+    def decompress(self, strings: List[bytes],
+                   indexes: torch.Tensor,
+                   target_device: torch.device,
+                   skip_dequantization: bool = False):
+        super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).decompress(
+            strings, self.indexes_view_fn(indexes), target_device, skip_dequantization
+        )
 
 
 class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
