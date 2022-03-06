@@ -106,9 +106,7 @@ class PCGCEvaluator(Evaluator):
                 write_xyz_to_ply_file(pred, reconstructed_path)
 
                 if self.mpeg_pcc_error_command != '':
-                    if not file_path.endswith('.ply') or \
-                            pc_data.ori_resolution is None or \
-                            pc_data.ori_resolution[idx] != resolution:
+                    if not file_path.endswith('.ply') or pc_data.ori_resolution is None:
                         file_path = out_file_path + '.ply'
                         write_xyz_to_ply_file(target, file_path)
                     mpeg_pc_error_dict = mpeg_pc_error(

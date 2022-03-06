@@ -1,0 +1,49 @@
+model_path: models.mlp_based.randlanet_like.baseline
+
+
+train:
+  rundir_name: 'train_convolutional_<autoindex>'
+  amp: False
+  more_reproducible: True
+  batch_size: 2
+  num_workers: 2
+  optimizer: [AdamW, AdamW, Adam]
+  momentum: [0.9, 0.9, 0.1]
+  weight_decay: [0.0001, 0.0001, 0.0]
+  max_grad_norm: [1.0, 1.0, 0.0]
+
+  learning_rate: [0.0005, 0.0001, 0.005]
+  epochs: 40
+
+  scheduler: Step
+  lr_step_size: 12
+  lr_step_gamma: 0.3
+
+  ckpt_frequency: 1
+  resume_from_ckpt: ''
+  resume_items: ['state_dict']
+  test_frequency: 4
+
+  dataset_path: 'lib.datasets.ShapeNetCorev2'
+  dataset:
+    train_filelist_path: 'obj_train_list.txt'
+    data_format: '.obj'
+    mesh_sample_points_num: 40000
+    random_rotation: True
+    resolution: 0
+    with_resolution: True
+    with_ori_resolution: True
+
+
+test:
+  batch_size: 1
+  num_workers: 2
+  log_frequency: 1
+  save_results: True
+  dataset_path:
+    'lib.datasets.PlyVoxel.Owlii_8iVFBv2'
+  dataset:
+    resolution: 0
+    with_resolution: True
+    with_ori_resolution: True
+    kd_tree_partition_max_points_num: 1500000

@@ -15,9 +15,10 @@ class ModelConfig(SimpleConfig):
     decoder_neighbor_feature_channels: Tuple[int, ...] = (32, 16, 8)
 
     bottleneck_scaler: int = 2 ** 0
+    res_em_index_ranges: Tuple[int, ...] = (16, 16, 16, 16)
 
-    reconstruct_loss_factor: float = 1e4
-    bpp_loss_factor: float = 1
+    reconstruct_loss_factor: float = 1e5
+    bpp_loss_factor: float = 1.
 
     # only for test phase:
     chamfer_dist_test_phase: bool = False

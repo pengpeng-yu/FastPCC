@@ -384,7 +384,7 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
                    indexes: torch.Tensor,
                    target_device: torch.device,
                    skip_dequantization: bool = False):
-        super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).decompress(
+        return super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).decompress(
             strings, self.indexes_view_fn(indexes), target_device, skip_dequantization
         )
 

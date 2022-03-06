@@ -207,8 +207,8 @@ class DistributionQuantizedCDFTable(nn.Module):
             # minima < lower_tail - offset
             # maxima > upper_tail - offset
             # Sightly increase range of pmfs to generate better cdf tables.
-            minima = torch.floor(lower_tail - offset).to(torch.int32) - 5
-            maxima = torch.ceil(upper_tail - offset).to(torch.int32) + 5
+            minima = torch.floor(lower_tail - offset).to(torch.int32) - 10
+            maxima = torch.ceil(upper_tail - offset).to(torch.int32) + 10
             # For stability.
             maxima.clip_(minima)
 

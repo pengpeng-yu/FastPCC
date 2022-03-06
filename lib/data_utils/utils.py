@@ -138,7 +138,9 @@ def pc_data_collate_fn(data_list: List[PCData],
         for key, value in data_dict.items():
             if key == 'xyz':
                 if not sparse_collate:
-                    batched_data_dict[key] = torch.stack(value, dim=0)
+                    batched_data_dict[key] = torch.stack(
+                        [_.to(torch.float32) for _ in value], dim=0
+                    )
                 else:
                     batched_data_dict[key] = ME.utils.batched_coordinates(
                         value, dtype=torch.int32
@@ -180,7 +182,7 @@ def pc_data_collate_fn(data_list: List[PCData],
                 # Add batch dimension.
                 # The first one is supposed to be the original coordinates.
                 if not sparse_collate:
-                    batched_data_dict[key] = [_[None] if idx != 0 else _
+                    batched_data_dict[key] = [_.to(torch.float32)[None] if idx != 0 else _.to(torch.float32)
                                               for idx, _ in enumerate(batched_data_dict[key])]
                 else:
                     batched_data_dict[key] = [ME.utils.batched_coordinates([_], dtype=torch.int32)
