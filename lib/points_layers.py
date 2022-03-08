@@ -116,14 +116,16 @@ class RandLANeighborFea(NeighborFeatureGenerator):
     def __init__(self, neighbor_num):
         super(RandLANeighborFea, self).__init__(neighbor_num, channels=3 + 3 + 3 + 1)
 
-    def forward(self, xyz):
+    def forward(self, xyz, anchor_xyz=None):
+        if anchor_xyz is None:
+            anchor_xyz = xyz
         relative_dists, neighbors_idx, _ = knn_points(
-            xyz, xyz,
+            anchor_xyz, xyz,
             k=self.neighbor_num, return_sorted=False
         )
         neighbors_xyz = index_points(xyz, neighbors_idx)
 
-        expanded_xyz = xyz[:, :, None].expand(-1, -1, neighbors_xyz.shape[2], -1)
+        expanded_xyz = anchor_xyz[:, :, None].expand(-1, -1, neighbors_xyz.shape[2], -1)
         relative_xyz = expanded_xyz - neighbors_xyz
         relative_dists = relative_dists[:, :, :, None]
 
@@ -508,7 +510,8 @@ class LocalFeatureAggregation(nn.Module):
                  neighbor_feature_generator: NeighborFeatureGenerator,
                  raw_neighbor_fea_out_chnls: int,
                  out_channels: int,
-                 cache_out_feature: bool = False):
+                 cache_out_feature: bool = False,
+                 use_shortcut: bool = True):
         super(LocalFeatureAggregation, self).__init__()
         self.neighbor_fea_chnls = in_channels + raw_neighbor_fea_out_chnls
         self.mlp_raw_neighbor_fea = MLPBlock(
@@ -530,7 +533,8 @@ class LocalFeatureAggregation(nn.Module):
         )
         self.mlp_shortcut = MLPBlock(
             in_channels, out_channels,
-            'nn.bn1d', None) if in_channels != 0 else None
+            'nn.bn1d', None
+        ) if in_channels != 0 and use_shortcut is True else None
         self.neighbor_feature_generator = neighbor_feature_generator
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -562,10 +566,10 @@ class LocalFeatureAggregation(nn.Module):
             )
             feature = self.mlp_neighbor_fea(neighbors_feature)
             feature = self.attn_pooling(feature)
-            feature = F.leaky_relu(
-                self.mlp_shortcut(msg.feature) + self.mlp_out(feature),
-                negative_slope=0.2
-            )
+            feature = self.mlp_out(feature)
+            if self.mlp_shortcut is not None: feature = feature + self.mlp_shortcut(msg.feature)
+            feature = F.leaky_relu(feature, negative_slope=0.2)
+
         else:
             assert msg.feature is None and msg.cached_feature == []
             neighbors_feature = raw_neighbors_feature_mlp

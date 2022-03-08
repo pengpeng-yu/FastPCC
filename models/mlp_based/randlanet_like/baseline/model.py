@@ -11,39 +11,44 @@ from lib.loss_functions import chamfer_loss
 from lib.evaluators import PCGCEvaluator
 from lib.points_layers import PointLayerMessage, TransitionDown, RandLANeighborFea, \
     LocalFeatureAggregation as LFA
-from lib.pointnet_utils import index_points, knn_points
 from lib.torch_utils import MLPBlock, concat_loss_dicts
 from models.mlp_based.randlanet_like.baseline.model_config import ModelConfig
 
 
 class Decoder(nn.Module):
-    def __init__(self, in_channel: int, encoder_channels: Tuple[int], decoder_channels: Tuple[int],
-                 decoder_neighbor_feature_channels: Tuple[int], neighbor_fea_generator: RandLANeighborFea,
+    def __init__(self, channels: Tuple[int], neighbor_feature_channels: Tuple[int],
+                 neighbor_fea_generator: RandLANeighborFea,
                  sample_rate: float, res_em_index_ranges: Tuple[int]):
         super(Decoder, self).__init__()
         self.upsample_rate = int(1 / sample_rate)
-        self.decoder_blocks_num = len(decoder_channels)
-        if not encoder_channels[::-1] == decoder_channels:
-            raise NotImplementedError
+        self.blocks_num = len(channels) - 1
 
         self.lfa_list = nn.ModuleList([
-            LFA(decoder_channels[idx] if idx != 0 else in_channel,
+            LFA(channels[idx],
                 neighbor_fea_generator,
-                decoder_neighbor_feature_channels[idx],
-                decoder_channel)
-            for idx, decoder_channel in enumerate(decoder_channels)
+                neighbor_feature_channels[idx],
+                channels[idx] * self.upsample_rate)
+            for idx in range(self.blocks_num)
+        ])
+        self.res_lfa_list = nn.ModuleList([
+            LFA(channels[idx + 1],
+                neighbor_fea_generator,
+                neighbor_feature_channels[idx + 1],
+                channels[idx + 1],
+                use_shortcut=False)
+            for idx in range(self.blocks_num - 1)
         ])
         self.mlp_pred_coord_list = nn.ModuleList([
             MLPBlock(
-                decoder_channel // self.upsample_rate, 3, bn='nn.bn1d', act=None
-            ) for decoder_channel in decoder_channels
+                channels[idx], 3, bn='nn.bn1d', act=None
+            ) for idx in range(self.blocks_num)
         ])
         self.mlp_pred_fea_list = nn.ModuleList([
             MLPBlock(
-                decoder_channel // self.upsample_rate,
-                encoder_channel * len(res_em_index_ranges),
+                channels[idx],
+                channels[idx + 1] * len(res_em_index_ranges),
                 bn='nn.bn1d', act=None
-            ) for encoder_channel, decoder_channel in zip(encoder_channels[-2::-1], decoder_channels[:-1])
+            ) for idx in range(self.blocks_num - 1)
         ])
 
         def parameter_fns_factory(in_channels, out_channels):
@@ -62,13 +67,13 @@ class Decoder(nn.Module):
                 encoder_cached_xyz: List[torch.Tensor],
                 loss_dict: Dict[str, torch.Tensor]):
 
-        for idx in range(self.decoder_blocks_num):
+        for idx in range(self.blocks_num):
             self.update_msg(msg, idx)
-            if idx != self.decoder_blocks_num - 1:
-                res_feature = index_points(
-                    encoder_cached_feature.pop(),
-                    knn_points(msg.xyz, encoder_cached_xyz.pop(), 4).idx
-                ).max(2).values
+            if idx != self.blocks_num - 1:
+                res_feature = self.res_lfa_list[idx](PointLayerMessage(
+                    torch.tensor(()), encoder_cached_feature.pop(),
+                    *self.res_lfa_list[idx].neighbor_feature_generator(encoder_cached_xyz.pop(), msg.xyz)
+                )).feature
                 pred_feature = self.mlp_pred_fea_list[idx](msg.feature)
 
                 msg.feature, sub_loss_dict = self.res_em(res_feature, pred_feature)
@@ -80,12 +85,12 @@ class Decoder(nn.Module):
                  encoder_cached_xyz: List[torch.Tensor]):
         bytes_dict = {}
 
-        for idx in range(self.decoder_blocks_num - 1):
+        for idx in range(self.blocks_num - 1):
             self.update_msg(msg, idx)
-            res_feature = index_points(
-                encoder_cached_feature.pop(),
-                knn_points(msg.xyz, encoder_cached_xyz.pop(), 4).idx
-            ).max(2).values
+            res_feature = self.res_lfa_list[idx](PointLayerMessage(
+                torch.tensor(()), encoder_cached_feature.pop(),
+                *self.res_lfa_list[idx].neighbor_feature_generator(encoder_cached_xyz.pop(), msg.xyz)
+            )).feature
             pred_feature = self.mlp_pred_fea_list[idx](msg.feature)
             bytes_strings, msg.feature = self.res_em.compress(
                 res_feature, pred_feature, return_dequantized=True
@@ -97,9 +102,9 @@ class Decoder(nn.Module):
                    msg: PointLayerMessage,
                    target_device: torch.device):
         fea_bytes_list = self.split_strings(concat_string)
-        for idx in range(self.decoder_blocks_num):
+        for idx in range(self.blocks_num):
             self.update_msg(msg, idx)
-            if idx != self.decoder_blocks_num - 1:
+            if idx != self.blocks_num - 1:
                 pred_feature = self.mlp_pred_fea_list[idx](msg.feature)
                 msg.feature = self.res_em.decompress([fea_bytes_list[idx]], pred_feature, target_device)
         return msg
@@ -163,34 +168,27 @@ class PCC(nn.Module):
             cfg.chamfer_dist_test_phase
         )
         neighbor_fea_generator = RandLANeighborFea(cfg.neighbor_num)
+        blocks_num = len(cfg.channels) - 1
 
         self.encoder = nn.Sequential(
             *[nn.Sequential(
-                LFA(cfg.encoder_channels[idx - 1] if idx != 0 else 3,
+                LFA(cfg.channels[idx],
                     neighbor_fea_generator,
-                    cfg.encoder_neighbor_feature_channels[idx],
-                    ch),
-                LFA(ch,
+                    cfg.neighbor_feature_channels[idx],
+                    cfg.channels[idx + 1]),
+                LFA(cfg.channels[idx + 1],
                     neighbor_fea_generator,
-                    cfg.encoder_neighbor_feature_channels[idx],
-                    ch),
+                    cfg.neighbor_feature_channels[idx],
+                    cfg.channels[idx + 1]),
                 TransitionDown(
                     cfg.sample_method, cfg.sample_rate,
-                    cache_sampled_xyz=idx != len(cfg.encoder_channels) - 1,
-                    cache_sampled_feature=idx != len(cfg.encoder_channels) - 1
+                    cache_sampled_xyz=idx != blocks_num - 1,
+                    cache_sampled_feature=idx != blocks_num - 1
                 )
-            ) for idx, ch in enumerate(cfg.encoder_channels)],
-
-            nn.Sequential(
-                *[LFA(cfg.encoder_channels[-1],
-                      neighbor_fea_generator,
-                      cfg.encoder_neighbor_feature_channels[-1],
-                      cfg.encoder_channels[-1]
-                      ) for _ in range(2)]
-            )
+            ) for idx in range(blocks_num)],
         )
         self.encoder_out_mlp = MLPBlock(
-            cfg.encoder_channels[-1], cfg.compressed_channels,
+            cfg.channels[-1], cfg.compressed_channels,
             bn='nn.bn1d', act=None
         )
 
@@ -201,11 +199,13 @@ class PCC(nn.Module):
             init_scale=5
         )
 
+        self.decoder_in_mlp = MLPBlock(
+            cfg.compressed_channels, cfg.channels[-1],
+            bn='nn.bn1d', act='leaky_relu(0.2)'
+        )
         self.decoder = Decoder(
-            cfg.compressed_channels,
-            cfg.encoder_channels,
-            cfg.decoder_channels,
-            cfg.decoder_neighbor_feature_channels,
+            cfg.channels[::-1],
+            cfg.neighbor_feature_channels[::-1],
             neighbor_fea_generator,
             cfg.sample_rate,
             cfg.res_em_index_ranges
@@ -216,25 +216,27 @@ class PCC(nn.Module):
             raise NotImplementedError
 
         if self.training:
-            encoder_msg: PointLayerMessage = self.encoder(
+            enc_msg: PointLayerMessage = self.encoder(
                 PointLayerMessage(xyz=pc_data.xyz, feature=pc_data.xyz)
             )
-            encoder_msg.feature = self.encoder_out_mlp(encoder_msg.feature).contiguous()
-            encoder_msg.feature *= self.cfg.bottleneck_scaler
-            encoder_msg.feature, loss_dict = self.em(encoder_msg.feature)
-            encoder_msg.feature /= self.cfg.bottleneck_scaler
-            decoder_msg: PointLayerMessage = self.decoder(
-                PointLayerMessage(
-                    xyz=encoder_msg.xyz, feature=encoder_msg.feature,
-                    raw_neighbors_feature=encoder_msg.raw_neighbors_feature,
-                    neighbors_idx=encoder_msg.neighbors_idx),
-                list(encoder_msg.cached_feature), encoder_msg.cached_xyz.copy(), loss_dict
+            enc_msg.feature = self.encoder_out_mlp(enc_msg.feature).contiguous()
+            enc_msg.feature, loss_dict = self.em(enc_msg.feature)
+
+            dec_msg = PointLayerMessage(
+                xyz=enc_msg.xyz, feature=enc_msg.feature,
+                raw_neighbors_feature=enc_msg.raw_neighbors_feature,
+                neighbors_idx=enc_msg.neighbors_idx
+            )
+            dec_msg.feature = self.decoder_in_mlp(dec_msg.feature).contiguous()
+            dec_msg: PointLayerMessage = self.decoder(
+                dec_msg, list(enc_msg.cached_feature),
+                enc_msg.cached_xyz.copy(), loss_dict
             )
 
-            for idx, recon_p in enumerate(decoder_msg.cached_xyz):
+            for idx, recon_p in enumerate(dec_msg.cached_xyz):
                 loss_dict[f'reconstruct_{idx}_loss'] = chamfer_loss(
                     recon_p,
-                    encoder_msg.cached_xyz[-idx - 1] if idx != len(decoder_msg.cached_xyz) - 1 else pc_data.xyz
+                    enc_msg.cached_xyz[-idx - 1] if idx != len(dec_msg.cached_xyz) - 1 else pc_data.xyz
                 ) * self.cfg.reconstruct_loss_factor
             for key in loss_dict:
                 if key.endswith('bits_loss'):
@@ -257,29 +259,33 @@ class PCC(nn.Module):
                 bottom_bytes_list = []
                 res_bytes_list = []
                 for sub_xyz in pc_data.xyz[1:]:
-                    encoder_msg: PointLayerMessage = self.encoder(
+                    enc_msg: PointLayerMessage = self.encoder(
                         PointLayerMessage(xyz=sub_xyz, feature=sub_xyz)
                     )
-                    encoder_msg.feature = self.encoder_out_mlp(encoder_msg.feature).contiguous()
-                    encoder_msg.feature *= self.cfg.bottleneck_scaler
-                    fea_recon, (bottom_bytes, ), coding_batch_shape = self.em(encoder_msg.feature)
-                    fea_recon /= self.cfg.bottleneck_scaler
+                    enc_msg.feature = self.encoder_out_mlp(enc_msg.feature).contiguous()
+                    (bottom_bytes, ), coding_batch_shape, bottom_fea_recon = self.em.compress(
+                        enc_msg.feature, return_dequantized=True
+                    )
                     bottom_bytes_list.append(bottom_bytes)
 
-                    # TODO: split enc and dec into individual loops
-                    decoder_msg, res_bytes = self.decoder.compress(
-                        PointLayerMessage(xyz=encoder_msg.xyz, feature=fea_recon),
-                        list(encoder_msg.cached_feature), encoder_msg.cached_xyz
-                    )
-                    decoder_msg = self.decoder.decompress(
-                        res_bytes,
-                        PointLayerMessage(xyz=encoder_msg.xyz, feature=fea_recon),
-                        next(self.parameters()).device
+                    dec_msg = PointLayerMessage(xyz=enc_msg.xyz, feature=bottom_fea_recon)
+                    dec_msg.feature = self.decoder_in_mlp(dec_msg.feature).contiguous()
+                    dec_msg, res_bytes = self.decoder.compress(
+                        dec_msg, list(enc_msg.cached_feature), enc_msg.cached_xyz
                     )
                     res_bytes_list.append(res_bytes)
-                    pc_recon_list.append(decoder_msg.xyz)
-                    del encoder_msg, decoder_msg
+
                     torch.cuda.empty_cache()
+                    # TODO: split enc and dec into individual loops
+
+                    target_device = next(self.parameters()).device
+                    bottom_fea_recon_ = self.em.decompress([bottom_bytes], coding_batch_shape, target_device)
+                    dec_msg = PointLayerMessage(xyz=enc_msg.xyz, feature=bottom_fea_recon_)
+                    dec_msg.feature = self.decoder_in_mlp(dec_msg.feature).contiguous()
+                    dec_msg = self.decoder.decompress(
+                        res_bytes, dec_msg, target_device
+                    )
+                    pc_recon_list.append(dec_msg.xyz)
 
                 pc_recon = torch.cat([pc_recon for pc_recon in pc_recon_list], 1)
                 with io.BytesIO() as bs:
