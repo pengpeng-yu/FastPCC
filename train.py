@@ -16,6 +16,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.cuda import amp
 from torch.utils.tensorboard import SummaryWriter
+from torch.nn.modules.module import _EXTRA_STATE_KEY_SUFFIX as MODULE_EXTRA_STATE_KEY_SUFFIX
 
 from test import test
 from lib.config import Config
@@ -150,6 +151,17 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         logger.info('using DataParallel')
     elif device.type != 'cpu' and global_rank != -1:
         logger.info('using DistributedDataParallel')
+        # Old versions of pytorch infer params and buffers from state dict in DDP module,
+        # which may causes error of broadcasting if a model has non tensor states.
+        # (lib.entropy_models.continuous_base.DistributionQuantizedCDFTable._extra_state, in my case.)
+        # Explicit named_params and named_buffers is used since this pull,
+        # https://github.com/pytorch/pytorch/pull/65181.
+        # For backward compatibility, I ignore all the "_extra_state" as a simple workaround.
+        dpp_params_and_buffers_to_ignore = []
+        for state_name in model.state_dict():
+            if state_name.endswith(MODULE_EXTRA_STATE_KEY_SUFFIX):
+                dpp_params_and_buffers_to_ignore.append(state_name)
+        DDP._set_params_and_buffers_to_ignore_for_model(model, dpp_params_and_buffers_to_ignore)
         model = DDP(model.to(device), device_ids=[local_rank], output_device=local_rank,
                     find_unused_parameters=cfg.train.find_unused_parameters)
         if not cfg.train.shuffle:
