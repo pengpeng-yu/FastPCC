@@ -29,35 +29,35 @@ def init_torch_seeds(seed=0):
         cudnn.benchmark, cudnn.deterministic = True, False
 
 
-def select_device(logger, local_rank, device='', batch_size=None):
-    # device = 'cpu' or '0' or '0,1,2,3'
+def select_device(logger, local_rank, device='', batch_size=None) -> Tuple[torch.device, List[int]]:
+    # device = 'cpu' or 'Cuda:0,' or '0,1,2,3'
     s = ''
-    cpu = device.lower() == 'cpu'
-    if cpu:
-        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # force torch.cuda.is_available() = False
-    elif device:  # non-cpu device requested
-        os.environ['CUDA_VISIBLE_DEVICES'] = device  # set environment variable
-        assert torch.cuda.is_available(), f'CUDA unavailable, invalid device {device} requested'  # check availability
-
-    cuda = not cpu and torch.cuda.is_available()
+    device = str(device).strip().lower().replace('cuda:', '')
+    cuda = device.lower() != 'cpu'
     if cuda:
-        n = torch.cuda.device_count()
+        devices = [int(_) for _ in device.split(',') if _] if device else '0'
+        n = len(devices)
+        assert torch.cuda.is_available() and torch.cuda.device_count() >= n, \
+            f'CUDA unavailable, invalid device {device} requested'
         if n > 1 and batch_size:  # check that batch_size is compatible with device_count
             assert batch_size % n == 0, f'batch-size {batch_size} not multiple of GPU count {n}'
-        space = ' ' * len(s)
-        for i, d in enumerate(device.split(',') if device else range(n)):
+        for i, d in enumerate(devices):
             p = torch.cuda.get_device_properties(i)
-            s += f"{'' if i == 0 else space} CUDA:{d} ({p.name}, {p.total_memory / 1024 ** 2}MB)"  # bytes to MB
+            s += f" CUDA:{d} ({p.name}, {p.total_memory / (1 << 20):.0f}MiB)"  # bytes to MB
+        if local_rank == -1:
+            cuda_ids = devices
+            torch_device = torch.device('cuda:0')
+        else:
+            assert 0 <= local_rank < n
+            cuda_ids = [devices[local_rank]]
+            torch_device = torch.device('cuda', cuda_ids[0])
     else:
         s += 'CPU'
+        cuda_ids = [-1]
+        torch_device = torch.device('cpu')
 
     logger.info(s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s)  # emoji-safe
-    if cuda and local_rank == -1:
-        return torch.device('cuda:0')
-    elif cuda and local_rank != -1:
-        return torch.device('cuda', local_rank)
-    else:
-        return torch.device('cpu')
+    return torch_device, cuda_ids
 
 
 def is_parallel(model):

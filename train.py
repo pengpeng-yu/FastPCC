@@ -92,8 +92,11 @@ def main():
             logger.error(f'fail to launch Tensorboard')
             raise e
 
-        train(cfg, local_rank, logger, tb_writer, run_dir, ckpts_dir)
-        
+        try:
+            train(cfg, local_rank, logger, tb_writer, run_dir, ckpts_dir)
+        finally:
+            tb_proc.kill()
+
     else:
         train(cfg, local_rank, logger)
 
@@ -102,10 +105,10 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     # Parallel training
     world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
-    device = torch_utils.select_device(logger, local_rank, cfg.train.device, cfg.train.batch_size)
+    device, cuda_ids = torch_utils.select_device(logger, local_rank, cfg.train.device, cfg.train.batch_size)
+    torch.cuda.set_device(device)
 
     if local_rank != -1:
-        torch.cuda.set_device(local_rank)
         dist.init_process_group(backend='nccl', init_method='env://')
         assert cfg.train.batch_size % world_size == 0, '--batch-size must be multiple of CUDA device count'
         process_batch_size = cfg.train.batch_size // world_size
@@ -138,23 +141,23 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             assert len(cfg.train.optimizer) == 1
             params_divider: Callable[[str], int] = lambda s: 0
 
-    if device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() == 1 and False:  # disabled
+    if cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) == 1 and False:  # disabled
         model = model.to(device)
         logger.info('using single GPU')
-    elif device.type != 'cpu' and global_rank == -1 and torch.cuda.device_count() >= 1:
-        if torch.cuda.device_count() > 1:
-            logger.error('These are bugs with DP mode when device_count() > 1 due to the output format of model. '
-                         'Please use DDP')
+    elif cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) >= 1:
+        if len(cuda_ids) > 1:
+            logger.error('These are designs incompatible with DP mode when using '
+                         'more than one cuda devices. Please use DDP.')
             logger.error('terminated')
             raise NotImplementedError
-        model = torch.nn.DataParallel(model.to(device))
+        model = torch.nn.DataParallel(model.to(device), device_ids=cuda_ids)
         logger.info('using DataParallel')
-    elif device.type != 'cpu' and global_rank != -1:
+    elif cuda_ids[0] != -1 and global_rank != -1:
         logger.info('using DistributedDataParallel')
         # Old versions of pytorch infer params and buffers from state dict in DDP module,
         # which may causes error of broadcasting if a model has non tensor states.
         # (lib.entropy_models.continuous_base.DistributionQuantizedCDFTable._extra_state, in my case.)
-        # Explicit named_params and named_buffers is used since this pull,
+        # Explicit named_params and named_buffers are used since this pull,
         # https://github.com/pytorch/pytorch/pull/65181.
         # For backward compatibility, I ignore all the "_extra_state" as a simple workaround.
         dpp_params_and_buffers_to_ignore = []
