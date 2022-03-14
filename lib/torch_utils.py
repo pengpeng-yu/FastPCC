@@ -46,7 +46,7 @@ def select_device(logger, local_rank, device='', batch_size=None) -> Tuple[torch
             s += f" CUDA:{d} ({p.name}, {p.total_memory / (1 << 20):.0f}MiB)"  # bytes to MB
         if local_rank == -1:
             cuda_ids = devices
-            torch_device = torch.device('cuda:0')
+            torch_device = torch.device('cuda', cuda_ids[0])
         else:
             assert 0 <= local_rank < n
             cuda_ids = [devices[local_rank]]
