@@ -41,8 +41,8 @@ def select_device(logger, local_rank, device='', batch_size=None) -> Tuple[torch
             f'CUDA unavailable, invalid device {device} requested'
         if n > 1 and batch_size:  # check that batch_size is compatible with device_count
             assert batch_size % n == 0, f'batch-size {batch_size} not multiple of GPU count {n}'
-        for i, d in enumerate(devices):
-            p = torch.cuda.get_device_properties(i)
+        for d in devices:
+            p = torch.cuda.get_device_properties(int(d))
             s += f" CUDA:{d} ({p.name}, {p.total_memory / (1 << 20):.0f}MiB)"  # bytes to MB
         if local_rank == -1:
             cuda_ids = devices
