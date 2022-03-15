@@ -29,8 +29,8 @@ from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specializ
 from models.convolutional.baseline.layers import \
     Encoder, Decoder, \
     HyperEncoder, HyperDecoder, \
-    HyperDecoderCoordForGeoLossLess, HyperDecoderFeaForGeoLossLess, \
-    EncoderForGeoLossLess
+    HyperDecoderCoordForGeoLossless, HyperDecoderFeaForGeoLossless, \
+    EncoderForGeoLossless
 from models.convolutional.baseline.model_config import ModelConfig
 
 
@@ -152,13 +152,13 @@ class PCC(nn.Module):
 
         elif cfg.lossless_based:
             assert cfg.hyperprior == 'None'
-            encoder_geo_lossless = EncoderForGeoLossLess(
+            encoder_geo_lossless = EncoderForGeoLossless(
                 cfg.lossless_coder_channels,
                 cfg.compressed_channels,
                 cfg.encoder_scaler,
                 *basic_block_args
             )
-            hyper_decoder_coord_geo_lossless = HyperDecoderCoordForGeoLossLess(
+            hyper_decoder_coord_geo_lossless = HyperDecoderCoordForGeoLossless(
                 1 / cfg.encoder_scaler,
                 cfg.prior_indexes_scaler,
                 cfg.compressed_channels,
@@ -166,7 +166,7 @@ class PCC(nn.Module):
                 (cfg.lossless_coder_channels,),
                 *basic_block_args
             )
-            hyper_decoder_fea_geo_lossless = HyperDecoderFeaForGeoLossLess(
+            hyper_decoder_fea_geo_lossless = HyperDecoderFeaForGeoLossless(
                 1 / cfg.encoder_scaler,
                 cfg.prior_indexes_scaler,
                 cfg.compressed_channels,

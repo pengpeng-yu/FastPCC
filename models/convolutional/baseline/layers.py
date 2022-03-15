@@ -280,27 +280,7 @@ class DecoderBlock(nn.Module):
         return str(self.generative_upsample)
 
 
-class DecoderWithValueScaler(nn.Module):
-    def __init__(self, value_scaler: float, blocks: nn.Sequential):
-        super(DecoderWithValueScaler, self).__init__()
-        self.value_scaler = value_scaler
-        self.blocks = blocks
-
-    def forward(self, msg: GenerativeUpsampleMessage):
-        if self.value_scaler != 1:
-            msg.fea = minkowski_tensor_wrapped_op(
-                msg.fea, lambda _: _ * self.value_scaler
-            )
-        return self.blocks(msg)
-
-    def __getitem__(self, idx):
-        return DecoderWithValueScaler(self.value_scaler, self.blocks[idx])
-
-    def __len__(self):
-        return len(self.blocks)
-
-
-class Decoder(DecoderWithValueScaler):
+class Decoder(nn.Module):
     def __init__(self,
                  in_channels,
                  intra_channels: Tuple[int, ...],
@@ -312,7 +292,9 @@ class Decoder(DecoderWithValueScaler):
                  use_batch_norm: bool,
                  act: Optional[str],
                  **kwargs):
-        blocks = nn.Sequential(*[
+        super(Decoder, self).__init__()
+        self.value_scaler = value_scaler
+        self.blocks = nn.Sequential(*[
             DecoderBlock(
                 in_channels if idx == 0 else intra_channels[idx - 1],
                 ch, ch,
@@ -325,7 +307,13 @@ class Decoder(DecoderWithValueScaler):
                 **kwargs
             ) for idx, ch in enumerate(intra_channels)]
         )
-        super(Decoder, self).__init__(value_scaler, blocks)
+
+    def forward(self, msg: GenerativeUpsampleMessage):
+        if self.value_scaler != 1:
+            msg.fea = minkowski_tensor_wrapped_op(
+                msg.fea, lambda _: _ * self.value_scaler
+            )
+        return self.blocks(msg)
 
 
 class HyperCoder(nn.Module):
@@ -406,11 +394,11 @@ class HyperCoder(nn.Module):
 
 HyperEncoder = partial(HyperCoder, 'encoder')
 HyperDecoder = partial(HyperCoder, 'decoder')
-HyperDecoderCoordForGeoLossLess = partial(HyperCoder, 'generative_upsample_decoder')
-HyperDecoderFeaForGeoLossLess = partial(HyperCoder, 'upsample_decoder')
+HyperDecoderCoordForGeoLossless = partial(HyperCoder, 'generative_upsample_decoder')
+HyperDecoderFeaForGeoLossless = partial(HyperCoder, 'upsample_decoder')
 
 
-class EncoderForGeoLossLess(nn.Module):
+class EncoderForGeoLossless(nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
@@ -420,7 +408,7 @@ class EncoderForGeoLossLess(nn.Module):
                  basic_block_num: int,
                  use_batch_norm: bool,
                  act: Optional[str]):
-        super(EncoderForGeoLossLess, self).__init__()
+        super(EncoderForGeoLossless, self).__init__()
         hidden_channels = in_channels
         gate_channels = 1 * hidden_channels
         self.conv_h = ConvBlock(

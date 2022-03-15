@@ -93,7 +93,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
                 logger.warning(incompatible_keys)
         else:
             logger.warning(f'no weight is loaded')
-        device = torch_utils.select_device(
+        device, cuda_ids = torch_utils.select_device(
             logger,
             local_rank=-1,
             device=cfg.test.device
