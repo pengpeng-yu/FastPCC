@@ -106,7 +106,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
     device, cuda_ids = torch_utils.select_device(logger, local_rank, cfg.train.device, cfg.train.batch_size)
-    torch.cuda.set_device(device)
 
     if local_rank != -1:
         dist.init_process_group(backend='nccl', init_method='env://')

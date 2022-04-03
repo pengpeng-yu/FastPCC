@@ -156,7 +156,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
         # cache and return
         return_obj = PCData(
             xyz=torch.from_numpy(xyz),
-            normals=torch.from_numpy(normals),
+            normal=torch.from_numpy(normals),
             class_idx=cls_idx,
             file_path=file_path if self.cfg.with_file_path else None,
             resolution=self.cfg.resolution if self.cfg.with_resolution else None

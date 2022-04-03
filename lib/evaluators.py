@@ -30,7 +30,7 @@ class Evaluator:
         raise NotImplementedError
 
 
-class PCGCEvaluator(Evaluator):
+class PCGCEvaluator(Evaluator):  # TODO: color
     def __init__(self,
                  mpeg_pcc_error_command: str,
                  mpeg_pcc_error_threads: int,

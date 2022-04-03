@@ -246,3 +246,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
         )
         for module_name, module in modules_to_add.items():
             setattr(self, module_name, module)
+
+    def _apply(self, fn):
+        super(NoisyDeepFactorizedEntropyModel, self)._apply(fn)
+        self.prior_entropy_model.update_prior()

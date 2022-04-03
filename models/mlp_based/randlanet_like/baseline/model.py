@@ -59,7 +59,9 @@ class Decoder(nn.Module):
                           bias=True)
             )
         self.res_em = ContinuousNoisyDeepFactorizedIndexedEntropyModel(
-            res_em_index_ranges, 2, parameter_fns_factory=parameter_fns_factory
+            res_em_index_ranges, 2,
+            parameter_fns_factory=parameter_fns_factory,
+            quantize_indexes=True
         )
 
     def forward(self, msg: PointLayerMessage,
@@ -212,7 +214,7 @@ class PCC(nn.Module):
         )
 
     def forward(self, pc_data: PCData):
-        if not (pc_data.colors is None and pc_data.normals is None):
+        if not (pc_data.color is None and pc_data.normal is None):
             raise NotImplementedError
 
         if self.training:

@@ -20,7 +20,10 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                  coding_ndim: int,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
+                 lower_bound: Union[int, torch.Tensor] = 0,
+                 upper_bound: Union[int, torch.Tensor] = -1,
                  range_coder_precision: int = 16,
+                 overflow_coding: bool = True,
                  broadcast_shape_bytes: Tuple[int, ...] = (2,)):
         """
         Generally, prior object should have parameters on target device when being
@@ -39,7 +42,10 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             coding_ndim=coding_ndim,
             init_scale=init_scale,
             tail_mass=tail_mass,
-            range_coder_precision=range_coder_precision
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            range_coder_precision=range_coder_precision,
+            overflow_coding=overflow_coding
         )
         assert coding_ndim >= self.prior.batch_ndim
         self.broadcast_shape_bytes = broadcast_shape_bytes
@@ -183,7 +189,10 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
                  num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
+                 lower_bound: Union[int, torch.Tensor] = 0,
+                 upper_bound: Union[int, torch.Tensor] = -1,
                  range_coder_precision: int = 16,
+                 overflow_coding: bool = True,
                  broadcast_shape_bytes: Tuple[int, ...] = (2,)):
         prior_weights, prior_biases, prior_factors = \
             DeepFactorized.make_parameters(
@@ -199,7 +208,10 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
             coding_ndim=coding_ndim,
             init_scale=init_scale,
             tail_mass=tail_mass,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
             range_coder_precision=range_coder_precision,
+            overflow_coding=overflow_coding,
             broadcast_shape_bytes=broadcast_shape_bytes
         )
         # Keep references to ParameterList objects here to make them a part of state dict.

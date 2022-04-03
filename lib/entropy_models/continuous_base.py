@@ -27,33 +27,48 @@ class DistributionQuantizedCDFTable(nn.Module):
     """
     def __init__(self,
                  base: Distribution,
-                 init_scale: int = 10,
-                 tail_mass: float = 2 ** -8,
-                 cdf_precision: int = 16,
+                 init_scale: int,
+                 tail_mass: float,
+                 lower_bound: Union[int, torch.Tensor],
+                 upper_bound: Union[int, torch.Tensor],
+                 cdf_precision: int,
+                 overflow_coding: bool
                  ):
         super(DistributionQuantizedCDFTable, self).__init__()
         self.base = base
         self.init_scale = init_scale
         self.tail_mass = tail_mass
         self.cdf_precision = cdf_precision
+        self.overflow_coding = overflow_coding
+
+        is_valid = upper_bound >= lower_bound
+        if isinstance(is_valid, torch.Tensor):
+            is_valid = torch.all(is_valid)
+        self.if_estimate_tail = not is_valid
+
+        if self.if_estimate_tail:
+            self.estimate_tail()
+        else:
+            self.register_buffer(
+                'lower_bound',
+                lower_bound if isinstance(lower_bound, torch.Tensor)
+                else torch.tensor(lower_bound, dtype=torch.int32).expand(self.batch_shape),
+                persistent=False
+            )
+            self.register_buffer(
+                'upper_bound',
+                upper_bound if isinstance(upper_bound, torch.Tensor)
+                else torch.tensor(upper_bound, dtype=torch.int32).expand(self.batch_shape),
+                persistent=False
+            )
 
         self.cdf_list: List[List[int]] = [[]]
         self.cdf_offset_list: List[int] = []
         self.requires_updating_cdf_table: bool = True
-        self.range_coder = IndexedRansCoder(self.cdf_precision)
+        self.range_coder = IndexedRansCoder(self.cdf_precision, self.overflow_coding)
 
         if len(base.event_shape) != 0:
             raise NotImplementedError
-
-        try:
-            _ = self.base.cdf(0.5)
-        except NotImplementedError:
-            self.base_cdf_available = False
-        else:
-            self.base_cdf_available = True
-
-        if not self.base_cdf_available:
-            self.estimate_tail()
 
     def update_base(self, new_base: Distribution):
         assert type(new_base) is type(self.base)
@@ -175,7 +190,7 @@ class DistributionQuantizedCDFTable(nn.Module):
         Distribution with learnable params is supposed to have
         "stop_gradient" arg in their "e_functions".
         """
-        if self.e_input_values == self.e_functions == self.e_target_values == []:
+        if not self.if_estimate_tail:
             return 0
         else:
             loss = []
@@ -194,13 +209,13 @@ class DistributionQuantizedCDFTable(nn.Module):
 
     @torch.no_grad()
     def build_quantized_cdf_table(self):
-        if self.base_cdf_available:
-            raise NotImplementedError
+        offset = quantization_offset(self.base)
+
+        if not self.if_estimate_tail:
+            minima = self.lower_bound
+            maxima = self.upper_bound
 
         else:
-            # TODO(jonycgn, relational): Consider not using offset when soft quantization is used.
-            offset = quantization_offset(self.base)
-
             lower_tail = self.lower_tail()
             upper_tail = self.upper_tail()
 
@@ -212,40 +227,40 @@ class DistributionQuantizedCDFTable(nn.Module):
             # For stability.
             maxima.clip_(minima)
 
-            # PMF starting positions and lengths.
-            pmf_start = minima + offset
-            pmf_length = maxima - minima + 1
+        # PMF starting positions and lengths.
+        pmf_start = minima + offset
+        pmf_length = maxima - minima + 1
 
-            # Sample the densities in the computed ranges, possibly computing more
-            # samples than necessary at the upper end.
-            max_length = pmf_length.max().item()
-            if max_length > 2048:
-                print(f"Very wide PMF with {max_length} elements may lead to out of memory issues. "
-                      "Consider priors with smaller dispersion or increasing `tail_mass` parameter.")
-            samples = torch.arange(max_length, device=pmf_start.device)
-            samples = samples.reshape(max_length,
-                                      *[1] * len(self.base.batch_shape))
-            samples = samples + pmf_start[None, ...]  # broadcast
+        # Sample the densities in the computed ranges, possibly computing more
+        # samples than necessary at the upper end.
+        max_length = pmf_length.max().item()
+        if max_length > 2048:
+            print(f"Very wide PMF with {max_length} elements may lead to out of memory issues. "
+                  "Consider priors with smaller dispersion or increasing `tail_mass` parameter.")
+        samples = torch.arange(max_length, device=pmf_start.device)
+        samples = samples.reshape(max_length,
+                                  *[1] * len(self.base.batch_shape))
+        samples = samples + pmf_start[None, ...]  # broadcast
 
-            if hasattr(self.base, 'prob'):
-                pmf = self.base.prob(samples)
-            else:
-                pmf = torch.exp(self.base.log_prob(samples))
+        if hasattr(self.base, 'prob'):
+            pmf = self.base.prob(samples)
+        else:
+            pmf = torch.exp(self.base.log_prob(samples))
 
-            # Collapse batch dimensions of distribution.
-            pmf = pmf.reshape(max_length, -1).T
-            pmf_length = pmf_length.reshape(-1)
-            cdf_offset = minima.reshape(-1)
+        # Collapse batch dimensions of distribution.
+        pmf = pmf.reshape(max_length, -1).T
+        pmf_length = pmf_length.reshape(-1)
+        cdf_offset = minima.reshape(-1)
 
-            pmf_list = []
-            for i in range(len(pmf_length)):
-                single_pmf = pmf[i][: pmf_length[i]].tolist()
-                pmf_list.append(single_pmf)
-            self.cdf_list, self.cdf_offset_list = batched_pmf_to_quantized_cdf(
-                pmf_list, cdf_offset.tolist(), self.cdf_precision
-            )
-            self.requires_updating_cdf_table = False
-            self.range_coder.init_with_quantized_cdfs(self.cdf_list, self.cdf_offset_list)
+        pmf_list = []
+        for i in range(len(pmf_length)):
+            single_pmf = pmf[i][: pmf_length[i]].tolist()
+            pmf_list.append(single_pmf)
+        self.cdf_list, self.cdf_offset_list = batched_pmf_to_quantized_cdf(
+            pmf_list, cdf_offset.tolist(), self.cdf_precision, self.overflow_coding
+        )
+        self.requires_updating_cdf_table = False
+        self.range_coder.init_with_quantized_cdfs(self.cdf_list, self.cdf_offset_list)
 
     def get_extra_state(self):
         return self.cdf_list, self.cdf_offset_list, self.requires_updating_cdf_table
@@ -271,66 +286,17 @@ class DistributionQuantizedCDFTable(nn.Module):
                 self.build_quantized_cdf_table()
         return super(DistributionQuantizedCDFTable, self).train(mode=mode)
 
-    def _apply(self, fn):
-        """
-        Code from nn.Module._apply function.
-        """
-        def compute_should_use_set_data(tensor, tensor_applied):
-            # noinspection PyUnresolvedReferences,PyProtectedMember
-            if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
-                return not torch.__future__.get_overwrite_module_params_on_conversion()
-            else:
-                return False
-
-        def distribution_param_apply(obj):
-            for var_name, var in obj.__dict__.items():
-                if isinstance(var, nn.Parameter):
-                    with torch.no_grad():
-                        param_applied = fn(var)
-                    should_use_set_data = \
-                        compute_should_use_set_data(var, param_applied)
-                    if should_use_set_data:
-                        var.data = param_applied
-                    else:
-                        assert var.is_leaf
-                        obj.__dict__[var_name] = \
-                            nn.Parameter(param_applied, var.requires_grad)
-
-                    if var.grad is not None:
-                        with torch.no_grad():
-                            grad_applied = fn(var.grad)
-                        should_use_set_data = \
-                            compute_should_use_set_data(var.grad, grad_applied)
-                        if should_use_set_data:
-                            var.grad.data = grad_applied
-                        else:
-                            assert var.grad.is_leaf
-                            obj.__dict__[var_name].grad = \
-                                grad_applied.requires_grad_(var.grad.requires_grad)
-                    obj.__dict__[var_name].data = param_applied
-
-                elif isinstance(var, torch.Tensor):
-                    obj.__dict__[var_name] = fn(var)
-
-                elif isinstance(var, List):
-                    for i, v in enumerate(var):
-                        if isinstance(v, torch.Tensor):
-                            var[i] = fn(v)
-
-                elif isinstance(var, Distribution):
-                    distribution_param_apply(var)
-
-        distribution_param_apply(self.base)
-        super(DistributionQuantizedCDFTable, self)._apply(fn)
-
 
 class ContinuousEntropyModelBase(nn.Module):
     def __init__(self,
                  prior: Distribution,
                  coding_ndim: int,
-                 init_scale: int = 10,
-                 tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16):
+                 init_scale: int,
+                 tail_mass: float,
+                 lower_bound: Union[int, torch.Tensor],
+                 upper_bound: Union[int, torch.Tensor],
+                 range_coder_precision: int,
+                 overflow_coding: bool):
         super(ContinuousEntropyModelBase, self).__init__()
         # "self.prior" is supposed to be able to generate
         # flat quantized CDF table used by range coder.
@@ -338,7 +304,10 @@ class ContinuousEntropyModelBase(nn.Module):
             base=prior,
             init_scale=init_scale,
             tail_mass=tail_mass,
-            cdf_precision=range_coder_precision
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            cdf_precision=range_coder_precision,
+            overflow_coding=overflow_coding
         )
         self.coding_ndim = coding_ndim
 

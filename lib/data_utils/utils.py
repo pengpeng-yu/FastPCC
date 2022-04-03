@@ -77,13 +77,13 @@ def im_data_collate_fn(data_list: List[IMData],
 
 
 class PCData(SampleData):
-    tensor_to_tensor_items = ('colors', 'normals')
+    tensor_to_tensor_items = ('color', 'normal')
     list_to_tensor_items = ('class_idx',)
 
     def __init__(self,
                  xyz: Union[torch.Tensor, List[torch.Tensor]],
-                 colors: Union[torch.Tensor, List[torch.Tensor]] = None,
-                 normals: Union[torch.Tensor, List[torch.Tensor]] = None,
+                 color: Union[torch.Tensor, List[torch.Tensor]] = None,
+                 normal: Union[torch.Tensor, List[torch.Tensor]] = None,
                  class_idx: Union[int, torch.Tensor] = None,
                  ori_resolution: Union[int, List[int]] = None,
                  resolution: Union[int, List[int]] = None,
@@ -95,8 +95,8 @@ class PCData(SampleData):
         """
         super(PCData, self).__init__()
         self.xyz = xyz
-        self.colors = colors
-        self.normals = normals
+        self.color = color
+        self.normal = normal
         self.class_idx = class_idx
         self.ori_resolution = ori_resolution
         self.resolution = resolution

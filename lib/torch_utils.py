@@ -56,6 +56,7 @@ def select_device(logger, local_rank, device='', batch_size=None) -> Tuple[torch
         cuda_ids = [-1]
         torch_device = torch.device('cpu')
 
+    torch.cuda.set_device(torch_device)
     logger.info(s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s)  # emoji-safe
     return torch_device, cuda_ids
 

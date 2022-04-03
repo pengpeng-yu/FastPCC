@@ -3,7 +3,9 @@
 #include "cdf_ops.cpp"
 
 
-IndexedRansCoder::IndexedRansCoder(uint32_t precision) : precision(precision)
+IndexedRansCoder::IndexedRansCoder(
+    uint32_t precision, bool overflow_coding
+) : precision(precision), overflow_coding(overflow_coding)
 {
     assert(precision <= 16 && precision > 0);
     bin_esyms.resize(2);
@@ -18,7 +20,7 @@ int IndexedRansCoder::init_with_pmfs(
     std::vector<std::vector<double>> &pmfs,
     std::vector<int32_t> &offsets)
 {
-    auto &&ret = batched_pmf_to_quantized_cdf(pmfs, offsets, precision);
+    auto &&ret = batched_pmf_to_quantized_cdf(pmfs, offsets, precision, overflow_coding);
     return init_with_quantized_cdfs(std::get<0>(ret), std::get<1>(ret));
 }
 
@@ -102,32 +104,35 @@ std::vector<py::bytes> IndexedRansCoder::encode_with_indexes(
             assert(cdf_idx >= 0);
             assert(cdf_idx < esyms_list.size());
 
-            const int32_t sign = value < 0;
-            const int32_t max_value = esyms.size() - 1;
-            int32_t gamma;
-            if (sign)
+            if (overflow_coding)
             {
-                gamma = -value;
-                value = max_value;
-            }
-            else if (value >= max_value)
-            {
-                gamma = value - max_value + 1;
-                value = max_value;
-            }
-            if (value == max_value)
-            {
-                RansEncPutSymbol(&rans, &ptr, &bin_esyms[sign]);
-                int32_t n = 0;
-                while (gamma != 0)
+                const int32_t sign = value < 0;
+                const int32_t max_value = esyms.size() - 1;
+                int32_t gamma;
+                if (sign)
                 {
-                    RansEncPutSymbol(&rans, &ptr, &bin_esyms[gamma & 1]);
-                    gamma >>= 1;
-                    ++n;
+                    gamma = -value;
+                    value = max_value;
                 }
-                while (--n > 0)
+                else if (value >= max_value)
                 {
-                    RansEncPutSymbol(&rans, &ptr, &bin_esyms[0]);
+                    gamma = value - max_value + 1;
+                    value = max_value;
+                }
+                if (value == max_value)
+                {
+                    RansEncPutSymbol(&rans, &ptr, &bin_esyms[sign]);
+                    int32_t n = 0;
+                    while (gamma != 0)
+                    {
+                        RansEncPutSymbol(&rans, &ptr, &bin_esyms[gamma & 1]);
+                        gamma >>= 1;
+                        ++n;
+                    }
+                    while (--n > 0)
+                    {
+                        RansEncPutSymbol(&rans, &ptr, &bin_esyms[0]);
+                    }
                 }
             }
 
@@ -171,26 +176,29 @@ std::vector<std::vector<int32_t>> IndexedRansCoder::decode_with_indexes(
             int32_t value = cum2sym[RansDecGet(&rans, precision)];
             RansDecAdvanceSymbol(&rans, &ptr, &dsyms[value], precision);
 
-            const int32_t max_value = dsyms.size() - 1;
-            if (value == max_value)
+            if (overflow_coding)
             {
-                int32_t n = 0;
-                while (RansDecGet(&rans, 1) == 0)
+                const int32_t max_value = dsyms.size() - 1;
+                if (value == max_value)
                 {
-                    ++n;
-                    RansDecAdvanceSymbol(&rans, &ptr, &bin_dsyms[0], 1);
+                    int32_t n = 0;
+                    while (RansDecGet(&rans, 1) == 0)
+                    {
+                        ++n;
+                        RansDecAdvanceSymbol(&rans, &ptr, &bin_dsyms[0], 1);
+                    }
+                    RansDecAdvanceSymbol(&rans, &ptr, &bin_dsyms[1], 1);
+                    value = 1 << n;
+                    while (--n >= 0)
+                    {
+                        int32_t bit = RansDecGet(&rans, 1);
+                        RansDecAdvanceSymbol(&rans, &ptr, &bin_dsyms[bit], 1);
+                        value |= bit << n;
+                    }
+                    int32_t sign = RansDecGet(&rans, 1);
+                    RansDecAdvanceSymbol(&rans, &ptr, &bin_dsyms[sign], 1);
+                    value = sign ? -value : value + max_value - 1;
                 }
-                RansDecAdvanceSymbol(&rans, &ptr, &bin_dsyms[1], 1);
-                value = 1 << n;
-                while (--n >= 0)
-                {
-                    int32_t bit = RansDecGet(&rans, 1);
-                    RansDecAdvanceSymbol(&rans, &ptr, &bin_dsyms[bit], 1);
-                    value |= bit << n;
-                }
-                int32_t sign = RansDecGet(&rans, 1);
-                RansDecAdvanceSymbol(&rans, &ptr, &bin_dsyms[sign], 1);
-                value = sign ? -value : value + max_value - 1;
             }
             symbols[j] = value + offset;
         }
@@ -205,7 +213,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("batched_pmf_to_quantized_cdf", &batched_pmf_to_quantized_cdf,
           "Return batched quantized CDF for a given PMF");
     py::class_<IndexedRansCoder>(m, "IndexedRansCoder")
-        .def(py::init<uint32_t>())
+        .def(py::init<uint32_t, bool>())
         .def("init_with_pmfs", &IndexedRansCoder::init_with_pmfs)
         .def("init_with_quantized_cdfs", &IndexedRansCoder::init_with_quantized_cdfs)
         .def("encode_with_indexes", &IndexedRansCoder::encode_with_indexes)

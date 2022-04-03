@@ -24,7 +24,7 @@ def _load_and_test():
         verbose=True
     )
 
-    rans_coder = rans_ext_cpp.IndexedRansCoder(16)
+    rans_coder = rans_ext_cpp.IndexedRansCoder(16, True)
     torch.manual_seed(0)
     float_pmfs = torch.rand(3, 4, dtype=torch.float64) / 4
     offsets = [-2, -2, -2]
@@ -34,7 +34,7 @@ def _load_and_test():
     _test(rans_coder, [[-2, -1, 0, 10]], [[0, 1, 2, 1]])
 
     quantized_cdfs, updated_offsets = rans_ext_cpp.batched_pmf_to_quantized_cdf(
-        float_pmfs.tolist(), offsets, 16
+        float_pmfs.tolist(), offsets, 16, True
     )
     rans_coder.init_with_quantized_cdfs(quantized_cdfs, updated_offsets)
     _test(rans_coder, [[-2049, -2049, 2049, 2049]], [[0, 1, 2, 1]])
@@ -43,12 +43,21 @@ def _load_and_test():
     float_pmfs = [[0, 0], [1], [0, 1], [2 ** -17, 1], [0, 0, 0, 1], [1, 0, 0, 0]]
     offsets = [0] * len(float_pmfs)
     quantized_cdfs, updated_offsets = rans_ext_cpp.batched_pmf_to_quantized_cdf(
-        float_pmfs, offsets, 16
+        float_pmfs, offsets, 16, True
     )
     assert(quantized_cdfs == [[0, 1, 65536], *([[0, 65535, 65536]] * 5)])
     assert(updated_offsets == [2, 0, 1, 1, 3, 0])
     rans_coder.init_with_quantized_cdfs(quantized_cdfs, updated_offsets)
     _test(rans_coder, [[-2, -1, 0, 10]], [[0, 1, 2, 2]])
+
+    float_pmfs = [[0, 0], [1, 1], [0, 1], [2 ** -17, 1], [0, 0, 0, 1], [1, 0, 0, 0]]
+    offsets = [0] * len(float_pmfs)
+    quantized_cdfs, updated_offsets = rans_ext_cpp.batched_pmf_to_quantized_cdf(
+        float_pmfs, offsets, 16, False
+    )
+    rans_coder = rans_ext_cpp.IndexedRansCoder(16, False)
+    rans_coder.init_with_quantized_cdfs(quantized_cdfs, updated_offsets)
+    _test(rans_coder, [[0, 1, 0, 1, 0, 1, 3, 3]], [[0, 0, 1, 1, 2, 2, 4, 5]])
 
     return rans_ext_cpp.batched_pmf_to_quantized_cdf, rans_ext_cpp.IndexedRansCoder
 

@@ -5,6 +5,27 @@ import torch.autograd
 from torch.distributions import Distribution
 
 
+class GradScalerFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, factor):
+        ctx.save_for_backward(factor)
+        return x
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        factor, = ctx.saved_tensors
+        return grad_output * factor, None
+
+
+def grad_scaler(x: torch.Tensor, scaler: Union[float, torch.Tensor]) -> torch.Tensor:
+    if scaler == 1.0:
+        return x
+    else:
+        if not isinstance(scaler, torch.Tensor):
+            scaler = torch.tensor([scaler], dtype=x.dtype, device=x.device)
+        return GradScalerFunction.apply(x, scaler)
+
+
 class LowerBoundFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, bound):

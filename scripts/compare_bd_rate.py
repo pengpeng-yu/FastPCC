@@ -270,19 +270,20 @@ def main_output_script(info_paths_dict, vs_list, output_dir):  # TODO: TYPING
 
 if __name__ == '__main__':
     cfg_pattern = '[0-9]*'
+    all_res_folder = 'runs/test_all'
     info_paths_dict = {
-        'baseline': f'runs/test_all/baseline/{cfg_pattern}/results/metric.txt',
-        'baseline_4x': f'runs/test_all/baseline_4x/{cfg_pattern}/results/metric.txt',
-        'scale_normal': f'runs/test_all/hyperprior_scale_normal/{cfg_pattern}/results/metric.txt',
-        'factorized': f'runs/test_all/hyperprior_factorized/{cfg_pattern}/results/metric.txt',
-        'lossless': f'runs/test_all/lossless_based/{cfg_pattern}/results/metric.txt'
+        'baseline': f'{all_res_folder}/baseline/{cfg_pattern}/results/metric.txt',
+        'baseline_4x': f'{all_res_folder}/baseline_4x/{cfg_pattern}/results/metric.txt',
+        'scale_normal': f'{all_res_folder}/hyperprior_scale_normal/{cfg_pattern}/results/metric.txt',
+        'factorized': f'{all_res_folder}/hyperprior_factorized/{cfg_pattern}/results/metric.txt',
+        'lossl_based': f'{all_res_folder}/lossl_based/{cfg_pattern}/results/metric.txt'
     }
     vs_list = [
         ('vpcc', 'baseline'),
         ('vpcc', 'baseline_4x'),
         ('vpcc', 'scale_normal'),
         ('vpcc', 'factorized'),
-        ('vpcc', 'lossless')
+        ('vpcc', 'lossl_based')
     ]
     output_dir = 'runs/comparison'
     main_output_script(info_paths_dict, vs_list, output_dir)
@@ -294,7 +295,7 @@ if __name__ == '__main__':
     for sample_name in sample_names:
         fig = plt.figure().add_subplot(111)
         figs.append(fig)
-        for cfg_name in ['baseline', 'scale_normal', 'factorized', 'lossless', 'vpcc']:
+        for cfg_name in ['baseline', 'scale_normal', 'factorized', 'lossl_based', 'vpcc']:
             tmp_x_axis = res_info_dict[cfg_name][sample_name]["bpp"]
             tmp_y_axis = res_info_dict[cfg_name][sample_name]["mseF,PSNR (p2point)"]
             fig.plot(tmp_x_axis, tmp_y_axis, label=cfg_name.replace('_', ' '))

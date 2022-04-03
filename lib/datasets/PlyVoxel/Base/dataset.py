@@ -83,21 +83,21 @@ class PlyVoxel(torch.utils.data.Dataset):
             xyz = np.round(xyz)
 
         if self.cfg.with_color:
-            color = torch.from_numpy(np.asarray(point_cloud.colors, dtype=np.float32))
+            color = torch.from_numpy(np.asarray(point_cloud.color, dtype=np.float32))
             assert np.prod(color.shape) != 0
         else:
             color = None
 
         if self.cfg.with_normal:
-            normal = torch.from_numpy(np.asarray(point_cloud.normals, dtype=np.float32))
+            normal = torch.from_numpy(np.asarray(point_cloud.normal, dtype=np.float32))
             assert np.prod(normal.shape) != 0
         else:
             normal = None
 
         return PCData(
             xyz=xyz if isinstance(xyz, torch.Tensor) else torch.from_numpy(xyz),
-            colors=color,
-            normals=normal,
+            color=color,
+            normal=normal,
             file_path=file_path if self.cfg.with_file_path else None,
             ori_resolution=self.file_ori_resolutions[index] if self.cfg.with_ori_resolution else None,
             resolution=self.file_resolutions[index] if self.cfg.with_resolution else None

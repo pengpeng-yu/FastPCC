@@ -2,11 +2,10 @@ include "configs/train/convolutional/baseline.yaml"
 
 model:
   compressed_channels: 32
-  hyperprior: 'None'
-  prior_indexes_range: [16, 16, 16, 16]
-  hyper_encoder_scaler: 1.0
   prior_indexes_scaler: 10.0
-  lossless_based: True
-  lossless_coder_channels: 64
+  prior_indexes_range: [16, 16, 16, 16]
+  hyperprior: 'None'
+  recurrent_part_enabled: True
+  recurrent_part_channels: 64
   lossless_coord_indexes_range: [8, 8, 8, 8]
   lossless_hybrid_hyper_decoder_fea: True

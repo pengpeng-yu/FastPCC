@@ -8,7 +8,7 @@
 class IndexedRansCoderNoSymbol
 {
 public:
-    IndexedRansCoderNoSymbol(uint32_t precision);
+    IndexedRansCoderNoSymbol(uint32_t precision, bool overflow_coding);
     int init_with_pmfs(
         std::vector<std::vector<double>> &pmfs,
         std::vector<int32_t> &offsets
@@ -18,16 +18,17 @@ public:
         std::vector<int32_t> &offsets
     );
     std::vector<py::bytes> encode_with_indexes(
-        const std::vector<std::vector<int32_t>> &symbols_list, 
+        const std::vector<std::vector<int32_t>> &symbols_list,
         const std::vector<std::vector<int32_t>> &indexes_list
     );
     std::vector<std::vector<int32_t>> decode_with_indexes(
-        const std::vector<std::string> &encoded_list, 
+        const std::vector<std::string> &encoded_list,
         const std::vector<std::vector<int32_t>> &indexes_list
     );
 
 private:
     const uint32_t precision;
+    const bool overflow_coding;
     
     std::vector<std::vector<uint32_t>> cdfs;
     std::vector<int32_t> offsets;

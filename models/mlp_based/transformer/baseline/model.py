@@ -53,7 +53,7 @@ class PCC(nn.Module):
         self.init_weights()
 
     def forward(self, pc_data: PCData):
-        if not (pc_data.colors is None and pc_data.normals is None):
+        if not (pc_data.color is None and pc_data.normal is None):
             raise NotImplementedError
 
         encoder_msg: PointLayerMessage = self.encoder(

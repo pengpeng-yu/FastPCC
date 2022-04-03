@@ -10,7 +10,7 @@ str_or_seq = Union[str, Tuple[str, ...]]
 @dataclass
 class TrainConfig(SimpleConfig):
     rundir_name: str = 'train_<autoindex>'
-    device: str = '0'  # 0 or 0,1,2 or cpu
+    device: Union[int, str] = '0'  # 0 or 0,1,2 or cpu
     more_reproducible: bool = False
     amp: bool = True
     find_unused_parameters: bool = False
@@ -87,7 +87,7 @@ class TrainConfig(SimpleConfig):
 @dataclass
 class TestConfig(SimpleConfig):
     rundir_name: str = 'test_<autoindex>'
-    device: str = '0'  # 0 or 1 or cpu (only single gpu supported)
+    device: Union[int, str] = '0'  # 0 or 1 or cpu (only single gpu supported)
     batch_size: int = 8
     num_workers: int = 4
     weights_from_ckpt: str = ''

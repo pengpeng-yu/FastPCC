@@ -2,11 +2,16 @@
 
 
 std::vector<uint32_t>
-pmf_to_quantized_cdf(std::vector<double> &pmf, int32_t &offset, uint32_t precision)
+pmf_to_quantized_cdf(std::vector<double> &pmf, int32_t &offset, uint32_t precision,
+    bool overflow_coding)
 {
     assert(precision <= 32);
     const uint32_t prob_scale = 1u << precision;
-    std::vector<uint32_t> cdf(pmf.size() + 2);
+    std::vector<uint32_t> cdf;
+    if (overflow_coding)
+        cdf.resize(pmf.size() + 2);
+    else
+        cdf.resize(pmf.size() + 1);
     cdf[0] = 0u;
 
 #ifndef	NDEBUG
@@ -16,48 +21,55 @@ pmf_to_quantized_cdf(std::vector<double> &pmf, int32_t &offset, uint32_t precisi
     }
 #endif
     double total = std::accumulate(pmf.begin(), pmf.end(), 0.);
-    double overflow = std::max(1. - total, 0.);
-    total += overflow;
-    pmf.push_back(overflow);
+    if (overflow_coding)
+    {
+        double overflow = std::max(1. - total, 0.);
+        total += overflow;
+        pmf.push_back(overflow);
+    }
 
     std::partial_sum(pmf.begin(), pmf.end(), pmf.begin());
     std::transform(pmf.begin(), pmf.end(), cdf.begin() + 1,
                    [prob_scale, total](auto p)
                    { return static_cast<uint32_t>(std::round(prob_scale * (p / total))); });
+    cdf.back() = prob_scale;
 
     assert(cdf.size() >= 3);
-    size_t cdf_start = 0, cdf_end = 0;
-    for (size_t i = 0; i < cdf.size() - 1; i++)
+    if (overflow_coding)
     {
-        if (cdf[i + 1] != cdf[i])
+        size_t cdf_start = 0, cdf_end = 0;
+        for (size_t i = 0; i < cdf.size() - 1; i++)
         {
-            cdf_start = i;
-            break;
+            if (cdf[i + 1] != cdf[i])
+            {
+                cdf_start = i;
+                break;
+            }
         }
-    }
-    for (size_t i = cdf.size() - 2; i > 0; i--)
-    {
-        if (cdf[i - 1] != cdf[i])
+        for (size_t i = cdf.size() - 2; i > 0; i--)
         {
-            cdf_end = i;
-            break;
+            if (cdf[i - 1] != cdf[i])
+            {
+                cdf_end = i;
+                break;
+            }
         }
-    }
-    offset += cdf_start;
+        offset += cdf_start;
 
-    if (cdf_start > cdf_end)
-    {
-        assert(cdf_start = cdf.size() - 2);
-        cdf_start = cdf.size() - 3;
-        cdf_end = cdf_start + 1;
+        if (cdf_start > cdf_end)
+        {
+            assert(cdf_start = cdf.size() - 2);
+            cdf_start = cdf.size() - 3;
+            cdf_end = cdf_start + 1;
+        }
+        size_t cdf_size =  cdf_end - cdf_start + 1 + 1;
+        for (size_t i = 0; i < cdf_size - 1; i++)
+        {
+            cdf[i] = cdf[i + cdf_start];
+        }
+        cdf.resize(cdf_size);
+        cdf.back() = prob_scale;
     }
-    size_t cdf_size =  cdf_end - cdf_start + 1 + 1;
-    for (size_t i = 0; i < cdf_size - 1; i++)
-    {
-        cdf[i] = cdf[i + cdf_start];
-    }
-    cdf.resize(cdf_size);
-    cdf.back() = prob_scale;
 
     for (size_t i = 0; i < cdf.size() - 1; i++)
     {
@@ -109,7 +121,8 @@ std::tuple<std::vector<std::vector<uint32_t>>, std::vector<int32_t>>
 batched_pmf_to_quantized_cdf(
     std::vector<std::vector<double>> &pmfs,
     std::vector<int32_t> &offsets,
-    uint32_t precision)
+    uint32_t precision,
+    bool overflow_coding)
 {
     std::vector<std::vector<uint32_t>> cdfs;
     cdfs.reserve(pmfs.size());
@@ -117,7 +130,7 @@ batched_pmf_to_quantized_cdf(
     {
         auto &pmf = pmfs[i];
         auto &offset = offsets[i];
-        cdfs.push_back(pmf_to_quantized_cdf(pmf, offset, precision));
+        cdfs.push_back(pmf_to_quantized_cdf(pmf, offset, precision, overflow_coding));
     }
     return std::make_tuple(cdfs, offsets);
 }

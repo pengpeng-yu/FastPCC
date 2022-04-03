@@ -8,7 +8,7 @@ from torch.distributions import Distribution
 
 from .distributions.uniform_noise import NoisyDeepFactorized
 from .continuous_base import ContinuousEntropyModelBase
-from .utils import lower_bound, upper_bound, quantization_offset
+from .utils import lower_bound, upper_bound, quantization_offset, grad_scaler
 
 from lib.torch_utils import minkowski_tensor_wrapped_fn, minkowski_tensor_wrapped_op
 
@@ -23,7 +23,10 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16):
+                 lower_bound: Union[int, torch.Tensor] = 0,
+                 upper_bound: Union[int, torch.Tensor] = -1,
+                 range_coder_precision: int = 16,
+                 overflow_coding: bool = True):
         """
         The prior of ContinuousIndexedEntropyModel object is rebuilt
         in each forwarding during training.
@@ -56,8 +59,12 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             coding_ndim=coding_ndim,
             init_scale=init_scale,
             tail_mass=tail_mass,
-            range_coder_precision=range_coder_precision
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            range_coder_precision=range_coder_precision,
+            overflow_coding=overflow_coding
         )
+        # TODO: mark this buffer as ignored in DDP broadcasting.
         self.register_buffer('range_coding_prior_indexes',
                              range_coding_prior_indexes, persistent=False)
 
@@ -70,6 +77,10 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                 torch.round_(indexes)
         parameters = {k: f(indexes) for k, f in self.parameter_fns.items()}
         return self.prior_fn(**parameters)
+
+    @torch.no_grad()
+    def update_prior(self):
+        self.prior.update_base(self.make_prior(self.range_coding_prior_indexes))
 
     def make_range_coding_prior(self) -> torch.Tensor:
         """
@@ -103,7 +114,8 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
     @minkowski_tensor_wrapped_fn({1: 0, 2: None})
     def forward(self, x: torch.Tensor, indexes: torch.Tensor,
                 return_aux_loss: bool = True,
-                additive_uniform_noise: bool = True) \
+                additive_uniform_noise: bool = True,
+                x_grad_scaler_for_bits_loss: float = 1.0) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, List[bytes]]]:
         """
@@ -113,13 +125,12 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         indexes = self.normalize_indexes(indexes)
         prior = self.make_prior(indexes)
         if self.training:
-            with torch.no_grad():
-                self.prior.update_base(self.make_prior(self.range_coding_prior_indexes))
+            self.update_prior()
             if additive_uniform_noise is True:
                 x_perturbed = self.perturb(x)
             else:
                 x_perturbed = x
-            log_probs = prior.log_prob(x_perturbed)
+            log_probs = prior.log_prob(grad_scaler(x_perturbed, x_grad_scaler_for_bits_loss))
             loss_dict = {'bits_loss': log_probs.sum() / (-math.log(2))}
             if return_aux_loss:
                 loss_dict['aux_loss'] = self.prior.aux_loss()
@@ -231,8 +242,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         Use model.eval() to update the prior function and the cdf table.
         """
         if mode is False and self.prior.requires_updating_cdf_table:
-            with torch.no_grad():
-                self.prior.update_base(self.make_prior(self.range_coding_prior_indexes))
+            self.update_prior()
         return super(ContinuousIndexedEntropyModel, self).train(mode=mode)
 
 
@@ -342,7 +352,10 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16):
+                 lower_bound: Union[int, torch.Tensor] = 0,
+                 upper_bound: Union[int, torch.Tensor] = -1,
+                 range_coder_precision: int = 16,
+                 overflow_coding: bool = True):
         parameter_fns, self.indexes_view_fn, modules_to_add = \
             noisy_deep_factorized_indexed_entropy_model_init(
                 index_ranges, parameter_fns_type, parameter_fns_factory, num_filters
@@ -350,7 +363,8 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
         super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).__init__(
             NoisyDeepFactorized, index_ranges, parameter_fns,
             coding_ndim, indexes_bound_gradient, quantize_indexes,
-            init_scale, tail_mass, range_coder_precision
+            init_scale, tail_mass, lower_bound, upper_bound,
+            range_coder_precision, overflow_coding
         )
         for module_name, module in modules_to_add.items():
             setattr(self, module_name, module)
@@ -387,6 +401,10 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
         return super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).decompress(
             strings, self.indexes_view_fn(indexes), target_device, skip_dequantization
         )
+
+    def _apply(self, fn):
+        super(ContinuousIndexedEntropyModel, self)._apply(fn)
+        self.update_prior()
 
 
 class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
