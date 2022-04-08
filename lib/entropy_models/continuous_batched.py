@@ -76,7 +76,9 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             log_probs = self.prior.log_prob(x_perturbed)
             loss_dict = {'bits_loss': log_probs.sum() / (-math.log(2))}
             if return_aux_loss:
-                loss_dict['aux_loss'] = self.prior.aux_loss()
+                aux_loss = self.prior.aux_loss()
+                if aux_loss is not None:
+                    loss_dict['aux_loss'] = aux_loss
             return x_perturbed, loss_dict
 
         else:

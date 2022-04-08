@@ -191,7 +191,7 @@ class DistributionQuantizedCDFTable(nn.Module):
         "stop_gradient" arg in their "e_functions".
         """
         if not self.if_estimate_tail:
-            return 0
+            return None
         else:
             loss = []
             for i, f, t in zip(self.e_input_values, self.e_functions, self.e_target_values):
