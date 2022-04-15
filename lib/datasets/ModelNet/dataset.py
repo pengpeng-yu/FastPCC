@@ -137,11 +137,8 @@ class ModelNetDataset(torch.utils.data.Dataset):
         # quantize  points: ndarray -> voxel points: torch.Tensor
         if self.cfg.resolution != 0:
             assert self.cfg.resolution > 1
-            if self.data_file_format == '.txt':
-                # coordinates of modelnet40_normal_resampled are in [-1, 1]
-                xyz *= (self.cfg.resolution // 2)
-            else:
-                xyz *= self.cfg.resolution
+            xyz *= (self.cfg.resolution - 1)
+            xyz = np.round(xyz)
             unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True)
             xyz = xyz[unique_map]
             if self.cfg.with_normal_channel:

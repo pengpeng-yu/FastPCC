@@ -5,9 +5,6 @@ from typing import Tuple
 
 @dataclass
 class DatasetConfig(SimpleConfig):
-    # When using modelnet40_normal_resampled(txt file), coordinates are left untouched ([-1, 1]).
-    # When using original modelnet(off file) with resolution = 0, coordinates are in [0, 1].
-    # When using original modelnet(off file) with resolution!= 0, coordinates are in [0, resolution).
     # Files list can be generated automatically when using original modelnet dataset.
     # When using OFF files, caches are generated to accelerate __getitem__.
     root: str = 'datasets/modelnet40_normal_resampled'
@@ -24,7 +21,7 @@ class DatasetConfig(SimpleConfig):
     with_normal_channel: bool = False
 
     # works when using points as model input, this is the amount of input points
-    # when using voxels as model input, this is the amount of points before voxelization
+    # when using voxels as model input, this is the amount of points before vocalization
     input_points_num: int = 8192
 
     # Sampling points from mesh.

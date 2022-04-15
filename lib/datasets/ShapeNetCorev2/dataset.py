@@ -108,7 +108,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         if self.cfg.resolution != 0:
             assert self.cfg.resolution > 1
-            xyz *= self.cfg.resolution
+            xyz *= (self.cfg.resolution - 1)
             xyz = np.round(xyz)
             unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True)
             xyz = xyz[unique_map]
