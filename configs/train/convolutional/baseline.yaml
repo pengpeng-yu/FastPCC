@@ -43,7 +43,6 @@ train:
   dataset_path: 'lib.datasets.ShapeNetCorev2'
   dataset:
     random_rotation: True
-    with_resolution: True
 
 
 test:
@@ -54,6 +53,4 @@ test:
   dataset_path:
     'lib.datasets.PlyVoxel.Owlii_8iVFBv2'
   dataset:
-    with_resolution: True
-    with_ori_resolution: True
     kd_tree_partition_max_points_num: 1500000

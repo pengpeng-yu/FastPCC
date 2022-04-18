@@ -253,8 +253,8 @@ class Encoder(nn.Module):
 class DecoderBlock(nn.Module):
     def __init__(self,
                  in_channels,
+                 out_channels,
                  upsample_out_channels,
-                 classifier_in_channels,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -269,24 +269,36 @@ class DecoderBlock(nn.Module):
             use_batch_norm, act
         )
         classify_block = ConvBlock(
-            classifier_in_channels, 1,
+            upsample_out_channels, 1,
             3, 1,
             region_type=region_type,
             bn=use_batch_norm,
             act='relu' if kwargs.get('loss_type', None) == 'Dist' else None
         )
+        if out_channels != 0:  # 0 to disable attribute prediction.
+            self.predict_block = ConvBlock(
+                upsample_out_channels, out_channels,
+                3, 1,
+                region_type=region_type,
+                bn=use_batch_norm,
+                act=None
+            )
+        else:
+            self.predict_block = None
         self.generative_upsample = GenerativeUpsample(upsample_block, classify_block, **kwargs)
 
     def forward(self, msg: GenerativeUpsampleMessage):
-        return self.generative_upsample(msg)
-
-    def __repr__(self):
-        return str(self.generative_upsample)
+        msg = self.generative_upsample(msg)
+        if self.predict_block is not None:
+            assert self.generative_upsample.enable_fea_pruning is True
+            msg.fea = self.predict_block(msg.fea)
+        return msg
 
 
 class Decoder(nn.Module):
     def __init__(self,
                  in_channels,
+                 out_channels,
                  intra_channels: Tuple[int, ...],
                  value_scaler: float,
                  basic_block_type: str,
@@ -300,7 +312,8 @@ class Decoder(nn.Module):
         self.blocks = nn.Sequential(*[
             DecoderBlock(
                 in_channels if idx == 0 else intra_channels[idx - 1],
-                intra_ch, intra_ch,
+                out_channels if idx == len(intra_channels) - 1 else 0,
+                intra_ch,
                 basic_block_type,
                 region_type,
                 basic_block_num,

@@ -146,7 +146,7 @@ class GenerativeUpsample(nn.Module):
 
                  loss_type='BCE',
                  dist_upper_bound=2.0,
-                 is_last_layer=False,
+                 enable_fea_pruning=True,
 
                  requires_metric_during_testing=False,
                  use_cached_feature=False,
@@ -159,7 +159,7 @@ class GenerativeUpsample(nn.Module):
         self.mapping_target_region_type = getattr(ME.RegionType, mapping_target_region_type)
         self.loss_type = loss_type
         self.square_dist_upper_bound = dist_upper_bound ** 2
-        self.is_last_layer = is_last_layer
+        self.enable_fea_pruning = enable_fea_pruning
         self.requires_metric_during_testing = requires_metric_during_testing
         self.use_cached_feature = use_cached_feature
         self.cached_feature_fusion_method = cached_feature_fusion_method
@@ -200,7 +200,7 @@ class GenerativeUpsample(nn.Module):
             keep |= keep_target
             message.cached_target_list.append(loss_target)
             message.cached_pred_list.append(pred)
-            if not self.is_last_layer:
+            if self.enable_fea_pruning:
                 message.fea = self.pruning(fea, keep)
             else:
                 message.fea = None
@@ -209,7 +209,7 @@ class GenerativeUpsample(nn.Module):
                 keep_target = self.get_target(fea, pred, message.target_key, False)
                 message.cached_metric_list.append(
                     precision_recall(pred=keep, tgt=keep_target))
-            if not self.is_last_layer:
+            if self.enable_fea_pruning:
                 message.fea = self.pruning(fea, keep)
             else:
                 message.fea = None

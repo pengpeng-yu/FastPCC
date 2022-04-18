@@ -12,9 +12,8 @@ class DatasetConfig(SimpleConfig):
     train_filelist_path: str = 'train_list.txt'
     test_filelist_path: str = 'test_list.txt'
 
-    with_classes: bool = False
+    with_class: bool = False
     random_rotation: bool = False
-    with_file_path: bool = True
 
     # works only when using txt file like modelnet40_normal_resampled
     sample_method: str = 'uniform'
@@ -31,4 +30,3 @@ class DatasetConfig(SimpleConfig):
 
     # for ME sparse tensor. 0 means no quantization (use points as model input).
     resolution: int = 0
-    with_resolution: bool = False

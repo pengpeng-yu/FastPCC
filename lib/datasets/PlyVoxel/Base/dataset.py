@@ -78,7 +78,7 @@ class PlyVoxel(torch.utils.data.Dataset):
         xyz = np.asarray(point_cloud.points)
 
         if not self.voxelized:
-            xyz = xyz / self.file_ori_resolutions[index]
+            xyz = xyz / (self.file_ori_resolutions[index] - 1)
         else:
             xyz = np.round(xyz)
 
@@ -95,12 +95,12 @@ class PlyVoxel(torch.utils.data.Dataset):
             normal = None
 
         return PCData(
-            xyz=xyz if isinstance(xyz, torch.Tensor) else torch.from_numpy(xyz),
+            xyz=torch.from_numpy(xyz),
             color=color,
             normal=normal,
-            file_path=file_path if self.cfg.with_file_path else None,
-            ori_resolution=self.file_ori_resolutions[index] if self.cfg.with_ori_resolution else None,
-            resolution=self.file_resolutions[index] if self.cfg.with_resolution else None
+            file_path=file_path,
+            ori_resolution=self.file_ori_resolutions[index],
+            resolution=self.file_resolutions[index]
         )
 
     def collate_fn(self, batch):
@@ -114,7 +114,6 @@ if __name__ == '__main__':
     config = DatasetConfig()
     config.with_color = True
     config.with_normal = False
-    config.with_file_path = True
 
     from loguru import logger
     dataset = PlyVoxel(config, False, logger)

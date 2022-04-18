@@ -21,7 +21,7 @@ train:
 
   dataset:
     input_points_num: 4096
-    with_classes: True
+    with_class: True
 
 
 test:

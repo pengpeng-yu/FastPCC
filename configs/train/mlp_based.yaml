@@ -31,8 +31,6 @@ train:
     mesh_sample_points_num: 40000
     random_rotation: True
     resolution: 0
-    with_resolution: True
-    with_ori_resolution: True
 
 
 test:
@@ -44,6 +42,4 @@ test:
     'lib.datasets.PlyVoxel.Owlii_8iVFBv2'
   dataset:
     resolution: 0
-    with_resolution: True
-    with_ori_resolution: True
     kd_tree_partition_max_points_num: 1500000

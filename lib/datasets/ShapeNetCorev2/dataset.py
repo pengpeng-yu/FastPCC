@@ -20,8 +20,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         if cfg.data_format in ['.solid.binvox', '.surface.binvox'] or \
                 cfg.data_format == ['.solid.binvox', '.surface.binvox'] or \
                 cfg.data_format == ['.surface.binvox', '.solid.binvox']:
-            if cfg.resolution != 128 and cfg.resolution != 0:
-                raise NotImplementedError
+            assert cfg.resolution in [128, 0]
         elif cfg.data_format != '.obj':
             raise NotImplementedError
         data_format = [cfg.data_format] if isinstance(cfg.data_format, str) else cfg.data_format
@@ -74,7 +73,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 if is_training:
                     assert len(self.file_list) == 35765 - 80 - 1  # 80 have no binvox files
                 else:
-                    assert len(self.file_list) == 10266 - 13  # 13 has no binvox files
+                    assert len(self.file_list) == 10266 - 13  # 13 have no binvox files
             elif cfg.data_format == '.solid.binvox':
                 pass
             elif cfg.data_format == '.obj':
@@ -97,9 +96,8 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             xyz = o3d_coords_sampled_from_triangle_mesh(
                 file_path,
                 self.cfg.mesh_sample_points_num,
-                self.cfg.mesh_sample_point_method,
-                dtype=np.float64
-            )
+                sample_method=self.cfg.mesh_sample_point_method,
+            )[0]
 
         if self.cfg.random_rotation:
             xyz = R.random().apply(xyz)
@@ -110,7 +108,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             assert self.cfg.resolution > 1
             xyz *= (self.cfg.resolution - 1)
             xyz = np.round(xyz)
-            unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True)
+            unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
             xyz = xyz[unique_map]
 
             if self.cfg.data_format == '.obj' and \
@@ -120,11 +118,10 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                       f'sparse quantized points_num = {xyz.shape[0]}')
 
         return PCData(
-            xyz=xyz if isinstance(xyz, torch.Tensor) else torch.from_numpy(xyz),
-            file_path=file_path if self.cfg.with_file_path else None,
-            ori_resolution=
-            None if not self.cfg.with_ori_resolution or self.cfg.data_format == '.obj' else 128,
-            resolution=self.cfg.resolution if self.cfg.with_resolution else None
+            xyz=torch.from_numpy(xyz),
+            file_path=file_path,
+            ori_resolution=None if self.cfg.data_format == '.obj' else 128,
+            resolution=self.cfg.resolution
         )
 
     def collate_fn(self, batch):

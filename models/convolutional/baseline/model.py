@@ -96,10 +96,10 @@ class PCC(nn.Module):
         )
 
         if not cfg.lossless_coord_enabled:
-            assert cfg.input_feature_type == 'Occupation'
             self.encoder = encoder
             self.decoder = Decoder(
                 cfg.compressed_channels,
+                0 if cfg.input_feature_type == 'Occupation' else self.input_feature_channels,
                 cfg.decoder_channels,
                 1 / cfg.encoder_scaler,
                 *self.basic_block_args,
@@ -133,13 +133,13 @@ class PCC(nn.Module):
             elif cfg.input_feature_type == 'Color':
                 if self.cfg.lossless_color_enabled:
                     hyper_dec_fea_lossl_out_chnls = \
-                        (self.em_lossl_dec_fea_chnls //
-                         self.cfg.compressed_channels * self.input_feature_channels,) + \
+                        (self.em_lossl_dec_fea_chnls // self.cfg.compressed_channels
+                         * self.input_feature_channels,) + \
                         (self.em_lossl_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
                     skip_encoding_top_fea = 'no_skip'
                 else:
-                    hyper_dec_fea_lossl_out_chnls = (3,) + \
-                        (self.em_lossl_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
+                    hyper_dec_fea_lossl_out_chnls = (self.input_feature_channels,) + \
+                                                    (self.em_lossl_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
                     skip_encoding_top_fea = 'skip_with_pred'
                 hyper_dec_fea_lossl_intra_chnls = cfg.decoder_channels[::-1]
             else:
@@ -424,12 +424,8 @@ class PCC(nn.Module):
 
         if self.cfg.input_feature_type == 'Color' and not self.cfg.lossless_color_enabled:
             loss_dict['color_recon_loss'] = self.get_color_recon_loss(
-                sparse_pc, bottleneck_feature
-            )
-
-        if self.cfg.input_feature_type == 'Color' and not self.cfg.lossless_color_enabled:
-            loss_dict['color_recon_loss'] = self.get_color_recon_loss(
-                sparse_pc, bottleneck_feature
+                sparse_pc,
+                bottleneck_feature if self.cfg.lossless_coord_enabled else decoder_message.fea
             )
 
         loss_dict['loss'] = sum(loss_dict.values())
@@ -680,19 +676,19 @@ class PCC(nn.Module):
             recon_loss *= factor
         return recon_loss
 
-    def get_color_recon_loss(self, sparse_pc, bottleneck_feature):
-        permutation_kernel_map = sparse_pc.coordinate_manager.kernel_map(
+    def get_color_recon_loss(self, sparse_pc, color_pred):
+        kernel_map = sparse_pc.coordinate_manager.kernel_map(
             sparse_pc.coordinate_map_key,
-            bottleneck_feature.coordinate_map_key,
+            color_pred.coordinate_map_key,
             kernel_size=1
-        )[0][0].to(torch.long)
+        )[0].to(torch.long)
         if self.cfg.color_recon_loss_type == 'SmoothL1':
             loss_func = F.smooth_l1_loss
         else:
             raise NotImplementedError
         recon_loss = loss_func(
-            sparse_pc.F[permutation_kernel_map],
-            bottleneck_feature.F
+            sparse_pc.F[kernel_map[0]],
+            color_pred.F[kernel_map[1]]
         )
         factor = self.cfg.color_recon_loss_factor
         if factor != 1:

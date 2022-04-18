@@ -53,9 +53,9 @@ class PCGCv2Data(torch.utils.data.Dataset):
         file_path = self.file_list[index]
         xyz = h5py.File(file_path)['data'][:, :3]
         return PCData(xyz=torch.from_numpy(xyz.astype(np.float32)),
-                      file_path=file_path if self.cfg.with_file_path else None,
-                      ori_resolution=128 if self.cfg.with_ori_resolution else None,
-                      resolution=self.cfg.resolution if self.cfg.with_resolution else None)
+                      file_path=file_path,
+                      ori_resolution=128,
+                      resolution=self.cfg.resolution)
 
     def collate_fn(self, batch):
         return pc_data_collate_fn(batch, sparse_collate=True)

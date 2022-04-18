@@ -12,6 +12,3 @@ class DatasetConfig(SimpleConfig):
     train_split_ratio: float = 1.0
 
     resolution: int = 128
-    with_file_path: bool = False
-    with_ori_resolution: bool = False
-    with_resolution: bool = False

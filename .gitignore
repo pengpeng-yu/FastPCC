@@ -3,10 +3,12 @@
 __pycache__/
 .DS_Store
 
+tmp/
 build/
 runs/*
 datasets/*
 weights/*
 scripts/old/*
+scripts/tmp/
 /train.sh
 /test.sh

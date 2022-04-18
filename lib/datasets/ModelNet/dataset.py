@@ -75,7 +75,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
             self.gen_cache = False
 
         # load classes indices
-        if cfg.with_classes:
+        if cfg.with_class:
             with open(os.path.join(cfg.root, cfg.classes_names)) as f:
                 classes_names = f.readlines()
             self.classes_idx = {l.strip(): cls_idx for cls_idx, l in enumerate(classes_names)}
@@ -97,7 +97,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
 
         # for modelnet40_normal_resampled
         if file_path.endswith('.txt'):
-            point_cloud = np.loadtxt(file_path, dtype=np.float32, delimiter=',')
+            point_cloud = np.loadtxt(file_path, dtype=np.float64, delimiter=',')
             assert point_cloud.shape[0] >= self.cfg.input_points_num
             if point_cloud.shape[0] > self.cfg.input_points_num:
                 if self.cfg.sample_method == 'uniform':
@@ -112,9 +112,8 @@ class ModelNetDataset(torch.utils.data.Dataset):
             point_cloud = o3d_coords_sampled_from_triangle_mesh(
                 file_path,
                 self.cfg.input_points_num,
-                self.cfg.mesh_sample_point_method,
-                dtype=np.float32
-            )
+                sample_method=self.cfg.mesh_sample_point_method
+            )[0]
         else:
             raise NotImplementedError
 
@@ -130,7 +129,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
         # random rotation
         if not self.gen_cache and self.cfg.random_rotation:
             if self.cfg.with_normal_channel: raise NotImplementedError
-            xyz = R.random().apply(xyz).astype(np.float32)
+            xyz = R.random().apply(xyz)
 
         xyz = normalize_coords(xyz)
 
@@ -139,13 +138,13 @@ class ModelNetDataset(torch.utils.data.Dataset):
             assert self.cfg.resolution > 1
             xyz *= (self.cfg.resolution - 1)
             xyz = np.round(xyz)
-            unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True)
+            unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
             xyz = xyz[unique_map]
             if self.cfg.with_normal_channel:
                 normals = normals[unique_map]
 
         # classes
-        if self.cfg.with_classes:
+        if self.cfg.with_class:
             cls_idx = self.classes_idx[os.path.split(self.file_list[index])[1].rsplit('_', 1)[0]]
         else:
             cls_idx = None
@@ -155,8 +154,8 @@ class ModelNetDataset(torch.utils.data.Dataset):
             xyz=torch.from_numpy(xyz),
             normal=torch.from_numpy(normals),
             class_idx=cls_idx,
-            file_path=file_path if self.cfg.with_file_path else None,
-            resolution=self.cfg.resolution if self.cfg.with_resolution else None
+            file_path=file_path,
+            resolution=self.cfg.resolution
         )
 
         if self.gen_cache is True:
@@ -175,9 +174,8 @@ class ModelNetDataset(torch.utils.data.Dataset):
 if __name__ == '__main__':
     config = DatasetConfig()
     config.input_points_num = 200000
-    config.with_classes = False
+    config.with_class = False
     config.with_normal_channel = True
-    config.with_file_path = True
     config.resolution = 128
     config.root = 'datasets/modelnet40_manually_aligned'
 

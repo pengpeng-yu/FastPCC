@@ -14,9 +14,6 @@ class DatasetConfig(SimpleConfig):
 
     with_color: bool = False
     with_normal: bool = False
-    with_file_path: bool = True
 
     ori_resolution: Union[int, Tuple[int, ...]] = (512, 1024, 2048)  # depends on the datasets themselves
     resolution: Union[int, Tuple[int, ...]] = (512, 1024, 2048)  # target resolution
-    with_resolution: bool = False
-    with_ori_resolution: bool = False

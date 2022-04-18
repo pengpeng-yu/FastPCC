@@ -296,22 +296,31 @@ def read_xyz_from_ply_file(file_path: str):
     return xyz
 
 
-def o3d_coords_sampled_from_triangle_mesh(triangle_mesh_path: str, points_num: int,
-                                          sample_method: str = 'uniform',
-                                          dtype=np.float32) -> np.ndarray:
+def o3d_coords_sampled_from_triangle_mesh(
+        triangle_mesh_path: str, points_num: int,
+        rotation_matrix: np.ndarray = None,
+        sample_method: str = 'uniform',
+        with_color: bool = False
+) -> Tuple[np.ndarray, np.ndarray]:
     mesh_object = o3d.io.read_triangle_mesh(triangle_mesh_path)
+    if rotation_matrix is not None:
+        mesh_object.rotate(rotation_matrix)
     if sample_method == 'barycentric':
-        point_cloud = resample_mesh_by_faces(
+        assert with_color is False
+        coord = resample_mesh_by_faces(
             mesh_object,
             density=points_num / len(mesh_object.triangles))
-    elif sample_method == 'poisson_disk':
-        point_cloud = np.asarray(mesh_object.sample_points_poisson_disk(points_num).points)
-    elif sample_method == 'uniform':
-        point_cloud = np.asarray(mesh_object.sample_points_uniformly(points_num).points)
+        color = None
     else:
-        raise NotImplementedError
-    point_cloud = point_cloud.astype(dtype)
-    return point_cloud
+        if sample_method == 'poisson_disk':
+            point_cloud = mesh_object.sample_points_poisson_disk(points_num)
+        elif sample_method == 'uniform':
+            point_cloud = mesh_object.sample_points_poisson_disk(points_num)
+        else:
+            raise NotImplementedError
+        coord = np.asarray(point_cloud.points)
+        color = np.asarray(point_cloud.colors)
+    return coord, color
 
 
 def normalize_coords(xyz: np.ndarray):
