@@ -3,6 +3,7 @@ import pathlib
 
 import open3d as o3d
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 import torch
 import torch.utils.data
 
@@ -74,6 +75,9 @@ class PlyVoxel(torch.utils.data.Dataset):
             print(f'Error when loading {file_path}')
             raise e
 
+        if self.cfg.random_rotation:
+            point_cloud.rotate(R.random().as_matrix())
+
         # xyz
         xyz = np.asarray(point_cloud.points)
 
@@ -83,13 +87,14 @@ class PlyVoxel(torch.utils.data.Dataset):
             xyz = np.round(xyz)
 
         if self.cfg.with_color:
-            color = torch.from_numpy(np.asarray(point_cloud.color, dtype=np.float32))
+            color = torch.from_numpy(np.asarray(point_cloud.colors, dtype=np.float32))
+            color *= 255
             assert np.prod(color.shape) != 0
         else:
             color = None
 
         if self.cfg.with_normal:
-            normal = torch.from_numpy(np.asarray(point_cloud.normal, dtype=np.float32))
+            normal = torch.from_numpy(np.asarray(point_cloud.normals, dtype=np.float32))
             assert np.prod(normal.shape) != 0
         else:
             normal = None

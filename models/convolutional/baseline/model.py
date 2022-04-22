@@ -11,11 +11,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.ops import sigmoid_focal_loss
 import MinkowskiEngine as ME
+from MinkowskiEngine.MinkowskiSparseTensor import SparseTensorQuantizationMode
 
 from lib.utils import Timer
 from lib.mpeg_gpcc_utils import gpcc_octree_lossless_geom_encode, gpcc_decode
 from lib.torch_utils import MLPBlock, TorchCudaMaxMemoryAllocated
-from lib.data_utils import PCData, write_xyz_to_ply_file
+from lib.data_utils import PCData, write_ply_file
 from lib.evaluators import PCGCEvaluator
 from lib.sparse_conv_layers import GenerativeUpsampleMessage
 from lib.entropy_models.continuous_batched import \
@@ -91,11 +92,15 @@ class PCC(nn.Module):
             cfg.encoder_scaler if not cfg.recurrent_part_enabled else 1,
             0 if not cfg.lossless_coord_enabled else cfg.compressed_channels,
             cfg.encoder_scaler,
+            not (cfg.lossless_coord_enabled and
+                 cfg.input_feature_type == 'Color'
+                 and not cfg.lossless_color_enabled),
             *self.basic_block_args,
             None if not cfg.recurrent_part_enabled else cfg.activation
         )
 
         if not cfg.lossless_coord_enabled:
+            assert not self.cfg.lossless_color_enabled
             self.encoder = encoder
             self.decoder = Decoder(
                 cfg.compressed_channels,
@@ -126,21 +131,15 @@ class PCC(nn.Module):
             hyper_dec_coord_lossl_intra_chnls = cfg.decoder_channels[::-1]
 
             if cfg.input_feature_type == 'Occupation':
-                hyper_dec_fea_lossl_out_chnls = \
-                    (self.em_lossl_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
+                hyper_dec_fea_lossl_out_chnls = (self.em_lossl_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
                 hyper_dec_fea_lossl_intra_chnls = cfg.decoder_channels[-2::-1]
                 skip_encoding_top_fea = 'skip'
             elif cfg.input_feature_type == 'Color':
-                if self.cfg.lossless_color_enabled:
-                    hyper_dec_fea_lossl_out_chnls = \
-                        (self.em_lossl_dec_fea_chnls // self.cfg.compressed_channels
-                         * self.input_feature_channels,) + \
-                        (self.em_lossl_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
-                    skip_encoding_top_fea = 'no_skip'
-                else:
-                    hyper_dec_fea_lossl_out_chnls = (self.input_feature_channels,) + \
-                                                    (self.em_lossl_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
-                    skip_encoding_top_fea = 'skip_with_pred'
+                hyper_dec_fea_lossl_out_chnls = \
+                    (self.em_lossl_dec_fea_chnls // self.cfg.compressed_channels
+                     * self.input_feature_channels,) + \
+                    (self.em_lossl_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
+                skip_encoding_top_fea = 'no_skip'
                 hyper_dec_fea_lossl_intra_chnls = cfg.decoder_channels[::-1]
             else:
                 raise NotImplementedError
@@ -264,7 +263,6 @@ class PCC(nn.Module):
             fea_parameter_fns_factory=parameter_fns_factory,
             fea_num_filters=(1, 3, 3, 3, 3, 1),
             skip_encoding_top_fea=skip_encoding_top_fea,
-            upper_fea_grad_scaler_for_bits_loss=self.cfg.lossless_part_upper_fea_grad_scaler,
             quantize_indexes=True
         )
         return em_lossless_based
@@ -354,8 +352,8 @@ class PCC(nn.Module):
             minkowski_algorithm=self.minkowski_algorithm
         )
         ME.set_global_coordinate_manager(global_coord_mg)
-        pc_coord_key = global_coord_mg.insert_and_map(xyz, [tensor_stride] * 3)[0]
         if only_return_coords:
+            pc_coord_key = global_coord_mg.insert_and_map(xyz, [tensor_stride] * 3)[0]
             return pc_coord_key, global_coord_mg
         else:
             if self.cfg.input_feature_type == 'Occupation':
@@ -365,13 +363,20 @@ class PCC(nn.Module):
                     device=xyz.device
                 )
             elif self.cfg.input_feature_type == 'Color':
+                # Input point clouds are expected to be unnormalized discrete (0~255) float32 tensor.
+                # In lossy color compression case, we use normalized colors.
+                # In lossless color compression case, we use unnormalized colors.
                 sparse_pc_feature = color
+                if not self.cfg.lossless_color_enabled:
+                    sparse_pc_feature /= 255
             else:
                 raise NotImplementedError
             sparse_pc = ME.SparseTensor(
                 features=sparse_pc_feature,
-                coordinate_map_key=pc_coord_key,
-                coordinate_manager=global_coord_mg
+                coordinates=xyz,
+                tensor_stride=[tensor_stride] * 3,
+                coordinate_manager=global_coord_mg,
+                quantization_mode=SparseTensorQuantizationMode.UNWEIGHTED_AVERAGE,
             )
             return sparse_pc
 
@@ -395,7 +400,7 @@ class PCC(nn.Module):
             points_num_list = None
             feature = sparse_pc
 
-        if self.cfg.lossless_coord_enabled or self.cfg.recurrent_part_enabled:
+        if self.em_lossless_based is not None:
             bottleneck_feature, loss_dict = self.em_lossless_based(
                 feature, lossless_coder_num
             )
@@ -403,9 +408,14 @@ class PCC(nn.Module):
             bottleneck_feature, loss_dict = self.em(feature)
 
         for key in loss_dict:
+            # TODO: how about
+            #  (warmup_forward and key.startswith('fea'))
+            #  if self.em_lossless_based is not None else warmup_forward)
             if key.endswith('bits_loss'):
                 loss_dict[key] = loss_dict[key] * (
-                    (self.cfg.warmup_bpp_loss_factor if warmup_forward
+                    (self.cfg.warmup_bpp_loss_factor
+                     if ((warmup_forward and key.startswith('fea'))
+                         if self.cfg.lossless_coord_enabled else warmup_forward)
                      else self.cfg.bpp_loss_factor) / sparse_pc.shape[0]
                 )
 
@@ -442,12 +452,14 @@ class PCC(nn.Module):
         ME.clear_global_coordinate_manager()
         torch.cuda.empty_cache()
         with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
-            pc_recon = self.decompress(compressed_string, sparse_tensor_coords)
+            coord_recon, color_recon = self.decompress(compressed_string, sparse_tensor_coords)
         ret = self.evaluator.log_batch(
-            preds=[pc_recon],
+            preds=[coord_recon],
             targets=[pc_data.xyz[:, 1:]],
             compressed_strings=[compressed_string],
             pc_data=pc_data,
+            preds_color=[color_recon] if color_recon is not None else None,
+            targets_color=[pc_data.color] if color_recon is not None else None,
             extra_info_dicts=[
                 {'encoder_elapsed_time': encoder_t.elapsed_time,
                  'encoder_max_cuda_memory_allocated': encoder_m.max_memory_allocated,
@@ -467,12 +479,14 @@ class PCC(nn.Module):
         ME.clear_global_coordinate_manager()
         torch.cuda.empty_cache()
         with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
-            pc_recon = self.decompress_partitions(compressed_string, sparse_tensor_coords_list)
+            coord_recon, color_recon = self.decompress_partitions(compressed_string, sparse_tensor_coords_list)
         ret = self.evaluator.log_batch(
-            preds=[pc_recon],
+            preds=[coord_recon],
             targets=[pc_data.xyz[0]],
             compressed_strings=[compressed_string],
             pc_data=pc_data,
+            preds_color=[color_recon] if color_recon is not None else None,
+            targets_color=[pc_data.color[0]] if color_recon is not None else None,
             extra_info_dicts=[
                 {'encoder_elapsed_time': encoder_t.elapsed_time,
                  'encoder_max_cuda_memory_allocated': encoder_m.max_memory_allocated,
@@ -510,7 +524,7 @@ class PCC(nn.Module):
             h = hashlib.md5()
             h.update(str(time.time()).encode())
             tmp_file_path = 'tmp-' + h.hexdigest()
-            write_xyz_to_ply_file(sparse_tensor_coords[:, 1:], f'{tmp_file_path}.ply')
+            write_ply_file(sparse_tensor_coords[:, 1:], f'{tmp_file_path}.ply')
             gpcc_octree_lossless_geom_encode(
                 f'{tmp_file_path}.ply', f'{tmp_file_path}.bin',
                 command=self.cfg.mpeg_gpcc_command
@@ -553,7 +567,8 @@ class PCC(nn.Module):
                                 for s in compressed_string_list))
         return concat_string, sparse_tensor_coords_list
 
-    def decompress(self, compressed_string: bytes, sparse_tensor_coords: Optional[torch.Tensor]) -> torch.Tensor:
+    def decompress(self, compressed_string: bytes, sparse_tensor_coords: Optional[torch.Tensor]
+                   ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         device = next(self.parameters()).device
         with io.BytesIO(compressed_string) as bs:
             if not self.cfg.lossless_coord_enabled and self.cfg.adaptive_pruning:
@@ -612,32 +627,47 @@ class PCC(nn.Module):
                 )
             )
             # The last one is supposed to be the final output of the decoder.
-            pc_recon = decoder_message.cached_pred_list[-1].C[:, 1:]
+            coord_recon = decoder_message.cached_pred_list[-1].C[:, 1:]
+            color_recon_raw = decoder_message.fea.F
         else:
-            pc_recon = fea_recon.C[:, 1:]  # TODO: return color
-        return pc_recon
+            coord_recon = fea_recon.C[:, 1:]
+            color_recon_raw = fea_recon.F
+        if self.cfg.input_feature_type == 'Color':
+            if not self.cfg.lossless_color_enabled:
+                color_recon_raw *= 255
+            color_recon = color_recon_raw.clip_(0, 255).round_().to('cpu', torch.uint8)
+        else:
+            color_recon = None
+        return coord_recon, color_recon
 
     def decompress_partitions(self, concat_string: bytes,
-                              sparse_tensor_coords_list: List[Optional[torch.Tensor]]) \
-            -> torch.Tensor:
-        pc_recon_list = []
+                              sparse_tensor_coords_list: List[Optional[torch.Tensor]]
+                              ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        coord_recon_list = []
+        color_recon_list = []
         concat_string_len = len(concat_string)
 
         with io.BytesIO(concat_string) as bs:
             while bs.tell() != concat_string_len:
                 length = int.from_bytes(bs.read(3), 'little', signed=False)
-                pc_recon_list.append(self.decompress(
+                coord_recon, color_recon = self.decompress(
                     bs.read(length), sparse_tensor_coords_list.pop(0)
-                ))
+                )
+                coord_recon_list.append(coord_recon)
+                color_recon_list.append(color_recon)
 
                 ME.clear_global_coordinate_manager()
 
-        pc_recon = torch.cat([pc_recon for pc_recon in pc_recon_list], 0)
-        return pc_recon
+        coord_recon_concat = torch.cat(coord_recon_list, 0)
+        if color_recon_list[0] is not None:
+            color_recon_concat = torch.cat(color_recon_list, 0)
+        else:
+            color_recon_concat = None
+        return coord_recon_concat, color_recon_concat
 
     def get_lossless_coder_num(self, resolution: Union[int, List[int]]) -> Optional[int]:
         assert len(self.cfg.encoder_channels) == len(self.cfg.decoder_channels) + 1
-        if self.cfg.lossless_coord_enabled or self.cfg.recurrent_part_enabled:
+        if self.em_lossless_based is not None:
             if not isinstance(resolution, int):
                 for r in resolution[1:]:
                     assert r == resolution[0]

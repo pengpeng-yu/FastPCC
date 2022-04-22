@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import torch
 
-from lib.data_utils import PCData, write_xyz_to_ply_file
+from lib.data_utils import PCData, write_ply_file
 try:
     from lib.loss_functions import chamfer_loss
 except ImportError:
@@ -30,7 +30,7 @@ class Evaluator:
         raise NotImplementedError
 
 
-class PCGCEvaluator(Evaluator):  # TODO: color
+class PCGCEvaluator(Evaluator):
     def __init__(self,
                  mpeg_pcc_error_command: str,
                  mpeg_pcc_error_threads: int,
@@ -49,21 +49,25 @@ class PCGCEvaluator(Evaluator):  # TODO: color
                   targets: Union[List[torch.Tensor], torch.Tensor],
                   compressed_strings: List[bytes],
                   pc_data: PCData,
+                  preds_color: Union[List[torch.Tensor], torch.Tensor] = None,
+                  targets_color: Union[List[torch.Tensor], torch.Tensor] = None,
                   extra_info_dicts: List[Dict[str, Union[str, int, float]]] = None):
         """
-        "preds" and "targets" are supposed to be list contains unnormalized discrete
-        coordinates with resolution specified in pc_data.resolution.
+        "preds" and "targets" are supposed to be list contains unnormalized
+        coordinates with resolution specified in pc_data.resolution (GPU or CPU torch.int32).
+        "color" are supposed to be unnormalized RGBs (CPU torch.uint8).
         """
         batch_size = len(preds)
-        assert batch_size == \
-               len(targets) == \
-               len(compressed_strings)
+        assert batch_size == len(targets) == len(compressed_strings)
         if self.compute_chamfer_loss:
             assert batch_size == len(pc_data.resolution)
         if pc_data.results_dir is not None:
-            assert batch_size == \
-                   len(pc_data.resolution) == \
-                   len(pc_data.file_path)
+            assert batch_size == len(pc_data.resolution) == len(pc_data.file_path)
+        if preds_color is not None or targets_color is not None:
+            have_color = True
+            assert batch_size == len(preds_color) == len(targets_color)
+        else:
+            have_color = False
 
         for idx in range(batch_size):
             file_info_dict = {}
@@ -103,16 +107,16 @@ class PCGCEvaluator(Evaluator):  # TODO: color
                 )
                 if extra_info_dicts is not None:
                     file_info_dict.update(extra_info_dicts[idx])
-                write_xyz_to_ply_file(pred, reconstructed_path)
+                write_ply_file(pred, reconstructed_path, rgb=preds_color[idx] if have_color else None)
 
                 if self.mpeg_pcc_error_command != '':
                     if not file_path.endswith('.ply') or pc_data.ori_resolution is None:
                         file_path = out_file_path + '.ply'
-                        write_xyz_to_ply_file(target, file_path)
+                        write_ply_file(target, file_path, rgb=targets_color[idx] if have_color else None)
                     mpeg_pc_error_dict = mpeg_pc_error(
                         os.path.abspath(file_path),
                         os.path.abspath(reconstructed_path),
-                        resolution=resolution, normal=False,
+                        resolution=resolution, normal=False, color=have_color,
                         command=self.mpeg_pcc_error_command,
                         threads=self.mpeg_pcc_error_threads)
                     assert mpeg_pc_error_dict != {}, \

@@ -209,11 +209,16 @@ class GenerativeUpsample(nn.Module):
                 keep_target = self.get_target(fea, pred, message.target_key, False)
                 message.cached_metric_list.append(
                     precision_recall(pred=keep, tgt=keep_target))
+            message.cached_pred_list.append(self.pruning(pred, keep))
             if self.enable_fea_pruning:
-                message.fea = self.pruning(fea, keep)
+                # Avoid pruning twice (which brings duplicated coordinates in cm,
+                message.fea = ME.SparseTensor(
+                    fea.F[keep],
+                    coordinate_map_key=message.cached_pred_list[-1].coordinate_map_key,
+                    coordinate_manager=fea.coordinate_manager
+                )
             else:
                 message.fea = None
-            message.cached_pred_list.append(self.pruning(pred, keep))
         return message
 
     @torch.no_grad()

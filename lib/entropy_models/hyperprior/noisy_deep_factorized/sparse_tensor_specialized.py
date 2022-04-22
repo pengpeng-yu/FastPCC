@@ -63,7 +63,7 @@ class GeoLosslessEntropyModel(nn.Module):
         self.coord_bytes_num_bytes = coord_bytes_num_bytes
         self.skip_encoding_top_fea = skip_encoding_top_fea
         self.upper_fea_grad_scaler_for_bits_loss = upper_fea_grad_scaler_for_bits_loss
-        assert self.skip_encoding_top_fea in ['no_skip', 'skip', 'skip_with_pred']
+        assert self.skip_encoding_top_fea in ['no_skip', 'skip']
         self.indexed_entropy_model_coord = ContinuousIndexedEntropyModel(
             prior_fn=coord_prior_fn,
             index_ranges=coord_index_ranges,
@@ -141,9 +141,6 @@ class GeoLosslessEntropyModel(nn.Module):
                 if idx == 0 and self.skip_encoding_top_fea == 'skip':
                     assert sub_hyper_decoder_fea is None
                     lower_fea_tilde = None
-                    fea_loss_dict = {}
-                elif idx == 0 and self.skip_encoding_top_fea == 'skip_with_pred':
-                    lower_fea_tilde = sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key)
                     fea_loss_dict = {}
                 elif self.hybrid_hyper_decoder_fea is True:  # no_skip
                     fea_info_pred = sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key).F
@@ -347,8 +344,6 @@ class GeoLosslessEntropyModel(nn.Module):
                     coordinate_map_key=coord_recon_key,
                     coordinate_manager=cm
                 )
-            elif idx == 0 and self.skip_encoding_top_fea == 'skip_with_pred':
-                lower_fea_recon = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
             elif self.hybrid_hyper_decoder_fea is True:  # no_skip
                 fea_info_pred = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key).F
                 fea_recon_channels = fea_info_pred.shape[1] // (

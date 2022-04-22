@@ -168,6 +168,7 @@ class Encoder(nn.Module):
                  value_scaler: float,
                  res_feature_channels: int,
                  res_fea_value_scaler: float,
+                 keep_raw_fea_as_res_fea: bool,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -179,7 +180,9 @@ class Encoder(nn.Module):
         self.points_num_scaler = points_num_scaler
         self.value_scaler = value_scaler
         self.res_feature_channels = res_feature_channels
+        self.if_gen_res_fea = res_feature_channels != 0
         self.res_fea_value_scaler = res_fea_value_scaler
+        self.keep_raw_fea_as_res_fea = keep_raw_fea_as_res_fea
         if intra_channels[0] != 0:
             self.first_block = ConvBlock(
                 in_channels, intra_channels[0], 3, 1,
@@ -195,7 +198,14 @@ class Encoder(nn.Module):
             use_batch_norm, act,
             use_batch_norm, last_act
         )
-        if self.res_feature_channels != 0:
+        if self.if_gen_res_fea:
+            self.conv_gate_list = nn.ModuleList([
+                ConvBlock(
+                    res_feature_channels, intra_ch, 2, 2,
+                    region_type='HYPER_CUBE',
+                    bn=use_batch_norm, act=None
+                ) for intra_ch in intra_channels[2:]
+            ])
             self.conv_out_list = nn.ModuleList([
                 ConvBlock(
                     intra_ch, res_feature_channels, 3, 1,
@@ -203,19 +213,85 @@ class Encoder(nn.Module):
                     bn=use_batch_norm, act=None
                 ) for intra_ch in intra_channels[1:-1]
             ])
+            if not self.keep_raw_fea_as_res_fea:
+                self.conv_gate_list.insert(
+                    0, ConvBlock(
+                        in_channels, intra_channels[1], 2, 2,
+                        region_type='HYPER_CUBE',
+                        bn=use_batch_norm, act=None
+                    )
+                )
+                self.conv_out_list.insert(
+                    0, ConvBlock(
+                        intra_channels[0], in_channels, 3, 1,
+                        region_type=region_type,
+                        bn=use_batch_norm, act=None
+                    ))
 
-    def forward(self, x) -> Union[ME.SparseTensor, List[ME.SparseTensor], Optional[List[List[int]]]]:
+    def forward(self, x) -> Tuple[List[ME.SparseTensor], Optional[List[List[int]]]]:
         points_num_list = [[_.shape[0] for _ in x.decomposed_coordinates]]
-        strided_fea_list = [x]  # Here, x is supposed to be the original point cloud.
+        strided_fea_list = []
+        cm = x.coordinate_manager
 
-        if self.first_block is not None:
-            x = self.first_block(x)
-
-        for idx, block in enumerate(self.blocks):
-            x = block(x)
+        if not self.if_gen_res_fea:
             strided_fea_list.append(x)
-            if idx != len(self.blocks) - 1:
-                points_num_list.append([_.shape[0] for _ in x.decomposed_coordinates])
+            if self.first_block is not None:
+                x = self.first_block(x)
+            for idx, block in enumerate(self.blocks):
+                x = block(x)
+                strided_fea_list.append(x)
+                if idx != len(self.blocks) - 1:
+                    points_num_list.append([_.shape[0] for _ in x.decomposed_coordinates])
+
+        elif self.if_gen_res_fea:
+            if self.keep_raw_fea_as_res_fea:
+                strided_fea_list.append(x)
+                if self.first_block is not None:
+                    x = self.first_block(x)
+                for idx, block in enumerate(self.blocks):
+                    x = block(x)
+                    if idx != 0:
+                        forget = torch.sigmoid((self.conv_gate_list[idx - 1](strided_fea_list[-1])).F)
+                        x = ME.SparseTensor(
+                            features=(forget * x.F),
+                            coordinate_map_key=x.coordinate_map_key,
+                            coordinate_manager=cm
+                        )
+                    if idx != len(self.blocks) - 1:
+                        strided_fea_list.append(self.conv_out_list[idx](x))
+                    else:
+                        strided_fea_list.append(x)
+                    if idx != len(self.blocks) - 1:
+                        points_num_list.append([_.shape[0] for _ in x.decomposed_coordinates])
+                if self.res_fea_value_scaler != 1:
+                    for idx in range(1, len(strided_fea_list) - 1):
+                        strided_fea_list[idx] = minkowski_tensor_wrapped_op(
+                            strided_fea_list[idx], lambda _: _ * self.res_fea_value_scaler
+                        )
+
+            elif not self.keep_raw_fea_as_res_fea:
+                if self.first_block is not None:
+                    x = self.first_block(x)
+                strided_fea_list.append(self.conv_out_list[0](x))
+                for idx, block in enumerate(self.blocks):
+                    x = block(x)
+                    forget = torch.sigmoid((self.conv_gate_list[idx](strided_fea_list[-1])).F)
+                    x = ME.SparseTensor(
+                        features=(forget * x.F),
+                        coordinate_map_key=x.coordinate_map_key,
+                        coordinate_manager=cm
+                    )
+                    if idx != len(self.blocks) - 1:
+                        strided_fea_list.append(self.conv_out_list[idx + 1](x))
+                    else:
+                        strided_fea_list.append(x)
+                    if idx != len(self.blocks) - 1:
+                        points_num_list.append([_.shape[0] for _ in x.decomposed_coordinates])
+                if self.res_fea_value_scaler != 1:
+                    for idx in range(len(strided_fea_list) - 1):
+                        strided_fea_list[idx] = minkowski_tensor_wrapped_op(
+                            strided_fea_list[idx], lambda _: _ * self.res_fea_value_scaler
+                        )
 
         if not self.requires_points_num_list:
             points_num_list = None
@@ -230,18 +306,12 @@ class Encoder(nn.Module):
         #   2. scaled
         #   3. have suitable channels (depends on compressed data channels).
         # The original point cloud is treated as a special feature and left untouched.
-        if self.res_feature_channels != 0:
-            for idx in range(1, len(strided_fea_list) - 1):
-                strided_fea_list[idx] = minkowski_tensor_wrapped_op(
-                    self.conv_out_list[idx - 1](strided_fea_list[idx]),
-                    lambda _: _ * self.res_fea_value_scaler
-                )
-
         # If there is another encoder after this one,
         # we will make the final output of this encoder
         #   1. activated
         #   2. unscaled (which is supposed to be done by the next encoder)
         #   3. have suitable channels (depends on the next encoder).
+
         if self.value_scaler != 1:
             strided_fea_list[-1] = minkowski_tensor_wrapped_op(
                 strided_fea_list[-1], lambda _: _ * self.value_scaler
@@ -430,7 +500,7 @@ class EncoderRecurrent(nn.Module):
             gate_channels,
             2, 2,
             region_type='HYPER_CUBE',
-            bn=use_batch_norm, act=act
+            bn=use_batch_norm, act=None
         )
         self.conv_c = make_downsample_blocks(
             hidden_channels, hidden_channels, (hidden_channels,),

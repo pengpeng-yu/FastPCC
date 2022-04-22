@@ -39,7 +39,6 @@ class ModelConfig(SimpleConfig):
     # Lossless compression settings
     lossless_coord_enabled: bool = False
     lossless_color_enabled: bool = False
-    lossless_part_upper_fea_grad_scaler: float = 1.0
     lossless_coord_indexes_range: Tuple[int, ...] = (8, 8, 8, 8)
     lossless_hybrid_hyper_decoder_fea: bool = False
 

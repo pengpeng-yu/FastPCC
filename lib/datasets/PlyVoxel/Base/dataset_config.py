@@ -14,6 +14,7 @@ class DatasetConfig(SimpleConfig):
 
     with_color: bool = False
     with_normal: bool = False
+    random_rotation: bool = False
 
     ori_resolution: Union[int, Tuple[int, ...]] = (512, 1024, 2048)  # depends on the datasets themselves
     resolution: Union[int, Tuple[int, ...]] = (512, 1024, 2048)  # target resolution

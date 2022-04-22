@@ -265,24 +265,43 @@ def im_pad(
     return holder, valid_range
 
 
-def write_xyz_to_ply_file(
+def write_ply_file(
         xyz: Union[torch.Tensor, np.ndarray],
         file_path: str,
-        ply_dtype: str = '<f4',
-        write_ascii: bool = True,
+        xyz_dtype: str = '<f4',
+        rgb: Union[torch.Tensor, np.ndarray] = None,
+        write_ascii: bool = False,
         make_dirs: bool = False) -> None:
     if make_dirs:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
     if isinstance(xyz, torch.Tensor):
         xyz = xyz.cpu().numpy()
     assert xyz.shape[1] == 3 and xyz.dtype in (np.int32, np.int64)
-    xyz_with_properties = np.empty(
-        len(xyz), dtype=[('x', ply_dtype), ('y', ply_dtype), ('z', ply_dtype)]
-    )
-    xyz_with_properties['x'] = xyz[:, 0].astype(ply_dtype)
-    xyz_with_properties['y'] = xyz[:, 1].astype(ply_dtype)
-    xyz_with_properties['z'] = xyz[:, 2].astype(ply_dtype)
-    el = PlyElement.describe(xyz_with_properties, 'vertex')
+    xyz = xyz.astype(xyz_dtype)
+    rgb_dtype = np.uint8
+    if isinstance(rgb, torch.Tensor):
+        rgb = rgb.cpu().numpy()
+    if rgb is not None:
+        assert rgb.shape[1] == 3 and rgb.shape[0] == xyz.shape[0]
+        assert rgb.dtype in (np.float32, rgb_dtype)
+        rgb = rgb.astype(rgb_dtype)
+    if rgb is None:
+        el_with_properties = np.empty(
+            len(xyz), dtype=[('x', xyz_dtype), ('y', xyz_dtype), ('z', xyz_dtype)]
+        )
+    else:
+        el_with_properties = np.empty(
+            len(xyz), dtype=[('x', xyz_dtype), ('y', xyz_dtype), ('z', xyz_dtype),
+                             ('r', rgb_dtype), ('g', rgb_dtype), ('b', rgb_dtype)]
+        )
+    el_with_properties['x'] = xyz[:, 0]
+    el_with_properties['y'] = xyz[:, 1]
+    el_with_properties['z'] = xyz[:, 2]
+    if rgb is not None:
+        el_with_properties['r'] = rgb[:, 0]
+        el_with_properties['g'] = rgb[:, 1]
+        el_with_properties['b'] = rgb[:, 2]
+    el = PlyElement.describe(el_with_properties, 'vertex')
     PlyData([el], text=write_ascii).write(file_path)
 
 
