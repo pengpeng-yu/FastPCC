@@ -27,7 +27,7 @@ from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
 from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
     GeoLosslessNoisyDeepFactorizedEntropyModel
 
-from models.convolutional.baseline.layers import \
+from models.convolutional.baseline.layers import Scaler, \
     Encoder, Decoder, \
     HyperEncoder, HyperDecoder, \
     HyperDecoderGenUpsample, HyperDecoderUpsample, \
@@ -163,12 +163,15 @@ class PCC(nn.Module):
             )
 
         def parameter_fns_factory(in_channels, out_channels):
-            return nn.Sequential(
+            ret = [
                 MLPBlock(in_channels, out_channels,
                          bn=None, act=self.cfg.activation),
                 nn.Linear(out_channels, out_channels,
                           bias=True)
-            )
+            ]
+            if self.cfg.prior_indexes_post_scaler != 1.0:
+                ret.insert(0, Scaler(self.cfg.prior_indexes_post_scaler))
+            return nn.Sequential(*ret)
         em = self.init_em(parameter_fns_factory)
         if cfg.lossless_coord_enabled or cfg.recurrent_part_enabled:
             self.em = None

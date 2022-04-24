@@ -19,6 +19,7 @@ class ModelConfig(SimpleConfig):
     compressed_channels: int = 8
     encoder_scaler: float = 1.0
     prior_indexes_scaler: float = 1.0
+    prior_indexes_post_scaler: float = 1.0
     prior_indexes_range: Tuple[int, ...] = (64, )
 
     # Normal part of network

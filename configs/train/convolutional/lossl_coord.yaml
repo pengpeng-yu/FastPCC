@@ -2,15 +2,18 @@ include "configs/train/convolutional/baseline.yaml"
 
 model:
   basic_block_num: 2
-  compressed_channels: 4
-  prior_indexes_scaler: 10.0
-  prior_indexes_range: [16, 16, 16, 16]
+  compressed_channels: 8
+  prior_indexes_scaler: 256.0
+  prior_indexes_post_scaler: 0.00390625
+  prior_indexes_range: [256, 256]
+  encoder_channels: [4, 16, 64]
+  decoder_channels: [16, 4]
   hyperprior: 'None'
   recurrent_part_enabled: True
   recurrent_part_channels: 64
   lossless_coord_enabled: True
-  lossless_coord_indexes_range: [32, 32]
+  lossless_coord_indexes_range: [256, 256]
   lossless_hybrid_hyper_decoder_fea: False
   bpp_loss_factor: 1.0
-  warmup_steps: 40000
+  warmup_steps: 80000
   warmup_bpp_loss_factor: 0.01

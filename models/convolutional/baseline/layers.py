@@ -12,6 +12,15 @@ from lib.sparse_conv_layers import \
 from lib.torch_utils import minkowski_tensor_wrapped_op
 
 
+class Scaler(nn.Module):
+    def __init__(self, scaler):
+        super(Scaler, self).__init__()
+        self.scaler = scaler
+
+    def forward(self, x):
+        return x * self.scaler
+
+
 class ResBlock(nn.Module):
     def __init__(self, channels, region_type: str, bn: bool, act: Optional[str]):
         super(ResBlock, self).__init__()
@@ -218,7 +227,7 @@ class Encoder(nn.Module):
                     0, ConvBlock(
                         in_channels, intra_channels[1], 2, 2,
                         region_type='HYPER_CUBE',
-                        bn=use_batch_norm, act=None
+                        bn=use_batch_norm, act=act
                     )
                 )
                 self.conv_out_list.insert(
@@ -500,7 +509,7 @@ class EncoderRecurrent(nn.Module):
             gate_channels,
             2, 2,
             region_type='HYPER_CUBE',
-            bn=use_batch_norm, act=None
+            bn=use_batch_norm, act=act
         )
         self.conv_c = make_downsample_blocks(
             hidden_channels, hidden_channels, (hidden_channels,),
