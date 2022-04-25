@@ -92,9 +92,7 @@ class PCC(nn.Module):
             cfg.encoder_scaler if not cfg.recurrent_part_enabled else 1,
             0 if not cfg.lossless_coord_enabled else cfg.compressed_channels,
             cfg.encoder_scaler,
-            not (cfg.lossless_coord_enabled and
-                 cfg.input_feature_type == 'Color'
-                 and not cfg.lossless_color_enabled),
+            cfg.input_feature_type == 'Color' and cfg.lossless_color_enabled,
             *self.basic_block_args,
             None if not cfg.recurrent_part_enabled else cfg.activation
         )
@@ -148,9 +146,9 @@ class PCC(nn.Module):
                 enc_lossl = EncoderPartiallyRecurrent(encoder)
             else:
                 enc_lossl = EncoderPartiallyRecurrent(encoder, self.init_enc_rec())
-                hyper_dec_coord_lossl_out_chnls += (hyper_dec_coord_lossl_out_chnls[-1],)
+                hyper_dec_coord_lossl_out_chnls += (len(cfg.lossless_coord_indexes_range),)
                 hyper_dec_coord_lossl_intra_chnls += (cfg.recurrent_part_channels,)
-                hyper_dec_fea_lossl_out_chnls += (hyper_dec_fea_lossl_out_chnls[-1],)
+                hyper_dec_fea_lossl_out_chnls += (self.em_lossl_dec_fea_chnls,)
                 hyper_dec_fea_lossl_intra_chnls += (cfg.recurrent_part_channels,)
 
             hyper_dec_coord_lossl = self.init_hyper_dec_gen_up_rec(

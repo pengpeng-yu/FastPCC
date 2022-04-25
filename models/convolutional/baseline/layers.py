@@ -125,6 +125,8 @@ class NNSequentialWithConvTransBlockArgs(nn.Sequential):
                 used_flag = True
             else:
                 x = m(x)
+        if args or kwargs:
+            assert used_flag
         return x
 
 
@@ -177,7 +179,7 @@ class Encoder(nn.Module):
                  value_scaler: float,
                  res_feature_channels: int,
                  res_fea_value_scaler: float,
-                 keep_raw_fea_as_res_fea: bool,
+                 keep_raw_fea_in_strided_list: bool,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -189,18 +191,14 @@ class Encoder(nn.Module):
         self.points_num_scaler = points_num_scaler
         self.value_scaler = value_scaler
         self.res_feature_channels = res_feature_channels
-        self.if_gen_res_fea = res_feature_channels != 0
+        self.if_gen_res_fea = res_feature_channels != 0 and len(intra_channels) >= 3
         self.res_fea_value_scaler = res_fea_value_scaler
-        self.keep_raw_fea_as_res_fea = keep_raw_fea_as_res_fea
-        if intra_channels[0] != 0:
-            self.first_block = ConvBlock(
-                in_channels, intra_channels[0], 3, 1,
-                region_type=region_type,
-                bn=use_batch_norm, act=act
-            )
-        else:
-            self.first_block = None
-            intra_channels = (in_channels, *intra_channels[1:])
+        self.keep_raw_fea_in_strided_list = keep_raw_fea_in_strided_list
+        self.first_block = ConvBlock(
+            in_channels, intra_channels[0], 3, 1,
+            region_type=region_type,
+            bn=use_batch_norm, act=act
+        )
         self.blocks = make_downsample_blocks(
             intra_channels[0], out_channels, intra_channels[1:],
             basic_block_type, region_type, basic_block_num,
@@ -222,7 +220,7 @@ class Encoder(nn.Module):
                     bn=use_batch_norm, act=None
                 ) for intra_ch in intra_channels[1:-1]
             ])
-            if not self.keep_raw_fea_as_res_fea:
+            if not self.keep_raw_fea_in_strided_list:
                 self.conv_gate_list.insert(
                     0, ConvBlock(
                         in_channels, intra_channels[1], 2, 2,
@@ -243,9 +241,11 @@ class Encoder(nn.Module):
         cm = x.coordinate_manager
 
         if not self.if_gen_res_fea:
-            strided_fea_list.append(x)
-            if self.first_block is not None:
-                x = self.first_block(x)
+            if self.keep_raw_fea_in_strided_list:
+                strided_fea_list.append(x)
+            x = self.first_block(x)
+            if not self.keep_raw_fea_in_strided_list:
+                strided_fea_list.append(x)
             for idx, block in enumerate(self.blocks):
                 x = block(x)
                 strided_fea_list.append(x)
@@ -253,10 +253,9 @@ class Encoder(nn.Module):
                     points_num_list.append([_.shape[0] for _ in x.decomposed_coordinates])
 
         elif self.if_gen_res_fea:
-            if self.keep_raw_fea_as_res_fea:
+            if self.keep_raw_fea_in_strided_list:
                 strided_fea_list.append(x)
-                if self.first_block is not None:
-                    x = self.first_block(x)
+                x = self.first_block(x)
                 for idx, block in enumerate(self.blocks):
                     x = block(x)
                     if idx != 0:
@@ -278,9 +277,8 @@ class Encoder(nn.Module):
                             strided_fea_list[idx], lambda _: _ * self.res_fea_value_scaler
                         )
 
-            elif not self.keep_raw_fea_as_res_fea:
-                if self.first_block is not None:
-                    x = self.first_block(x)
+            elif not self.keep_raw_fea_in_strided_list:
+                x = self.first_block(x)
                 strided_fea_list.append(self.conv_out_list[0](x))
                 for idx, block in enumerate(self.blocks):
                     x = block(x)
