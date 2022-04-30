@@ -14,6 +14,7 @@ class ModelConfig(SimpleConfig):
     basic_block_num: int = 3
     use_batch_norm: bool = False
     activation: str = 'relu'
+    first_conv_kernel_size: int = 3
 
     # Basic compression settings
     compressed_channels: int = 8

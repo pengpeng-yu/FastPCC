@@ -174,6 +174,7 @@ class Encoder(nn.Module):
                  in_channels,
                  out_channels,
                  intra_channels: Tuple[int, ...],
+                 first_conv_kernel_size: int,
                  requires_points_num_list: bool,
                  points_num_scaler: float,
                  value_scaler: float,
@@ -195,7 +196,7 @@ class Encoder(nn.Module):
         self.res_fea_value_scaler = res_fea_value_scaler
         self.keep_raw_fea_in_strided_list = keep_raw_fea_in_strided_list
         self.first_block = ConvBlock(
-            in_channels, intra_channels[0], 3, 1,
+            in_channels, intra_channels[0], first_conv_kernel_size, 1,
             region_type=region_type,
             bn=use_batch_norm, act=act
         )

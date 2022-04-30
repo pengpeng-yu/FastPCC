@@ -87,6 +87,7 @@ class PCC(nn.Module):
             cfg.compressed_channels if not cfg.recurrent_part_enabled
             else cfg.recurrent_part_channels,
             cfg.encoder_channels,
+            cfg.first_conv_kernel_size,
             cfg.adaptive_pruning,
             cfg.adaptive_pruning_num_scaler,
             cfg.encoder_scaler if not cfg.recurrent_part_enabled else 1,
