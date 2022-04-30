@@ -1,7 +1,9 @@
 import os
+import hashlib
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+import open3d as o3d
 import torch
 import torch.utils.data
 
@@ -9,7 +11,8 @@ try:
     import MinkowskiEngine as ME
 except ImportError: ME = None
 
-from lib.data_utils import binvox_rw, PCData, pc_data_collate_fn
+from lib.torch_utils import kd_tree_partition
+from lib.data_utils import binvox_rw, PCData, pc_data_collate_fn, write_ply_file
 from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
 from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coords
 
@@ -81,6 +84,42 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         except AssertionError as e:
             logger.info('wrong number of files.')
             raise e
+
+        self.cache_root = os.path.join(
+            cfg.root, 'cache',
+            hashlib.new(
+                'md5',
+                f'{filelist_abs_path} '
+                f'{cfg.mesh_sample_points_num} '
+                f'{cfg.mesh_sample_point_method} '
+                f'{cfg.ply_cache_dtype} '
+                f'{cfg.kd_tree_partition_max_points_num}'.encode('utf-8')
+            ).hexdigest()
+        )
+        if cfg.data_format == '.obj':
+            self.cached_file_list = [
+                _.replace(cfg.root, self.cache_root, 1).replace('.obj', '.ply', 1)
+                for _ in self.file_list]
+            if os.path.isfile(os.path.join(
+                self.cache_root,
+                'train_all_cached' if is_training else 'test_all_cached'
+            )):
+                self.file_list = self.cached_file_list
+                self.use_cache = True
+                self.gen_cache = False
+            else:
+                os.makedirs(self.cache_root, exist_ok=True)
+                with open(os.path.join(self.cache_root, 'dataset_config.yaml'), 'w') as f:
+                    f.write(cfg.to_yaml())
+                self.use_cache = False
+                self.gen_cache = True
+        else:
+            self.cached_file_list = None
+            self.use_cache = self.gen_cache = False
+
+        if cfg.data_format != '.obj':
+            assert cfg.mesh_sample_points_num % cfg.kd_tree_partition_max_points_num == 0
+
         self.cfg = cfg
 
     def __len__(self):
@@ -92,12 +131,31 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             with open(file_path, 'rb') as f:
                 xyz = binvox_rw.read_as_coord_array(f).data.T.astype(np.float64)
                 xyz = np.ascontiguousarray(xyz)
+                if self.cfg.kd_tree_partition_max_points_num != 0:
+                    xyz = kd_tree_partition(torch.from_numpy(xyz), self.cfg.kd_tree_partition_max_points_num)
+                    xyz = xyz[np.random.randint(len(xyz))].numpy()
         else:
-            xyz = o3d_coords_sampled_from_triangle_mesh(
-                file_path,
-                self.cfg.mesh_sample_points_num,
-                sample_method=self.cfg.mesh_sample_point_method,
-            )[0]
+            if self.use_cache:
+                xyz = np.asarray(o3d.io.read_point_cloud(file_path).points)
+                partitions_num = self.cfg.mesh_sample_points_num // self.cfg.kd_tree_partition_max_points_num
+                xyz = xyz.reshape((partitions_num, -1, 3))
+                xyz = xyz[np.random.randint(partitions_num)]
+            else:
+                xyz = o3d_coords_sampled_from_triangle_mesh(
+                    file_path,
+                    self.cfg.mesh_sample_points_num,
+                    sample_method=self.cfg.mesh_sample_point_method,
+                )[0]
+                xyz = torch.cat(kd_tree_partition(
+                    torch.from_numpy(xyz), self.cfg.kd_tree_partition_max_points_num
+                ), 0).numpy()
+                if self.gen_cache:
+                    cache_file_path = self.cached_file_list[index]
+                    os.makedirs(os.path.dirname(cache_file_path), exist_ok=True)
+                    if os.path.exists(cache_file_path):
+                        raise FileExistsError(cache_file_path)
+                    write_ply_file(xyz, self.cached_file_list[index], xyz_dtype=self.cfg.ply_cache_dtype)
+                    return
 
         if self.cfg.random_rotation:
             xyz = R.random().apply(xyz)
@@ -130,8 +188,10 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
 if __name__ == '__main__':
     config = DatasetConfig()
-    # config.data_format = '.obj'
-    config.mesh_sample_points_num = 5000000
+    config.data_format = '.obj'
+    config.train_filelist_path = 'train_list_obj.txt'
+    config.mesh_sample_points_num = 500000
+    config.resolution = 256
 
     from loguru import logger
     dataset = ShapeNetCorev2(config, True, logger)

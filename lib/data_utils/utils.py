@@ -276,7 +276,7 @@ def write_ply_file(
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
     if isinstance(xyz, torch.Tensor):
         xyz = xyz.cpu().numpy()
-    assert xyz.shape[1] == 3 and xyz.dtype in (np.int32, np.int64)
+    assert xyz.shape[1] == 3 and xyz.dtype in (np.int32, np.int64, np.float32, np.float64)
     xyz = xyz.astype(xyz_dtype)
     rgb_dtype = np.uint8
     if isinstance(rgb, torch.Tensor):
@@ -334,7 +334,7 @@ def o3d_coords_sampled_from_triangle_mesh(
         if sample_method == 'poisson_disk':
             point_cloud = mesh_object.sample_points_poisson_disk(points_num)
         elif sample_method == 'uniform':
-            point_cloud = mesh_object.sample_points_poisson_disk(points_num)
+            point_cloud = mesh_object.sample_points_uniformly(points_num)
         else:
             raise NotImplementedError
         coord = np.asarray(point_cloud.points)
@@ -342,9 +342,22 @@ def o3d_coords_sampled_from_triangle_mesh(
     return coord, color
 
 
-def normalize_coords(xyz: np.ndarray):
+def normalize_coords(xyz: np.ndarray, random_crop: bool = False, random_crop_ratio: float = 0.5):
     coord_max = xyz.max(axis=0, keepdims=True)
     coord_min = xyz.min(axis=0, keepdims=True)
+    if random_crop is True:
+        assert 0 < random_crop_ratio < 1
+        box_size = (coord_max - coord_min) * random_crop_ratio
+        origin_range = coord_max - box_size - coord_min
+        while True:
+            coord_min = np.random.rand(3) * origin_range + coord_min
+            coord_max = coord_min + box_size
+            valid_mask = ((xyz >= coord_min) & (xyz <= coord_max)).sum(1) == 3
+            if np.any(valid_mask):
+                break
+            else:
+                print('Warning: bad crop')
+        xyz = xyz[valid_mask]
     xyz = (xyz - coord_min) / (coord_max - coord_min).max()
     return xyz
 
