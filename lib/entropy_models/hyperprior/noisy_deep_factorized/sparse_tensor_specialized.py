@@ -1,4 +1,5 @@
 import io
+import math
 from typing import List, Tuple, Union, Dict, Any, Callable
 
 import torch
@@ -40,8 +41,6 @@ class GeoLosslessEntropyModel(nn.Module):
 
                  hyper_decoder_coord_post_op: Callable = lambda x: x,
                  hyper_decoder_fea_post_op: Callable = lambda x: x,
-                 fea_bytes_num_bytes: int = 2,
-                 coord_bytes_num_bytes: int = 2,
 
                  skip_encoding_top_fea: str = 'no_skip',
                  upper_fea_grad_scaler_for_bits_loss: float = 1.0,
@@ -59,8 +58,6 @@ class GeoLosslessEntropyModel(nn.Module):
         self.hybrid_hyper_decoder_fea = hybrid_hyper_decoder_fea
         self.hyper_decoder_coord_post_op = hyper_decoder_coord_post_op
         self.hyper_decoder_fea_post_op = hyper_decoder_fea_post_op
-        self.fea_bytes_num_bytes = fea_bytes_num_bytes
-        self.coord_bytes_num_bytes = coord_bytes_num_bytes
         self.skip_encoding_top_fea = skip_encoding_top_fea
         self.upper_fea_grad_scaler_for_bits_loss = upper_fea_grad_scaler_for_bits_loss
         assert self.skip_encoding_top_fea in ['no_skip', 'skip']
@@ -203,6 +200,7 @@ class GeoLosslessEntropyModel(nn.Module):
         # be added in minkowski_tensor_wrapped_fn(),
         # thus all the inputs of entropy models are supposed to
         # have batch size == 1.
+        # TODO: Call each em.compress() only once?
 
         strided_fea_list = self.encoder(y_top, coder_num)
         *strided_fea_list, bottom_fea = strided_fea_list
@@ -284,14 +282,7 @@ class GeoLosslessEntropyModel(nn.Module):
                     )
             fea_strings.append(fea_string)
 
-        partial_concat_string = self.concat_strings(
-            [fea_strings, coord_strings],
-            [self.fea_bytes_num_bytes, self.coord_bytes_num_bytes]
-        )
-        concat_string = self.concat_strings(
-            [[bottom_fea_string], [partial_concat_string]],
-            [self.fea_bytes_num_bytes, 0]
-        )
+        concat_string = self.concat_strings([bottom_fea_string, *fea_strings, *coord_strings])  #
         return concat_string, bottom_fea_recon
 
     def decompress(self,
@@ -300,13 +291,10 @@ class GeoLosslessEntropyModel(nn.Module):
                    sparse_tensor_coords_tuple: Tuple[ME.CoordinateMapKey, ME.CoordinateManager],
                    coder_num: int) \
             -> ME.SparseTensor:
-        (bottom_fea_string,), (partial_concat_string,) = self.split_strings(
-            concat_string, 1, [self.fea_bytes_num_bytes, 0]
-        )
-        fea_strings, coord_strings = self.split_strings(
-            partial_concat_string, coder_num,
-            [self.fea_bytes_num_bytes, self.coord_bytes_num_bytes]
-        )
+        split_string = self.split_strings(concat_string, coder_num * 2 + 1)
+        bottom_fea_string = split_string[0]
+        fea_strings = split_string[1: coder_num + 1]
+        coord_strings = split_string[coder_num + 1:]
         strided_fea_recon_list = []
         cm = sparse_tensor_coords_tuple[1]
 
@@ -375,44 +363,56 @@ class GeoLosslessEntropyModel(nn.Module):
         return strided_fea_recon_list[-1]
 
     @staticmethod
-    def concat_strings(strings_lists: List[List[bytes]],
-                       length_bytes_numbers: List[int] = None) -> bytes:
-        strings_lists_num = len(strings_lists)
-        if length_bytes_numbers is None:
-            length_bytes_numbers = [4] * strings_lists_num
-        else:
-            assert strings_lists_num == len(length_bytes_numbers)
-        strings_num_one_list = len(strings_lists[0])
-        for strings_list in strings_lists[1:]:
-            assert len(strings_list) == strings_num_one_list
+    def concat_strings(bytes_list: List[bytes]):
+        assert len(bytes_list) >= 2
+        bytes_len_list = []
+        for _ in bytes_list:
+            bytes_len = len(_)
+            assert bytes_len >= 1
+            bytes_len_list.append(bytes_len - 1)
 
-        with io.BytesIO() as bs:
-            for idx, strings in enumerate(zip(*strings_lists)):
-                for i, (string, bytes_num) in enumerate(zip(strings, length_bytes_numbers)):
-                    if idx != strings_num_one_list - 1 or i != strings_lists_num - 1:
-                        bs.write(len(string).to_bytes(bytes_num, 'little', signed=False))
-                    bs.write(string)
+        bytes_len_bytes_list = []
+        bytes_len_bytes_len_list = []
+        for bytes_len in bytes_len_list:
+            bytes_len_bytes_len = math.ceil(bytes_len.bit_length() / 8)
+            bytes_len_bytes_list.append(bytes_len.to_bytes(bytes_len_bytes_len, 'little'))
+            bytes_len_bytes_len_list.append(bytes_len_bytes_len)
 
-            concat_string = bs.getvalue()
-        return concat_string
+        bytes_len_bytes_len_bits_list = []
+        for bytes_len_bytes_len in bytes_len_bytes_len_list:
+            assert 0 <= bytes_len_bytes_len <= 3
+            bytes_len_bytes_len_bits = f'{bytes_len_bytes_len:b}'
+            if len(bytes_len_bytes_len_bits) == 1:
+                bytes_len_bytes_len_bits = '0' + bytes_len_bytes_len_bits
+            bytes_len_bytes_len_bits_list.append(bytes_len_bytes_len_bits)
+        head_bytes = int(
+            '1' + ''.join(bytes_len_bytes_len_bits_list), 2
+        ).to_bytes(math.ceil(len(bytes_list) / 4 + 0.125), 'little')
+
+        concat_bytes = head_bytes + b''.join(bytes_len_bytes_list) + b''.join(bytes_list)
+        return concat_bytes
 
     @staticmethod
-    def split_strings(concat_string: bytes,
-                      strings_num_one_list: int,
-                      length_bytes_numbers: List[int]) -> List[List[bytes]]:
-        strings_lists_num = len(length_bytes_numbers)
-        strings_lists = [[] for _ in range(strings_lists_num)]
+    def split_strings(concat_bytes: bytes, bytes_list_len: int):
+        bs = io.BytesIO(concat_bytes)
+        head_bytes_len = math.ceil(bytes_list_len / 4 + 0.125)
+        head_bits = f"{int.from_bytes(bs.read(head_bytes_len), 'little'):b}"
 
-        with io.BytesIO(concat_string) as bs:
-            for idx in range(strings_num_one_list):
-                for i, bytes_num in enumerate(length_bytes_numbers):
-                    if idx != strings_num_one_list - 1 or i != strings_lists_num - 1:
-                        length = int.from_bytes(bs.read(bytes_num), 'little', signed=False)
-                        strings_lists[i].append(bs.read(length))
-                    else:
-                        strings_lists[i].append(bs.read())
+        bytes_len_bytes_len_list = []
+        for idx in range(1, bytes_list_len * 2 + 1, 2):
+            bytes_len_bytes_len_list.append(int(head_bits[idx: idx + 2], 2))
 
-        return strings_lists
+        bytes_len_list = []
+        for bytes_len_bytes_len in bytes_len_bytes_len_list:
+            bytes_len_list.append(int.from_bytes(bs.read(bytes_len_bytes_len), 'little') + 1)
+
+        bytes_list = []
+        for bytes_len in bytes_len_list:
+            bytes_list.append(bs.read(bytes_len))
+
+        assert bs.read() == b''
+        bs.close()
+        return bytes_list
 
     @staticmethod
     def get_coord_mask(
@@ -453,9 +453,6 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
                  hyper_decoder_fea: Union[nn.Module, nn.ModuleList],
                  hybrid_hyper_decoder_fea: bool,
 
-                 fea_bytes_num_bytes: int = 2,
-                 coord_bytes_num_bytes: int = 2,
-
                  coord_index_num_scales: int = 64,
                  coord_index_scale_min: float = 0.11,
                  coord_index_scale_max: float = 256,
@@ -483,7 +480,6 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
             NoisyNormal, (coord_index_num_scales,), coord_parameter_fns,
             NoisyNormal, (fea_index_num_scales,), fea_parameter_fns,
             lambda x: x, lambda x: x,
-            fea_bytes_num_bytes, coord_bytes_num_bytes,
             skip_encoding_top_fea, upper_fea_grad_scaler_for_bits_loss,
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
@@ -499,9 +495,6 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  hyper_decoder_coord: Union[nn.Module, nn.ModuleList],
                  hyper_decoder_fea: Union[nn.Module, nn.ModuleList],
                  hybrid_hyper_decoder_fea: bool,
-
-                 fea_bytes_num_bytes: int = 2,
-                 coord_bytes_num_bytes: int = 2,
 
                  coord_index_ranges: Tuple[int, ...] = (8, 8, 8, 8),
                  coord_parameter_fns_type: str = 'transform',
@@ -536,7 +529,6 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
             NoisyDeepFactorized, coord_index_ranges, coord_parameter_fns,
             NoisyDeepFactorized, fea_index_ranges, fea_parameter_fns,
             coord_indexes_view_fn, fea_indexes_view_fn,
-            fea_bytes_num_bytes, coord_bytes_num_bytes,
             skip_encoding_top_fea, upper_fea_grad_scaler_for_bits_loss,
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision

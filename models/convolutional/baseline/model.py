@@ -1,5 +1,5 @@
 import io
-from functools import partial, reduce
+from functools import partial
 from typing import List, Union, Tuple, Generator, Optional
 import math
 import os
@@ -254,8 +254,6 @@ class PCC(nn.Module):
             hyper_decoder_coord=hyper_decoder_coord_geo_lossless,
             hyper_decoder_fea=hyper_decoder_fea_geo_lossless,
             hybrid_hyper_decoder_fea=self.cfg.lossless_hybrid_hyper_decoder_fea,
-            fea_bytes_num_bytes=2,  # TODO: reduce overheads
-            coord_bytes_num_bytes=2,
             coord_index_ranges=self.cfg.lossless_coord_indexes_range,
             coord_parameter_fns_type='transform',
             coord_parameter_fns_factory=parameter_fns_factory,
@@ -541,10 +539,8 @@ class PCC(nn.Module):
 
         with io.BytesIO() as bs:
             if not self.cfg.lossless_coord_enabled and self.cfg.adaptive_pruning:
-                bs.write(reduce(
-                    lambda i, j: i + j,
-                    [_[0].to_bytes(3, 'little', signed=False)
-                     for _ in points_num_list]
+                bs.write(b''.join(
+                    (_[0].to_bytes(3, 'little', signed=False) for _ in points_num_list)
                 ))
             if self.cfg.recurrent_part_enabled:
                 bs.write(lossless_coder_num.to_bytes(1, 'little', signed=False))
@@ -564,9 +560,8 @@ class PCC(nn.Module):
             sparse_tensor_coords_list.append(sparse_tensor_coords)
 
         # Log bytes of each partition.
-        concat_string = reduce(lambda i, j: i + j,
-                               (len(s).to_bytes(3, 'little', signed=False) + s
-                                for s in compressed_string_list))
+        concat_string = b''.join((len(s).to_bytes(3, 'little', signed=False) + s
+                                 for s in compressed_string_list))
         return concat_string, sparse_tensor_coords_list
 
     def decompress(self, compressed_string: bytes, sparse_tensor_coords: Optional[torch.Tensor]

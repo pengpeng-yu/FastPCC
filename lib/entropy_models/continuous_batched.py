@@ -1,7 +1,6 @@
 import io
 from typing import List, Tuple, Dict, Union, Sequence
 import math
-from functools import reduce
 
 import torch
 import torch.distributions
@@ -131,11 +130,10 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         # Log broadcast shape.
         assert len(self.broadcast_shape_bytes) == len(broadcast_shape)
         if sum(self.broadcast_shape_bytes) != 0:
-            broadcast_shape_encoded = reduce(
-                lambda i, j: i + j,
-                (length.to_bytes(bytes_num, 'little', signed=False)
-                 for bytes_num, length in zip(self.broadcast_shape_bytes, broadcast_shape))
-            )
+            broadcast_shape_encoded = b''.join((
+                length.to_bytes(bytes_num, 'little', signed=False)
+                for bytes_num, length in zip(self.broadcast_shape_bytes, broadcast_shape)
+            ))
             # All the samples in a batch share the same broadcast_shape.
             strings = [broadcast_shape_encoded + s for s in strings]
 
