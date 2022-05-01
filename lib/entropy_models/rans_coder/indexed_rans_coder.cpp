@@ -94,9 +94,9 @@ std::vector<py::bytes> IndexedRansCoder::encode_with_indexes(
         RansState rans;
         RansEncInit(&rans);
 
-        for (size_t foward_sym_idx = 0; foward_sym_idx < symbols_num; ++foward_sym_idx)
+        for (size_t forward_sym_idx = 0; forward_sym_idx < symbols_num; ++forward_sym_idx)
         {
-            const size_t sym_idx = symbols_num - 1 - foward_sym_idx;
+            const size_t sym_idx = symbols_num - 1 - forward_sym_idx;
             const auto &cdf_idx = indexes[sym_idx];
             const auto &esyms = esyms_list[cdf_idx];
             const auto &offset = offsets[cdf_idx];

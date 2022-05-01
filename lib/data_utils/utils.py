@@ -292,15 +292,15 @@ def write_ply_file(
     else:
         el_with_properties = np.empty(
             len(xyz), dtype=[('x', xyz_dtype), ('y', xyz_dtype), ('z', xyz_dtype),
-                             ('r', rgb_dtype), ('g', rgb_dtype), ('b', rgb_dtype)]
+                             ('red', rgb_dtype), ('green', rgb_dtype), ('blue', rgb_dtype)]
         )
     el_with_properties['x'] = xyz[:, 0]
     el_with_properties['y'] = xyz[:, 1]
     el_with_properties['z'] = xyz[:, 2]
     if rgb is not None:
-        el_with_properties['r'] = rgb[:, 0]
-        el_with_properties['g'] = rgb[:, 1]
-        el_with_properties['b'] = rgb[:, 2]
+        el_with_properties['red'] = rgb[:, 0]
+        el_with_properties['green'] = rgb[:, 1]
+        el_with_properties['blue'] = rgb[:, 2]
     el = PlyElement.describe(el_with_properties, 'vertex')
     PlyData([el], text=write_ascii).write(file_path)
 
