@@ -137,23 +137,23 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         else:
             if self.use_cache:
                 xyz = np.asarray(o3d.io.read_point_cloud(file_path).points)
-                partitions_num = self.cfg.mesh_sample_points_num // self.cfg.kd_tree_partition_max_points_num
-                xyz = xyz.reshape((partitions_num, -1, 3))
-                xyz = xyz[np.random.randint(partitions_num)]
+                if self.cfg.kd_tree_partition_max_points_num != 0:
+                    partitions_num = self.cfg.mesh_sample_points_num // self.cfg.kd_tree_partition_max_points_num
+                    xyz = xyz.reshape((partitions_num, -1, 3))
+                    xyz = xyz[np.random.randint(partitions_num)]
             else:
                 xyz = o3d_coords_sampled_from_triangle_mesh(
                     file_path,
                     self.cfg.mesh_sample_points_num,
                     sample_method=self.cfg.mesh_sample_point_method,
                 )[0]
-                xyz = torch.cat(kd_tree_partition(
-                    torch.from_numpy(xyz), self.cfg.kd_tree_partition_max_points_num
-                ), 0).numpy()
+                if self.cfg.kd_tree_partition_max_points_num != 0:
+                    xyz = torch.cat(kd_tree_partition(
+                        torch.from_numpy(xyz), self.cfg.kd_tree_partition_max_points_num
+                    ), 0).numpy()
                 if self.gen_cache:
                     cache_file_path = self.cached_file_list[index]
                     os.makedirs(os.path.dirname(cache_file_path), exist_ok=True)
-                    if os.path.exists(cache_file_path):
-                        raise FileExistsError(cache_file_path)
                     write_ply_file(xyz, self.cached_file_list[index], xyz_dtype=self.cfg.ply_cache_dtype)
                     return
 
