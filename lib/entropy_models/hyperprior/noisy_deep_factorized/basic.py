@@ -86,75 +86,75 @@ class EntropyModel(nn.Module):
             return y_tilde, loss_dict
 
         else:
-            concat_strings, coding_batch_shape, rounded_y = self.compress(y)
+            concat_bytes_list, coding_batch_shape, rounded_y = self.compress(y)
             sparse_tensor_coords_tuple = get_minkowski_tensor_coords_tuple(y)
             y_recon = self.decompress(
-                concat_strings,
+                concat_bytes_list,
                 coding_batch_shape,
                 y.device,
                 sparse_tensor_coords_tuple
             )
-            return y_recon, concat_strings, coding_batch_shape
+            return y_recon, concat_bytes_list, coding_batch_shape
 
     def compress(self, y, return_dequantized: bool = False, estimate_bits: bool = False) \
             -> Union[Tuple[List[bytes], torch.Size, torch.Tensor],
                      Tuple[List[bytes], torch.Size, torch.Tensor, torch.Tensor]]:
         z = self.hyper_encoder_post_op(self.hyper_encoder(y))
-        prior_strings, coding_batch_shape, z_recon, *estimated_prior_bits = \
+        prior_bytes_list, coding_batch_shape, z_recon, *estimated_prior_bits = \
             self.hyperprior_entropy_model.compress(
                 z, return_dequantized=True, estimate_bits=estimate_bits
             )
         indexes = self.hyper_decoder_post_op(self.hyper_decoder(z_recon))
-        strings, rounded_y_or_dequantized_y, *estimated_bits = \
+        bytes_list, rounded_y_or_dequantized_y, *estimated_bits = \
             self.prior_entropy_model.compress(
                 y, indexes, return_dequantized=return_dequantized, estimate_bits=estimate_bits
             )
-        concat_strings = self.concat_strings(prior_strings, strings)
+        concat_bytes_list = self.concat_bytes_lists(prior_bytes_list, bytes_list)
         if estimated_bits:
-            return concat_strings, coding_batch_shape, rounded_y_or_dequantized_y, \
+            return concat_bytes_list, coding_batch_shape, rounded_y_or_dequantized_y, \
                    estimated_prior_bits[0] + estimated_bits[0]
         else:
-            return concat_strings, coding_batch_shape, rounded_y_or_dequantized_y,
+            return concat_bytes_list, coding_batch_shape, rounded_y_or_dequantized_y,
 
     def decompress(self,
-                   concat_strings: List[bytes],
+                   concat_bytes_list: List[bytes],
                    coding_batch_shape: torch.Size,
                    target_device: torch.device,
                    sparse_tensor_coords_tuple: Tuple = None) -> Any:
-        prior_strings, strings = self.split_strings(concat_strings)
+        prior_bytes_list, bytes_list = self.split_bytes_lists(concat_bytes_list)
         z_recon = self.hyperprior_entropy_model.decompress(
-            prior_strings, coding_batch_shape, target_device, False,
+            prior_bytes_list, coding_batch_shape, target_device, False,
             sparse_tensor_coords_tuple=sparse_tensor_coords_tuple
         )
         pre_indexes = self.hyper_decoder(z_recon)
         sparse_tensor_coords_tuple = get_minkowski_tensor_coords_tuple(pre_indexes)
         indexes = self.hyper_decoder_post_op(pre_indexes)
         y_recon = self.prior_entropy_model.decompress(
-            strings, indexes, target_device, False,
+            bytes_list, indexes, target_device, False,
             sparse_tensor_coords_tuple=sparse_tensor_coords_tuple
         )
         return y_recon
 
-    def concat_strings(self, prior_strings: List[bytes], strings: List[bytes]) -> List[bytes]:
+    def concat_bytes_lists(self, prior_bytes_list: List[bytes], bytes_list: List[bytes]) -> List[bytes]:
         return [len(i).to_bytes(self.prior_bytes_num_bytes, 'little', signed=False) + i + j
-                for i, j in zip(prior_strings, strings)]
+                for i, j in zip(prior_bytes_list, bytes_list)]
 
-    def split_strings(self, concat_strings: List[bytes]) -> Tuple[List[bytes], List[bytes]]:
-        prior_strings = []
-        strings = []
-        for concat_s in concat_strings:
-            prior_strings_len = int.from_bytes(
-                concat_s[:self.prior_bytes_num_bytes],
+    def split_bytes_lists(self, concat_bytes_list: List[bytes]) -> Tuple[List[bytes], List[bytes]]:
+        prior_bytes_list = []
+        bytes_list = []
+        for concat_b in concat_bytes_list:
+            prior_bytes_len = int.from_bytes(
+                concat_b[:self.prior_bytes_num_bytes],
                 'little', signed=False
             )
-            prior_strings.append(
-                concat_s[self.prior_bytes_num_bytes:
-                         self.prior_bytes_num_bytes + prior_strings_len]
+            prior_bytes_list.append(
+                concat_b[self.prior_bytes_num_bytes:
+                         self.prior_bytes_num_bytes + prior_bytes_len]
             )
-            strings.append(
-                concat_s[self.prior_bytes_num_bytes + prior_strings_len:]
+            bytes_list.append(
+                concat_b[self.prior_bytes_num_bytes + prior_bytes_len:]
             )
-        return prior_strings, strings
+        return prior_bytes_list, bytes_list
 
 
 class ScaleNoisyNormalEntropyModel(EntropyModel):

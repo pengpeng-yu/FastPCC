@@ -81,10 +81,10 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             return x_perturbed, loss_dict
 
         else:
-            strings, batch_shape, _ = self.compress(x)
-            decompressed = self.decompress(strings, batch_shape, x.device)
+            bytes_list, batch_shape, _ = self.compress(x)
+            decompressed = self.decompress(bytes_list, batch_shape, x.device)
 
-            return decompressed, strings, batch_shape
+            return decompressed, bytes_list, batch_shape
 
     @torch.no_grad()
     @minkowski_tensor_wrapped_fn({1: 2})
@@ -118,9 +118,9 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         collapsed_x = quantized_x.reshape(-1, coding_unit_shape.numel())
         indexes = self.build_indexes(broadcast_shape).reshape(-1).tolist()  # shape: coding_unit_shape.numel()
 
-        strings = []
+        bytes_list = []
         for unit_idx in range(collapsed_x.shape[0]):
-            strings.append(
+            bytes_list.append(
                 self.prior.range_coder.encode_with_indexes(
                     [collapsed_x[unit_idx].tolist()],
                     [indexes]
@@ -135,39 +135,39 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                 for bytes_num, length in zip(self.broadcast_shape_bytes, broadcast_shape)
             ))
             # All the samples in a batch share the same broadcast_shape.
-            strings = [broadcast_shape_encoded + s for s in strings]
+            bytes_list = [broadcast_shape_encoded + s for s in bytes_list]
 
         if estimate_bits is True:
             estimated_bits = self.prior.log_prob(quantized_x).sum() / (-math.log(2))
-            return strings, batch_shape, rounded_x_or_dequantized_x, estimated_bits
+            return bytes_list, batch_shape, rounded_x_or_dequantized_x, estimated_bits
 
         else:
-            return strings, batch_shape, rounded_x_or_dequantized_x
+            return bytes_list, batch_shape, rounded_x_or_dequantized_x
 
     @torch.no_grad()
     @minkowski_tensor_wrapped_fn({'<del>sparse_tensor_coords_tuple': 0})
-    def decompress(self, strings: List[bytes],
+    def decompress(self, bytes_list: List[bytes],
                    batch_shape: torch.Size,
                    target_device: torch.device,
                    skip_dequantization: bool = False):
         if sum(self.broadcast_shape_bytes) != 0:
             broadcast_shape = []
             broadcast_shape_total_bytes = sum(self.broadcast_shape_bytes)
-            broadcast_shape_string = strings[0][:broadcast_shape_total_bytes]
-            with io.BytesIO(broadcast_shape_string) as bs:
+            broadcast_shape_bytes = bytes_list[0][:broadcast_shape_total_bytes]
+            with io.BytesIO(broadcast_shape_bytes) as bs:
                 for bytes_num in self.broadcast_shape_bytes:
                     broadcast_shape.append(int.from_bytes(bs.read(bytes_num), 'little', signed=False))
             broadcast_shape = torch.Size(broadcast_shape)
         else:
             broadcast_shape = torch.Size([1] * len(self.broadcast_shape_bytes))
             broadcast_shape_total_bytes = 0
-            broadcast_shape_string = b''
+            broadcast_shape_bytes = b''
 
         indexes = self.build_indexes(broadcast_shape).reshape(-1).tolist()
 
         symbols = []
-        for s in strings:
-            assert s[:broadcast_shape_total_bytes] == broadcast_shape_string
+        for s in bytes_list:
+            assert s[:broadcast_shape_total_bytes] == broadcast_shape_bytes
             symbols.append(
                 self.prior.range_coder.decode_with_indexes(
                     [s[broadcast_shape_total_bytes:]], [indexes],

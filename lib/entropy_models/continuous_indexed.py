@@ -139,9 +139,9 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             return x_perturbed, loss_dict
 
         else:
-            strings, _ = self.compress(x, indexes)
-            decompressed = self.decompress(strings, indexes, x.device)
-            return decompressed, strings
+            bytes_list, _ = self.compress(x, indexes)
+            decompressed = self.decompress(bytes_list, indexes, x.device)
+            return decompressed, bytes_list
 
     @torch.no_grad()
     def flatten_indexes(self, indexes):
@@ -203,20 +203,20 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             )
         collapsed_x = quantized_x.reshape(-1, coding_unit_shape.numel())
 
-        strings = self.prior.range_coder.encode_with_indexes(
+        bytes_list = self.prior.range_coder.encode_with_indexes(
             collapsed_x.tolist(),
             flat_indexes.tolist()
         )
 
         if estimate_bits:
             estimated_bits = prior.log_prob(quantized_x).sum() / (-math.log(2))
-            return strings, rounded_x_or_dequantized_x, estimated_bits
+            return bytes_list, rounded_x_or_dequantized_x, estimated_bits
         else:
-            return strings, rounded_x_or_dequantized_x
+            return bytes_list, rounded_x_or_dequantized_x
 
     @torch.no_grad()
     @minkowski_tensor_wrapped_fn({'<del>sparse_tensor_coords_tuple': 0, 2: None})
-    def decompress(self, strings: List[bytes],
+    def decompress(self, bytes_list: List[bytes],
                    indexes: torch.Tensor,
                    target_device: torch.device,
                    skip_dequantization: bool = False):
@@ -228,7 +228,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         flat_indexes = flat_indexes.reshape(-1, coding_unit_shape.numel())
 
         symbols = self.prior.range_coder.decode_with_indexes(
-            strings, flat_indexes.tolist()
+            bytes_list, flat_indexes.tolist()
         )
         symbols = torch.tensor(symbols, device=target_device)
         if skip_dequantization:
@@ -396,12 +396,12 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
 
     @torch.no_grad()
     @minkowski_tensor_wrapped_fn({'<del>sparse_tensor_coords_tuple': 0, 2: None})
-    def decompress(self, strings: List[bytes],
+    def decompress(self, bytes_list: List[bytes],
                    indexes: torch.Tensor,
                    target_device: torch.device,
                    skip_dequantization: bool = False):
         return super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).decompress(
-            strings, self.indexes_view_fn(indexes), target_device, skip_dequantization
+            bytes_list, self.indexes_view_fn(indexes), target_device, skip_dequantization
         )
 
     def _apply(self, fn):
@@ -450,9 +450,9 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
         return super(LocationScaleIndexedEntropyModel, self).compress(x, indexes)
 
     @torch.no_grad()
-    def decompress(self, strings, indexes, loc=None):
+    def decompress(self, bytes_list, indexes, loc=None):
         values = super(LocationScaleIndexedEntropyModel, self).decompress(
-            strings, indexes)
+            bytes_list, indexes)
         if loc is not None:
             values += loc
         return values
