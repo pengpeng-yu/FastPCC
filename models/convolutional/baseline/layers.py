@@ -6,10 +6,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import MinkowskiEngine as ME
 
+from lib.torch_utils import concat_loss_dicts
 from lib.sparse_conv_layers import \
     ConvBlock, ConvTransBlock, GenConvTransBlock, \
     GenerativeUpsample, GenerativeUpsampleMessage
 from lib.torch_utils import minkowski_tensor_wrapped_op
+from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel
+from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
+    BytesListUtils
 
 
 class Scaler(nn.Module):
@@ -18,7 +22,7 @@ class Scaler(nn.Module):
         self.scaler = scaler
 
     def forward(self, x):
-        return x * self.scaler
+        return minkowski_tensor_wrapped_op(x, lambda _: _ * self.scaler)
 
 
 class ResBlock(nn.Module):
@@ -77,8 +81,8 @@ BLOCKS_DICT = {_.__name__: _ for _ in BLOCKS_LIST}
 
 
 def make_downsample_blocks(
-        in_channels,
-        out_channels,
+        in_channels: int,
+        out_channels: int,
         intra_channels: Tuple[int, ...],
         basic_block_type: str,
         region_type: str,
@@ -132,8 +136,8 @@ class NNSequentialWithConvTransBlockArgs(nn.Sequential):
 
 def make_upsample_block(
         generative: bool,
-        in_channels,
-        out_channels,
+        in_channels: int,
+        out_channels: int,
         basic_block_type: str,
         region_type: str,
         basic_block_num: int,
@@ -171,15 +175,13 @@ def make_upsample_block(
 
 class Encoder(nn.Module):
     def __init__(self,
-                 in_channels,
-                 out_channels,
+                 in_channels: int,
+                 out_channels: int,
                  intra_channels: Tuple[int, ...],
                  first_conv_kernel_size: int,
                  requires_points_num_list: bool,
                  points_num_scaler: float,
-                 value_scaler: float,
                  res_feature_channels: int,
-                 res_fea_value_scaler: float,
                  keep_raw_fea_in_strided_list: bool,
                  basic_block_type: str,
                  region_type: str,
@@ -190,10 +192,8 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
         self.requires_points_num_list = requires_points_num_list
         self.points_num_scaler = points_num_scaler
-        self.value_scaler = value_scaler
         self.res_feature_channels = res_feature_channels
         self.if_gen_res_fea = res_feature_channels != 0 and len(intra_channels) >= 3
-        self.res_fea_value_scaler = res_fea_value_scaler
         self.keep_raw_fea_in_strided_list = keep_raw_fea_in_strided_list
         self.first_block = ConvBlock(
             in_channels, intra_channels[0], first_conv_kernel_size, 1,
@@ -211,7 +211,7 @@ class Encoder(nn.Module):
                 ConvBlock(
                     res_feature_channels, intra_ch, 2, 2,
                     region_type='HYPER_CUBE',
-                    bn=use_batch_norm, act=None
+                    bn=use_batch_norm, act=act
                 ) for intra_ch in intra_channels[2:]
             ])
             self.conv_out_list = nn.ModuleList([
@@ -272,11 +272,6 @@ class Encoder(nn.Module):
                         strided_fea_list.append(x)
                     if idx != len(self.blocks) - 1:
                         points_num_list.append([_.shape[0] for _ in x.decomposed_coordinates])
-                if self.res_fea_value_scaler != 1:
-                    for idx in range(1, len(strided_fea_list) - 1):
-                        strided_fea_list[idx] = minkowski_tensor_wrapped_op(
-                            strided_fea_list[idx], lambda _: _ * self.res_fea_value_scaler
-                        )
 
             elif not self.keep_raw_fea_in_strided_list:
                 x = self.first_block(x)
@@ -295,11 +290,6 @@ class Encoder(nn.Module):
                         strided_fea_list.append(x)
                     if idx != len(self.blocks) - 1:
                         points_num_list.append([_.shape[0] for _ in x.decomposed_coordinates])
-                if self.res_fea_value_scaler != 1:
-                    for idx in range(len(strided_fea_list) - 1):
-                        strided_fea_list[idx] = minkowski_tensor_wrapped_op(
-                            strided_fea_list[idx], lambda _: _ * self.res_fea_value_scaler
-                        )
 
         if not self.requires_points_num_list:
             points_num_list = None
@@ -308,31 +298,16 @@ class Encoder(nn.Module):
                               [[int(n * self.points_num_scaler) for n in _]
                                for _ in points_num_list[1:]]
 
-        # If intra features are needed as residues,
-        # we will make those features
-        #   1. unactivated
-        #   2. scaled
-        #   3. have suitable channels (depends on compressed data channels).
-        # The original point cloud is treated as a special feature and left untouched.
-        # If there is another encoder after this one,
-        # we will make the final output of this encoder
-        #   1. activated
-        #   2. unscaled (which is supposed to be done by the next encoder)
-        #   3. have suitable channels (depends on the next encoder).
-
-        if self.value_scaler != 1:
-            strided_fea_list[-1] = minkowski_tensor_wrapped_op(
-                strided_fea_list[-1], lambda _: _ * self.value_scaler
-            )
-
         return strided_fea_list, points_num_list
 
 
 class DecoderBlock(nn.Module):
     def __init__(self,
-                 in_channels,
-                 out_channels,
-                 upsample_out_channels,
+                 in_channels: int,
+                 out_channels: int,
+                 upsample_out_channels: int,
+                 residual_channels: int,
+                 residual_indexes_scaler: float,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -353,32 +328,46 @@ class DecoderBlock(nn.Module):
             bn=use_batch_norm,
             act='relu' if kwargs.get('loss_type', None) == 'Dist' else None
         )
-        if out_channels != 0:  # 0 to disable attribute prediction.
-            self.predict_block = ConvBlock(
-                upsample_out_channels, out_channels,
+        if out_channels != 0 and residual_channels != 0:
+            predict_block = nn.Sequential(
+                ConvBlock(
+                    upsample_out_channels, out_channels,
+                    3, 1,
+                    region_type=region_type,
+                    bn=use_batch_norm,
+                    act=None
+                ),
+                Scaler(residual_indexes_scaler)
+            )
+            residual_block = ConvBlock(
+                residual_channels, residual_channels,
                 3, 1,
                 region_type=region_type,
                 bn=use_batch_norm,
                 act=None
             )
+        elif out_channels == residual_channels == 0:
+            predict_block = residual_block = None
         else:
-            self.predict_block = None
-        self.generative_upsample = GenerativeUpsample(upsample_block, classify_block, **kwargs)
+            raise ValueError(f'out_channels: {out_channels}, '
+                             f'residual_channels: {residual_channels}')
+        self.generative_upsample = GenerativeUpsample(
+            upsample_block, classify_block, predict_block, residual_block, **kwargs
+        )
 
     def forward(self, msg: GenerativeUpsampleMessage):
         msg = self.generative_upsample(msg)
-        if self.predict_block is not None:
-            assert self.generative_upsample.enable_fea_pruning is True
-            msg.fea = self.predict_block(msg.fea)
         return msg
 
 
 class Decoder(nn.Module):
     def __init__(self,
-                 in_channels,
-                 out_channels,
+                 in_channels: Union[int, Tuple[int, ...]],
+                 out_channels: Union[int, Tuple[int, ...]],
                  intra_channels: Tuple[int, ...],
-                 value_scaler: float,
+                 residual_channels: Optional[Tuple[int, ...]],
+                 residual_indexes_scaler: Optional[float],
+                 indexed_em: Optional[ContinuousIndexedEntropyModel],
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -386,33 +375,64 @@ class Decoder(nn.Module):
                  act: Optional[str],
                  **kwargs):
         super(Decoder, self).__init__()
-        self.value_scaler = value_scaler
+        if indexed_em is None:
+            self.use_residual = False
+            assert isinstance(in_channels, int) and out_channels == 0
+            in_channels = [in_channels, *intra_channels[:-1]]
+            out_channels = [0] * len(intra_channels)
+            residual_channels = [0] * len(intra_channels)
+        else:
+            self.use_residual = True
+            assert len(in_channels) == len(out_channels) == \
+                   len(intra_channels) == len(residual_channels)
+            assert isinstance(residual_indexes_scaler, float)
+            self.indexed_em = indexed_em
         self.blocks = nn.Sequential(*[
             DecoderBlock(
-                in_channels if idx == 0 else intra_channels[idx - 1],
-                out_channels if idx == len(intra_channels) - 1 else 0,
-                intra_ch,
-                basic_block_type,
-                region_type,
-                basic_block_num,
-                use_batch_norm,
-                act,
+                in_ch, out_ch, intra_ch, residual_ch, residual_indexes_scaler,
+                basic_block_type, region_type, basic_block_num, use_batch_norm, act,
                 **kwargs
-            ) for idx, intra_ch in enumerate(intra_channels)]
+            ) for in_ch, out_ch, intra_ch, residual_ch in
+            zip(in_channels, out_channels, intra_channels, residual_channels)]
         )
 
     def forward(self, msg: GenerativeUpsampleMessage):
-        if self.value_scaler != 1:
-            msg.fea = minkowski_tensor_wrapped_op(
-                msg.fea, lambda _: _ * self.value_scaler
-            )
-        return self.blocks(msg)
+        if self.use_residual:
+            msg.indexed_em = self.indexed_em
+            msg: GenerativeUpsampleMessage = self.blocks(msg)
+            loss_dict = {}
+            for idx, sub_loss_dict in enumerate(msg.em_loss_dict_list[::-1]):
+                concat_loss_dicts(loss_dict, sub_loss_dict, lambda k: f'fea_lossy_{idx}_' + k)
+            msg.em_loss_dict_list = [loss_dict]
+
+        else:
+            msg.cached_fea_list = []
+            msg = self.blocks(msg)
+        return msg
+
+    def compress(self, msg: GenerativeUpsampleMessage):
+        assert self.use_residual and not self.training
+        msg.indexed_em = self.indexed_em
+        msg.em_flag = 'compress'
+        msg: GenerativeUpsampleMessage = self.blocks(msg)
+        msg.em_bytes_list = [BytesListUtils.concat_bytes_list(msg.em_bytes_list)]
+        return msg
+
+    def decompress(self, msg: GenerativeUpsampleMessage, em_bytes_list_len: int):
+        assert self.use_residual and not self.training
+        msg.indexed_em = self.indexed_em
+        msg.em_flag = 'decompress'
+        assert len(msg.em_bytes_list) == 1
+        msg.em_bytes_list = BytesListUtils.split_bytes_list(
+            msg.em_bytes_list[0], em_bytes_list_len
+        )
+        msg: GenerativeUpsampleMessage = self.blocks(msg)
+        return msg
 
 
 class HyperCoder(nn.Module):
     def __init__(self,
                  coder_type: str,
-                 pre_value_scaler: float,
                  post_value_scaler: float,
                  in_channels: int,
                  out_channels: int,
@@ -423,7 +443,6 @@ class HyperCoder(nn.Module):
                  use_batch_norm: bool,
                  act: Optional[str]):
         super(HyperCoder, self).__init__()
-        self.pre_value_scaler = pre_value_scaler
         self.post_value_scaler = post_value_scaler
         self.coder_type = coder_type
         basic_block = partial(BLOCKS_DICT[basic_block_type],
@@ -476,8 +495,6 @@ class HyperCoder(nn.Module):
         self.main = NNSequentialWithConvTransBlockArgs(*main_modules)
 
     def forward(self, x, *args, **kwargs):
-        if self.pre_value_scaler != 1:
-            x = minkowski_tensor_wrapped_op(x, lambda _: _ * self.pre_value_scaler)
         x = self.main(x, *args, **kwargs)
         if self.post_value_scaler != 1:
             x = minkowski_tensor_wrapped_op(x, lambda _: _ * self.post_value_scaler)
@@ -492,9 +509,8 @@ HyperDecoderUpsample = partial(HyperCoder, 'upsample_decoder')
 
 class EncoderRecurrent(nn.Module):
     def __init__(self,
-                 in_channels,
-                 out_channels,
-                 value_scaler: float,
+                 in_channels: int,
+                 out_channels: int,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -523,7 +539,6 @@ class EncoderRecurrent(nn.Module):
             region_type=region_type,
             bn=use_batch_norm, act=None
         )
-        self.value_scaler = value_scaler
         self.hidden_channels = hidden_channels
 
     def forward(self, x: ME.SparseTensor, coder_num: int):
@@ -545,12 +560,6 @@ class EncoderRecurrent(nn.Module):
             hx = self.conv_out(cx)
             strided_fea_list.append(hx)
 
-        for idx in range(coder_num + 1):
-            if self.value_scaler != 1:
-                strided_fea_list[idx] = minkowski_tensor_wrapped_op(
-                    strided_fea_list[idx],
-                    lambda _: _ * self.value_scaler
-                )
         return strided_fea_list
 
 
@@ -576,7 +585,6 @@ class EncoderPartiallyRecurrent(nn.Module):
 class HyperDecoderPartiallyRecurrent(nn.ModuleList):
     def __init__(self,
                  coder_type: str,
-                 pre_value_scaler: float,
                  post_value_scaler: float,
                  in_channels: int,
                  out_channels: Tuple[int, ...],
@@ -587,7 +595,7 @@ class HyperDecoderPartiallyRecurrent(nn.ModuleList):
                  use_batch_norm: bool,
                  act: Optional[str],):
         modules = [HyperCoder(
-            coder_type, pre_value_scaler, post_value_scaler,
+            coder_type, post_value_scaler,
             in_channels, out_ch, (intra_ch, ), basic_block_type,
             region_type, basic_block_num, use_batch_norm, act
         ) for out_ch, intra_ch in zip(out_channels, intra_channels)]

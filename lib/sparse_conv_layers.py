@@ -9,6 +9,7 @@ import MinkowskiEngine as ME
 from torch import nn as nn
 
 from lib.metrics.misc import precision_recall
+from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel
 
 
 def get_act_module(act: Union[str, nn.Module, None]) -> Optional[nn.Module]:
@@ -122,47 +123,48 @@ class GenConvTransBlock(BaseConvBlock):
 class GenerativeUpsampleMessage:
     def __init__(self,
                  fea: ME.SparseTensor,
-                 target_key: ME.CoordinateMapKey = None,
-                 points_num_list: List[List[int]] = None,
-                 cached_fea_list: List[Union[ME.SparseTensor]] = None,
-                 cached_pred_list: List[ME.SparseTensor] = None,
-                 cached_target_list: List[ME.SparseTensor] = None):
-        self.fea = fea
-        self.target_key = target_key
-        self.points_num_list = points_num_list.copy() if points_num_list is not None else None
-        self.cached_fea_list = cached_fea_list or []
-        self.cached_pred_list = cached_pred_list or []
-        self.cached_target_list = cached_target_list or []
+                 target_key: Optional[ME.CoordinateMapKey] = None,
+                 points_num_list: Optional[List[List[int]]] = None,
+                 cached_fea_list: Optional[List[Union[ME.SparseTensor]]] = None,
+                 em_bytes_list: Optional[List[bytes]] = None):
+        self.fea: ME.SparseTensor = fea
+        self.target_key: Optional[ME.CoordinateMapKey] = target_key
+        self.points_num_list: Optional[List[List[int]]] = \
+            points_num_list.copy() if points_num_list is not None else None
+        self.cached_fea_list: List[Union[ME.SparseTensor]] = cached_fea_list or []
+        self.cached_pred_list: List[Union[ME.SparseTensor]] = []
+        self.cached_target_list: List[ME.SparseTensor] = []
         self.cached_metric_list: List[Dict[str, Union[int, float]]] = []
-        self.cached_fea_module_list: List[nn.Module] = []
+        self.indexed_em: Optional[ContinuousIndexedEntropyModel] = None
+        self.em_loss_dict_list: List[Dict[str, torch.Tensor]] = []
+        self.em_flag: str = ''
+        self.em_bytes_list: List[bytes] = em_bytes_list or []
 
 
 class GenerativeUpsample(nn.Module):
     def __init__(self,
                  upsample_block: nn.Module,
                  classify_block: nn.Module,
+                 predict_block: nn.Module = None,
+                 residual_block: nn.Module = None,
+
                  mapping_target_kernel_size=1,
                  mapping_target_region_type='HYPER_CUBE',
-
                  loss_type='BCE',
                  dist_upper_bound=2.0,
-                 enable_fea_pruning=True,
-
-                 requires_metric_during_testing=False,
-                 use_cached_feature=False,
-                 cached_feature_fusion_method='Cat'):
+                 requires_metric_during_testing=False):
         super(GenerativeUpsample, self).__init__()
         self.upsample_block = upsample_block
         # classify_block should not change coordinates of upsample_block's output
         self.classify_block = classify_block
+        self.predict_block = predict_block
+        self.residual_block = residual_block
         self.mapping_target_kernel_size = mapping_target_kernel_size
         self.mapping_target_region_type = getattr(ME.RegionType, mapping_target_region_type)
-        self.loss_type = loss_type
+        self.loss_type = 'BCE' if loss_type == 'Focal' else loss_type
         self.square_dist_upper_bound = dist_upper_bound ** 2
-        self.enable_fea_pruning = enable_fea_pruning
         self.requires_metric_during_testing = requires_metric_during_testing
-        self.use_cached_feature = use_cached_feature
-        self.cached_feature_fusion_method = cached_feature_fusion_method
+        self.use_residual = self.predict_block is not None and self.residual_block is not None
         self.pruning = ME.MinkowskiPruning()
 
     def forward(self, message: GenerativeUpsampleMessage):
@@ -177,21 +179,11 @@ class GenerativeUpsample(nn.Module):
         Target_key(identical for all upsample layers) is for generating target of each upsample layer.
 
         During testing, cached_target_list and target_key are no longer needed.
+
+        Only supports batch size == 1 during testing if self.use_residual.
         """
         fea = message.fea
         fea = self.upsample_block(fea)
-
-        if self.use_cached_feature:
-            cached_feature = message.cached_fea_list.pop()
-            if message.cached_fea_module_list:
-                cached_fea_module = message.cached_fea_module_list.pop()
-                cached_feature = cached_fea_module(cached_feature, coordinates=fea.coordinate_map_key)
-            if self.cached_feature_fusion_method == 'Cat':
-                fea = ME.cat(fea, cached_feature)
-            elif self.cached_feature_fusion_method == 'Add':
-                fea += cached_feature
-            else: raise NotImplementedError
-
         pred = self.classify_block(fea)
         keep = self.get_keep(pred, message.points_num_list)
 
@@ -200,25 +192,47 @@ class GenerativeUpsample(nn.Module):
             keep |= keep_target
             message.cached_target_list.append(loss_target)
             message.cached_pred_list.append(pred)
-            if self.enable_fea_pruning:
-                message.fea = self.pruning(fea, keep)
-            else:
-                message.fea = None
+
         elif not self.training:
             if self.requires_metric_during_testing:
                 keep_target = self.get_target(fea, pred, message.target_key, False)
                 message.cached_metric_list.append(
-                    precision_recall(pred=keep, tgt=keep_target))
-            message.cached_pred_list.append(self.pruning(pred, keep))
-            if self.enable_fea_pruning:
-                # Avoid pruning twice (which brings duplicated coordinates in cm,
-                message.fea = ME.SparseTensor(
-                    fea.F[keep],
-                    coordinate_map_key=message.cached_pred_list[-1].coordinate_map_key,
-                    coordinate_manager=fea.coordinate_manager
+                    precision_recall(pred=keep, tgt=keep_target)
                 )
-            else:
-                message.fea = None
+
+        message.fea = self.pruning(fea, keep)
+
+        if self.use_residual:
+            cm_key = message.fea.coordinate_map_key
+            if self.training:
+                cached_feature = message.cached_fea_list.pop()
+                res_fea = self.residual_block(cached_feature, coordinates=cm_key)
+                res_fea_indexes = self.predict_block(message.fea)
+                res_fea_tilde, fea_loss_dict = message.indexed_em(
+                    res_fea, res_fea_indexes
+                )
+                message.fea = res_fea_tilde
+                message.em_loss_dict_list.append(fea_loss_dict)
+
+            elif message.em_flag == 'compress':
+                cached_feature = message.cached_fea_list.pop()
+                res_fea = self.residual_block(cached_feature, coordinates=cm_key)
+                res_fea_indexes = self.predict_block(message.fea)
+                (res_fea_bytes,), res_fea_recon = message.indexed_em.compress(
+                    res_fea, res_fea_indexes, return_dequantized=True
+                )
+                message.fea = res_fea_recon
+                message.em_bytes_list.append(res_fea_bytes)
+
+            elif message.em_flag == 'decompress':
+                res_fea_bytes = message.em_bytes_list.pop(0)
+                res_fea_indexes = self.predict_block(message.fea)
+                res_fea_recon = message.indexed_em.decompress(
+                    [res_fea_bytes], res_fea_indexes, next(self.parameters()).device,
+                    sparse_tensor_coords_tuple=(cm_key, res_fea_indexes.coordinate_manager)
+                )
+                message.fea = res_fea_recon
+
         return message
 
     @torch.no_grad()

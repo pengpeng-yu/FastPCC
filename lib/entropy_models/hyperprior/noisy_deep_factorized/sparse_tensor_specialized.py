@@ -17,6 +17,60 @@ from ...distributions.uniform_noise import NoisyNormal, NoisyDeepFactorized
 from lib.torch_utils import minkowski_tensor_wrapped_op, concat_loss_dicts
 
 
+class BytesListUtils:
+    @staticmethod
+    def concat_bytes_list(bytes_list: List[bytes]) -> bytes:
+        assert len(bytes_list) >= 2
+        bytes_len_list = []
+        for _ in bytes_list:
+            bytes_len = len(_)
+            assert bytes_len >= 1
+            bytes_len_list.append(bytes_len - 1)
+
+        bytes_len_bytes_list = []
+        bytes_len_bytes_len_list = []
+        for bytes_len in bytes_len_list:
+            bytes_len_bytes_len = math.ceil(bytes_len.bit_length() / 8)
+            bytes_len_bytes_list.append(bytes_len.to_bytes(bytes_len_bytes_len, 'little'))
+            bytes_len_bytes_len_list.append(bytes_len_bytes_len)
+
+        bytes_len_bytes_len_bits_list = []
+        for bytes_len_bytes_len in bytes_len_bytes_len_list:
+            assert 0 <= bytes_len_bytes_len <= 3
+            bytes_len_bytes_len_bits = f'{bytes_len_bytes_len:b}'
+            if len(bytes_len_bytes_len_bits) == 1:
+                bytes_len_bytes_len_bits = '0' + bytes_len_bytes_len_bits
+            bytes_len_bytes_len_bits_list.append(bytes_len_bytes_len_bits)
+        head_bytes = int(
+            '1' + ''.join(bytes_len_bytes_len_bits_list), 2
+        ).to_bytes(math.ceil(len(bytes_list) / 4 + 0.125), 'little')
+
+        concat_bytes = head_bytes + b''.join(bytes_len_bytes_list) + b''.join(bytes_list)
+        return concat_bytes
+
+    @staticmethod
+    def split_bytes_list(concat_bytes: bytes, bytes_list_len: int) -> List[bytes]:
+        bs = io.BytesIO(concat_bytes)
+        head_bytes_len = math.ceil(bytes_list_len / 4 + 0.125)
+        head_bits = f"{int.from_bytes(bs.read(head_bytes_len), 'little'):b}"
+
+        bytes_len_bytes_len_list = []
+        for idx in range(1, bytes_list_len * 2 + 1, 2):
+            bytes_len_bytes_len_list.append(int(head_bits[idx: idx + 2], 2))
+
+        bytes_len_list = []
+        for bytes_len_bytes_len in bytes_len_bytes_len_list:
+            bytes_len_list.append(int.from_bytes(bs.read(bytes_len_bytes_len), 'little') + 1)
+
+        bytes_list = []
+        for bytes_len in bytes_len_list:
+            bytes_list.append(bs.read(bytes_len))
+
+        assert bs.read() == b''
+        bs.close()
+        return bytes_list
+
+
 class GeoLosslessEntropyModel(nn.Module):
     """
     Note:
@@ -177,20 +231,19 @@ class GeoLosslessEntropyModel(nn.Module):
             return strided_fea_tilde_list[-1], loss_dict
 
         else:
-            concat_bytes, bottom_fea_recon = self.compress(y_top, coder_num)
+            concat_bytes, bottom_fea_recon, fea_recon_ = self.compress(y_top, coder_num)
             # You can clear the shared coordinate manager in an upper module
             # after compression to save memory.
-            recon = self.decompress(
+            fea_recon = self.decompress(
                 concat_bytes,
-                bottom_fea_recon.device,
                 (bottom_fea_recon.coordinate_map_key,
                  bottom_fea_recon.coordinate_manager),
                 coder_num
             )
-            return bottom_fea_recon, recon, concat_bytes
+            return bottom_fea_recon, fea_recon, concat_bytes
 
     def compress(self, y_top: ME.SparseTensor, coder_num: int) -> \
-            Tuple[bytes, ME.SparseTensor]:
+            Tuple[bytes, ME.SparseTensor, ME.SparseTensor]:
         # Batch dimension of sparse tensor feature is supposed to
         # be added in minkowski_tensor_wrapped_fn(),
         # thus all the inputs of entropy models are supposed to
@@ -278,22 +331,24 @@ class GeoLosslessEntropyModel(nn.Module):
             if fea_bytes is not None:
                 fea_bytes_list.append(fea_bytes)
 
-        concat_bytes = self.concat_bytes_list([bottom_fea_bytes, *fea_bytes_list, *coord_bytes_list])
-        return concat_bytes, bottom_fea_recon
+        concat_bytes = BytesListUtils.concat_bytes_list(
+            [*coord_bytes_list, bottom_fea_bytes, *fea_bytes_list]
+        )
+        return concat_bytes, bottom_fea_recon, lower_fea_recon
 
     def decompress(self,
                    concat_bytes: bytes,
-                   target_device: torch.device,
                    sparse_tensor_coords_tuple: Tuple[ME.CoordinateMapKey, ME.CoordinateManager],
                    coder_num: int) \
             -> ME.SparseTensor:
+        target_device = next(self.parameters()).device
         bytes_list_len = coder_num * 2 + 1
         if self.skip_encoding_top_fea == 'skip':
             bytes_list_len -= 1
-        split_bytes = self.split_bytes_list(concat_bytes, bytes_list_len)
-        bottom_fea_bytes = split_bytes[0]
-        fea_bytes_list = split_bytes[1: coder_num + 1]
-        coord_bytes_list = split_bytes[coder_num + 1:]
+        split_bytes = BytesListUtils.split_bytes_list(concat_bytes, bytes_list_len)
+        coord_bytes_list = split_bytes[: coder_num]
+        bottom_fea_bytes = split_bytes[coder_num]
+        fea_bytes_list = split_bytes[coder_num + 1:]
         if self.skip_encoding_top_fea == 'skip':
             fea_bytes_list.append(b'')
         strided_fea_recon_list = []
@@ -362,58 +417,6 @@ class GeoLosslessEntropyModel(nn.Module):
                 )
             strided_fea_recon_list.append(lower_fea_recon)
         return strided_fea_recon_list[-1]
-
-    @staticmethod
-    def concat_bytes_list(bytes_list: List[bytes]) -> bytes:
-        assert len(bytes_list) >= 2
-        bytes_len_list = []
-        for _ in bytes_list:
-            bytes_len = len(_)
-            assert bytes_len >= 1
-            bytes_len_list.append(bytes_len - 1)
-
-        bytes_len_bytes_list = []
-        bytes_len_bytes_len_list = []
-        for bytes_len in bytes_len_list:
-            bytes_len_bytes_len = math.ceil(bytes_len.bit_length() / 8)
-            bytes_len_bytes_list.append(bytes_len.to_bytes(bytes_len_bytes_len, 'little'))
-            bytes_len_bytes_len_list.append(bytes_len_bytes_len)
-
-        bytes_len_bytes_len_bits_list = []
-        for bytes_len_bytes_len in bytes_len_bytes_len_list:
-            assert 0 <= bytes_len_bytes_len <= 3
-            bytes_len_bytes_len_bits = f'{bytes_len_bytes_len:b}'
-            if len(bytes_len_bytes_len_bits) == 1:
-                bytes_len_bytes_len_bits = '0' + bytes_len_bytes_len_bits
-            bytes_len_bytes_len_bits_list.append(bytes_len_bytes_len_bits)
-        head_bytes = int(
-            '1' + ''.join(bytes_len_bytes_len_bits_list), 2
-        ).to_bytes(math.ceil(len(bytes_list) / 4 + 0.125), 'little')
-
-        concat_bytes = head_bytes + b''.join(bytes_len_bytes_list) + b''.join(bytes_list)
-        return concat_bytes
-
-    @staticmethod
-    def split_bytes_list(concat_bytes: bytes, bytes_list_len: int) -> List[bytes]:
-        bs = io.BytesIO(concat_bytes)
-        head_bytes_len = math.ceil(bytes_list_len / 4 + 0.125)
-        head_bits = f"{int.from_bytes(bs.read(head_bytes_len), 'little'):b}"
-
-        bytes_len_bytes_len_list = []
-        for idx in range(1, bytes_list_len * 2 + 1, 2):
-            bytes_len_bytes_len_list.append(int(head_bits[idx: idx + 2], 2))
-
-        bytes_len_list = []
-        for bytes_len_bytes_len in bytes_len_bytes_len_list:
-            bytes_len_list.append(int.from_bytes(bs.read(bytes_len_bytes_len), 'little') + 1)
-
-        bytes_list = []
-        for bytes_len in bytes_len_list:
-            bytes_list.append(bs.read(bytes_len))
-
-        assert bs.read() == b''
-        bs.close()
-        return bytes_list
 
     @staticmethod
     def get_coord_mask(

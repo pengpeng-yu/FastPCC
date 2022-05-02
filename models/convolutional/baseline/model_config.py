@@ -18,9 +18,8 @@ class ModelConfig(SimpleConfig):
 
     # Basic compression settings
     compressed_channels: int = 8
-    encoder_scaler: float = 1.0
     prior_indexes_scaler: float = 1.0
-    prior_indexes_post_scaler: float = 1.0
+    prior_indexes_post_scaler: float = 1.0  # only valid for deep factorized conditional em.
     prior_indexes_range: Tuple[int, ...] = (64, )
 
     # Normal part of network
@@ -32,7 +31,6 @@ class ModelConfig(SimpleConfig):
     hyper_compressed_channels: int = 8
     hyper_encoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
     hyper_decoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
-    hyper_encoder_scaler: float = 1.0
 
     # Recurrent part (lossless) of network
     recurrent_part_enabled: bool = False

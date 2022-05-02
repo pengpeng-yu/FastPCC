@@ -301,7 +301,7 @@ class PCC(nn.Module):
                 ret = self.evaluator.log_batch(
                     preds=(pc_recon * pc_data.ori_resolution[0]).round().to('cpu', torch.int32),
                     targets=[pc_data.xyz[0]],
-                    compressed_strings=[concat_bytes],
+                    compressed_bytes_list=[concat_bytes],
                     pc_data=pc_data
                 )
                 return ret

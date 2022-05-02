@@ -6,7 +6,6 @@ model:
   use_batch_norm: False
   activation: 'relu'
   compressed_channels: 8
-  encoder_scaler: 1.0
   encoder_channels: [4, 16, 64, 64]
   decoder_channels: [64, 16, 4]
   coord_recon_loss_type: 'BCE'
