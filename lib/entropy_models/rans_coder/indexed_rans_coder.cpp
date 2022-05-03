@@ -32,33 +32,44 @@ int IndexedRansCoder::init_with_quantized_cdfs(
     size_t cdfs_num = cdfs.size();
     esyms_list.resize(cdfs_num);
     dsyms_list.resize(cdfs_num);
+#ifdef USE_CUM2SYM_LIST
     cum2sym_list.resize(cdfs_num);
-    this->offsets = std::move(offsets);
-    assert(cdfs_num == this->offsets.size());
+#endif
+    assert(cdfs_num == offsets.size());
 
     for (size_t cdf_idx = 0; cdf_idx < cdfs.size(); ++cdf_idx)
     {
         const auto &cdf = cdfs[cdf_idx];
         auto &esyms = esyms_list[cdf_idx];
         auto &dsyms = dsyms_list[cdf_idx];
-        auto &cum2sym = cum2sym_list[cdf_idx];
+
         assert(cdf[0] == 0 && cdf.back() == prob_scale);
         assert((cdf.size() - 1) < (1u << precision));
         const uint16_t symbols_num = uint16_t(cdf.size() - 1);
 
         esyms.resize(symbols_num);
         dsyms.resize(symbols_num);
+#ifdef USE_CUM2SYM_LIST
+        auto &cum2sym = cum2sym_list[cdf_idx];
         cum2sym.resize(prob_scale);
+#endif
         for (uint16_t sym = 0; sym < symbols_num; ++sym)
         {
             RansEncSymbolInit(&esyms[sym], cdf[sym], cdf[sym + 1] - cdf[sym], precision);
             RansDecSymbolInit(&dsyms[sym], cdf[sym], cdf[sym + 1] - cdf[sym]);
+#ifdef USE_CUM2SYM_LIST
             for (size_t cum_idx = cdf[sym]; cum_idx < cdf[sym + 1]; ++cum_idx)
             {
                 cum2sym[cum_idx] = sym;
             }
+#endif
         }
     }
+
+    this->offsets = std::move(offsets);
+#ifndef USE_CUM2SYM_LIST
+    this->cdfs = std::move(cdfs);
+#endif
     return 0;
 }
 
@@ -172,8 +183,22 @@ std::vector<std::vector<int32_t>> IndexedRansCoder::decode_with_indexes(
             const auto &cdf_idx = indexes[j];
             const auto &offset = offsets[cdf_idx];
             const auto &dsyms = dsyms_list[cdf_idx];
+#ifdef USE_CUM2SYM_LIST
             const auto &cum2sym = cum2sym_list[cdf_idx];
             int32_t value = cum2sym[RansDecGet(&rans, precision)];
+#else
+            const auto &cdf = cdfs[cdf_idx];
+            int32_t value = -1;
+            uint32_t cf = RansDecGet(&rans, precision);
+            for (size_t k = 1; k < cdf.size(); ++k)
+            {
+                if (cdf[k] > cf)
+                {
+                    value = k - 1;
+                    break;
+                }
+            }
+#endif
             RansDecAdvanceSymbol(&rans, &ptr, &dsyms[value], precision);
 
             if (overflow_coding)

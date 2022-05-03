@@ -22,22 +22,22 @@ int IndexedRansCoderNoSymbol::init_with_quantized_cdfs(
     std::vector<std::vector<uint32_t>> &cdfs,
     std::vector<int32_t> &offsets)
 {
-    this->cdfs = std::move(cdfs);
-    this->offsets = std::move(offsets);
-
     const uint32_t prob_scale = 1u << precision;
-    size_t cdfs_num = this->cdfs.size();
+    size_t cdfs_num = cdfs.size();
+#ifdef USE_CUM2SYM_LIST
     cum2sym_list.resize(cdfs_num);
-    assert(cdfs_num == this->offsets.size());
+#endif
+    assert(cdfs_num == offsets.size());
 
-    for (size_t cdf_idx = 0; cdf_idx < this->cdfs.size(); ++cdf_idx)
+    for (size_t cdf_idx = 0; cdf_idx < cdfs.size(); ++cdf_idx)
     {
-        const auto &cdf = this->cdfs[cdf_idx];
-        auto &cum2sym = cum2sym_list[cdf_idx];
+        const auto &cdf = cdfs[cdf_idx];
         assert(cdf[0] == 0 && cdf.back() == prob_scale);
         assert((cdf.size() - 1) < (1u << precision));
         const uint16_t symbols_num = uint16_t(cdf.size() - 1);
 
+#ifdef USE_CUM2SYM_LIST
+        auto &cum2sym = cum2sym_list[cdf_idx];
         cum2sym.resize(prob_scale);
         for (uint16_t sym = 0; sym < symbols_num; ++sym)
         {
@@ -46,7 +46,11 @@ int IndexedRansCoderNoSymbol::init_with_quantized_cdfs(
                 cum2sym[cum_idx] = sym;
             }
         }
+#endif
     }
+
+    this->cdfs = std::move(cdfs);
+    this->offsets = std::move(offsets);
     return 0;
 }
 
@@ -159,8 +163,21 @@ std::vector<std::vector<int32_t>> IndexedRansCoderNoSymbol::decode_with_indexes(
             const auto &cdf_idx = indexes[j];
             const auto &offset = offsets[cdf_idx];
             const auto &cdf = cdfs[cdf_idx];
+#ifdef USE_CUM2SYM_LIST
             const auto &cum2sym = cum2sym_list[cdf_idx];
             int32_t value = cum2sym[RansDecGet(&rans, precision)];
+#else
+            int32_t value = -1;
+            uint32_t cf = RansDecGet(&rans, precision);
+            for (size_t k = 1; k < cdf.size(); ++k)
+            {
+                if (cdf[k] > cf)
+                {
+                    value = k - 1;
+                    break;
+                }
+            }
+#endif
             RansDecAdvance(&rans, &ptr, cdf[value], cdf[value + 1] - cdf[value], precision);
 
              if (overflow_coding)

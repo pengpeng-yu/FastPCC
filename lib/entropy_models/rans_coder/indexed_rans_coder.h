@@ -30,10 +30,13 @@ private:
     const uint32_t precision;
     const bool overflow_coding;
     
+    std::vector<std::vector<uint32_t>> cdfs;
     std::vector<std::vector<RansEncSymbol>> esyms_list;
     std::vector<std::vector<RansDecSymbol>> dsyms_list;
     std::vector<int32_t> offsets;
+#ifdef USE_CUM2SYM_LIST
     std::vector<std::vector<uint16_t>> cum2sym_list;
+#endif
     std::vector<RansEncSymbol> bin_esyms;
     std::vector<RansDecSymbol> bin_dsyms;
 };
