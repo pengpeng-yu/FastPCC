@@ -674,7 +674,7 @@ class PCC(nn.Module):
             coord_recon = fea_recon.C[:, 1:]
             color_recon_raw = fea_recon.F
         if self.cfg.input_feature_type == 'Color':
-            color_recon = color_recon_raw.clip_(0, 255).round_().to('cpu', torch.uint8)
+            color_recon = color_recon_raw.clip_(0, 255).round_()
         else:
             color_recon = None
         return coord_recon, color_recon

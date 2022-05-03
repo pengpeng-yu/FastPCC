@@ -53,9 +53,9 @@ class PCGCEvaluator(Evaluator):
                   targets_color: Union[List[torch.Tensor], torch.Tensor] = None,
                   extra_info_dicts: List[Dict[str, Union[str, int, float]]] = None):
         """
-        "preds" and "targets" are supposed to be list contains unnormalized
+        "preds" and "targets" are supposed to be lists contain unnormalized
         coordinates with resolution specified in pc_data.resolution (GPU or CPU torch.int32).
-        "color" are supposed to be unnormalized RGBs (CPU torch.uint8).
+        "color" are supposed to be unnormalized RGBs (GPU or CPU torch.float32).
         """
         batch_size = len(preds)
         assert batch_size == len(targets) == len(compressed_bytes_list)
@@ -116,9 +116,9 @@ class PCGCEvaluator(Evaluator):
                     mpeg_pc_error_dict = mpeg_pc_error(
                         os.path.abspath(file_path),
                         os.path.abspath(reconstructed_path),
-                        resolution=resolution, normal=False, color=have_color,
-                        command=self.mpeg_pcc_error_command,
-                        threads=self.mpeg_pcc_error_threads)
+                        resolution=resolution, color=have_color,
+                        threads=self.mpeg_pcc_error_threads,
+                        command=self.mpeg_pcc_error_command,)
                     assert mpeg_pc_error_dict != {}, \
                         f'Error when calling mpeg pc error software with ' \
                         f'infile1={os.path.abspath(file_path)} ' \
