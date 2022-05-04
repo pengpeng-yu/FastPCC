@@ -135,6 +135,7 @@ class PCGCEvaluator(Evaluator):
                 f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
 
         mean_dict = defaultdict(float)
+        count_dist = defaultdict(int)
         exclusion = ['fea_points_num',
                      'input_points_num',
                      'output_points_num']
@@ -143,10 +144,13 @@ class PCGCEvaluator(Evaluator):
         for _, info in self.file_path_to_info.items():
             for key, value in info.items():
                 if key not in exclusion:
-                    mean_dict[key + '(mean)'] += value
+                    key = key + '(mean)'
+                    count_dist[key] += 1
+                    mean_dict[key] += value
         samples_num = len(self.file_path_to_info)
         for key in mean_dict:
             mean_dict[key] /= samples_num
+        mean_dict = {k: v for k, v in mean_dict.items() if count_dist[k] == samples_num}
         mean_dict['samples_num'] = samples_num
         if results_dir is not None:
             with open(os.path.join(results_dir, 'mean_metric.txt'), 'w') as f:

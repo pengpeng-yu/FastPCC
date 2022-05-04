@@ -10,7 +10,7 @@ _DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A
 
 def mpeg_pc_error(
         infile1: str, infile2: str, resolution: int, normal_file: str = '',
-        hausdorff: bool = True, color: bool = False, threads: int = 1, command='pc_error_d'
+        hausdorff: bool = False, color: bool = False, threads: int = 1, command='pc_error_d'
 ) -> Dict[str, float]:
     cmd_args = f'{command}' \
                f' -a {infile1}' \
