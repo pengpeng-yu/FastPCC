@@ -117,7 +117,8 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             self.cached_file_list = None
             self.use_cache = self.gen_cache = False
 
-        if cfg.data_format != '.obj':
+        if cfg.data_format == '.obj' and cfg.kd_tree_partition_max_points_num != 0:
+            # For caching.
             assert cfg.mesh_sample_points_num % cfg.kd_tree_partition_max_points_num == 0
 
         self.cfg = cfg
