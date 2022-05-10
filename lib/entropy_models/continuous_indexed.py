@@ -44,10 +44,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         Priors returned by prior_fn should have no member variable that is
         a learnable param.
         """
-        if len(index_ranges) == 1:
-            self.additional_indexes_dim = False
-        else:
-            self.additional_indexes_dim = True
+        self.additional_indexes_dim = len(index_ranges) != 1
         self.prior_fn = prior_fn
         self.parameter_fns = parameter_fns
         self.index_ranges = index_ranges

@@ -67,7 +67,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
             with open(os.path.join(self.cache_root, 'dataset_config.yaml'), 'w') as f:
                 f.write(cfg.to_yaml())
             self.use_cache = False
-            self.gen_cache = True if allow_cache else False
+            self.gen_cache = allow_cache
             if self.gen_cache is True:
                 logger.info(f'start caching in {self.cache_root}')
         else:

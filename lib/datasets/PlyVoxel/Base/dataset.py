@@ -32,10 +32,7 @@ class PlyVoxel(torch.utils.data.Dataset):
         resolutions = get_collections(cfg.resolution, len(roots))
         assert all([ori == tgt or tgt == 0 for ori, tgt in zip(ori_resolutions, resolutions)])
 
-        if sum(resolutions) == 0:
-            self.voxelized = False
-        else:
-            self.voxelized = True
+        self.voxelized = all([r != 0 for r in resolutions])
 
         # define files list path
         for root, filelist_path, file_path_pattern in zip(roots, filelist_paths, file_path_patterns):
