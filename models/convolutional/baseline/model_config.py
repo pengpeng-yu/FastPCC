@@ -18,9 +18,11 @@ class ModelConfig(SimpleConfig):
 
     # Basic compression settings
     compressed_channels: int = 8
+    bottleneck_process: str = 'noise'
     prior_indexes_scaler: float = 1.0
     prior_indexes_post_scaler: float = 1.0  # only valid for deep factorized conditional em.
     prior_indexes_range: Tuple[int, ...] = (64, )
+    quantize_indexes: bool = False  # during training
 
     # Normal part of network
     encoder_channels: Tuple[int, ...] = (16, 32, 64, 32)
@@ -49,7 +51,7 @@ class ModelConfig(SimpleConfig):
     adaptive_pruning: bool = True
     adaptive_pruning_num_scaler: float = 1.0
     coord_recon_loss_factor: float = 1.0
-    color_recon_loss_type: str = 'SmoothL1'
+    color_recon_loss_type: str = 'MSE_YUVBT709'
     color_recon_loss_factor: float = 1.0
     warmup_steps: int = 0
     warmup_bpp_loss_factor: float = 0.2

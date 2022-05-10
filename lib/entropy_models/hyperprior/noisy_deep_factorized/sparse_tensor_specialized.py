@@ -97,7 +97,7 @@ class GeoLosslessEntropyModel(nn.Module):
                  hyper_decoder_fea_post_op: Callable = lambda x: x,
 
                  skip_encoding_top_fea: str = 'no_skip',
-                 upper_fea_grad_scaler_for_bits_loss: float = 1.0,
+                 bottleneck_fea_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
@@ -113,15 +113,16 @@ class GeoLosslessEntropyModel(nn.Module):
         self.hyper_decoder_coord_post_op = hyper_decoder_coord_post_op
         self.hyper_decoder_fea_post_op = hyper_decoder_fea_post_op
         self.skip_encoding_top_fea = skip_encoding_top_fea
-        self.upper_fea_grad_scaler_for_bits_loss = upper_fea_grad_scaler_for_bits_loss
         assert self.skip_encoding_top_fea in ['no_skip', 'skip']
         self.indexed_entropy_model_coord = ContinuousIndexedEntropyModel(
             prior_fn=coord_prior_fn,
             index_ranges=coord_index_ranges,
             parameter_fns=coord_parameter_fns,
             coding_ndim=2,
+            bottleneck_process='',
             indexes_bound_gradient=indexes_bound_gradient,
             quantize_indexes=quantize_indexes,
+            quantize_bottleneck_in_eval=False,
             lower_bound=0,
             upper_bound=1,
             range_coder_precision=range_coder_precision,
@@ -132,6 +133,7 @@ class GeoLosslessEntropyModel(nn.Module):
             index_ranges=fea_index_ranges,
             parameter_fns=fea_parameter_fns,
             coding_ndim=2,
+            bottleneck_process=bottleneck_fea_process,
             indexes_bound_gradient=indexes_bound_gradient,
             quantize_indexes=quantize_indexes,
             init_scale=init_scale,
@@ -180,9 +182,7 @@ class GeoLosslessEntropyModel(nn.Module):
                 coord_target_key = fea.coordinate_map_key
                 coord_mask = self.get_coord_mask((coord_target_key, cm), pre_coord_mask_indexes)
                 coord_mask_f_, coord_loss_dict = self.indexed_entropy_model_coord(
-                    coord_mask.F[None], coord_mask_indexes,
-                    additive_uniform_noise=False,
-                    x_grad_scaler_for_bits_loss=self.upper_fea_grad_scaler_for_bits_loss
+                    coord_mask.F[None], coord_mask_indexes, is_first_forward=idx == coder_num - 1
                 )
                 concat_loss_dicts(loss_dict, coord_loss_dict, lambda k: f'coord_{idx}_' + k)
 
@@ -202,9 +202,7 @@ class GeoLosslessEntropyModel(nn.Module):
                     )
                     fea_indexes = self.hyper_decoder_fea_post_op(pre_fea_indexes)[None]
                     fea_pred_res_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
-                        (fea.F - fea_pred)[None], fea_indexes,
-                        x_grad_scaler_for_bits_loss=
-                        self.upper_fea_grad_scaler_for_bits_loss if idx != 0 else 1
+                        (fea.F - fea_pred)[None], fea_indexes, is_first_forward=idx == coder_num - 1
                     )
                     lower_fea_tilde = ME.SparseTensor(
                         features=fea_pred_res_tilde[0] + fea_pred,
@@ -216,9 +214,7 @@ class GeoLosslessEntropyModel(nn.Module):
                         sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key)
                     )
                     fea_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
-                        fea.F[None], fea_indexes,
-                        x_grad_scaler_for_bits_loss=
-                        self.upper_fea_grad_scaler_for_bits_loss if idx != 0 else 1
+                        fea.F[None], fea_indexes, is_first_forward=idx == coder_num - 1
                     )
                     lower_fea_tilde = ME.SparseTensor(
                         features=fea_tilde[0],
@@ -258,9 +254,7 @@ class GeoLosslessEntropyModel(nn.Module):
         cm = y_top.coordinate_manager
 
         (bottom_fea_bytes,), coding_batch_shape, bottom_fea_recon = \
-            self.bottom_fea_entropy_model.compress(
-                bottom_fea, return_dequantized=True
-            )
+            self.bottom_fea_entropy_model.compress(bottom_fea)
         lower_fea_recon = bottom_fea_recon
 
         for idx in range(coder_num - 1, -1, -1):
@@ -273,7 +267,7 @@ class GeoLosslessEntropyModel(nn.Module):
             coord_target_key = fea.coordinate_map_key
             coord_mask = self.get_coord_mask((coord_target_key, cm), pre_coord_mask_indexes)
             (coord_bytes,), coord_mask_f_ = self.indexed_entropy_model_coord.compress(
-                coord_mask.F[None], coord_mask_indexes, skip_quantization=True
+                coord_mask.F[None], coord_mask_indexes
             )
             coord_bytes_list.append(coord_bytes)
             coord_recon = coord_mask.C[coord_mask.F.to(torch.bool)[:, 0]]
@@ -309,7 +303,7 @@ class GeoLosslessEntropyModel(nn.Module):
                     )
                     fea_indexes = self.hyper_decoder_fea_post_op(pre_fea_indexes)[None]
                     (fea_bytes,), fea_pred_res_recon = self.indexed_entropy_model_fea.compress(
-                        (fea.F - fea_pred)[None], fea_indexes, return_dequantized=True,
+                        (fea.F - fea_pred)[None], fea_indexes,
                     )
                     lower_fea_recon = ME.SparseTensor(
                         features=fea_pred_res_recon[0] + fea_pred,
@@ -321,7 +315,7 @@ class GeoLosslessEntropyModel(nn.Module):
                         sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
                     )
                     (fea_bytes,), fea_recon = self.indexed_entropy_model_fea.compress(
-                        fea.F[None], fea_indexes, return_dequantized=True,
+                        fea.F[None], fea_indexes
                     )
                     lower_fea_recon = ME.SparseTensor(
                         features=fea_recon[0],
@@ -369,7 +363,7 @@ class GeoLosslessEntropyModel(nn.Module):
             coord_mask_pre_indexes = sub_hyper_decoder_coord(lower_fea_recon)
             coord_mask_indexes = self.hyper_decoder_coord_post_op(coord_mask_pre_indexes)
             coord_mask: ME.SparseTensor = self.indexed_entropy_model_coord.decompress(
-                [coord_bytes], coord_mask_indexes, target_device, skip_dequantization=True,
+                [coord_bytes], coord_mask_indexes, target_device,
                 sparse_tensor_coords_tuple=(coord_mask_pre_indexes.coordinate_map_key, cm)
             )
             coord_recon = coord_mask.C[coord_mask.F.to(torch.bool)[:, 0]]
@@ -465,7 +459,7 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
                  fea_index_scale_max: float = 256,
 
                  skip_encoding_top_fea: str = 'no_skip',
-                 upper_fea_grad_scaler_for_bits_loss: float = 1.0,
+                 bottleneck_fea_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
@@ -484,7 +478,7 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
             NoisyNormal, (coord_index_num_scales,), coord_parameter_fns,
             NoisyNormal, (fea_index_num_scales,), fea_parameter_fns,
             lambda x: x, lambda x: x,
-            skip_encoding_top_fea, upper_fea_grad_scaler_for_bits_loss,
+            skip_encoding_top_fea, bottleneck_fea_process,
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )
@@ -510,7 +504,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  fea_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1),
 
                  skip_encoding_top_fea: str = 'no_skip',
-                 upper_fea_grad_scaler_for_bits_loss: float = 1.0,
+                 bottleneck_fea_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
@@ -533,7 +527,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
             NoisyDeepFactorized, coord_index_ranges, coord_parameter_fns,
             NoisyDeepFactorized, fea_index_ranges, fea_parameter_fns,
             coord_indexes_view_fn, fea_indexes_view_fn,
-            skip_encoding_top_fea, upper_fea_grad_scaler_for_bits_loss,
+            skip_encoding_top_fea, bottleneck_fea_process,
             indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )

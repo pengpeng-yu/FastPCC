@@ -17,6 +17,8 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
     def __init__(self,
                  prior: Distribution,
                  coding_ndim: int,
+                 bottleneck_process: str = 'noise',
+                 quantize_bottleneck_in_eval: bool = True,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  lower_bound: Union[int, torch.Tensor] = 0,
@@ -39,6 +41,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         super(ContinuousBatchedEntropyModel, self).__init__(
             prior=prior,
             coding_ndim=coding_ndim,
+            bottleneck_process=bottleneck_process,
             init_scale=init_scale,
             tail_mass=tail_mass,
             lower_bound=lower_bound,
@@ -47,6 +50,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             overflow_coding=overflow_coding
         )
         assert coding_ndim >= self.prior.batch_ndim
+        self.quantize_bottleneck_in_eval = quantize_bottleneck_in_eval
         self.broadcast_shape_bytes = broadcast_shape_bytes
 
     def build_indexes(self, broadcast_shape: torch.Size):
@@ -58,8 +62,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
 
     @minkowski_tensor_wrapped_fn({1: 0})
     def forward(self, x: torch.Tensor,
-                return_aux_loss: bool = True,
-                additive_uniform_noise: bool = True) \
+                is_first_forward: bool = True) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, List[bytes], torch.Size]]:
         """
@@ -68,17 +71,14 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         be broadcastable to `self.prior_shape`.
         """
         if self.training:
-            if additive_uniform_noise is True:
-                x_perturbed = self.perturb(x)
-            else:
-                x_perturbed = x
-            log_probs = self.prior.log_prob(x_perturbed)
+            processed_x = self.process(x)
+            log_probs = self.prior.log_prob(processed_x)
             loss_dict = {'bits_loss': log_probs.sum() / (-math.log(2))}
-            if return_aux_loss:
+            if is_first_forward:
                 aux_loss = self.prior.aux_loss()
                 if aux_loss is not None:
                     loss_dict['aux_loss'] = aux_loss
-            return x_perturbed, loss_dict
+            return processed_x, loss_dict
 
         else:
             bytes_list, batch_shape, _ = self.compress(x)
@@ -88,10 +88,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
 
     @torch.no_grad()
     @minkowski_tensor_wrapped_fn({1: 2})
-    def compress(self, x: torch.Tensor,
-                 skip_quantization: bool = False,
-                 return_dequantized: bool = False,
-                 estimate_bits: bool = False) \
+    def compress(self, x: torch.Tensor, estimate_bits: bool = False) \
             -> Union[Tuple[List[bytes], torch.Size, torch.Tensor],
                      Tuple[List[bytes], torch.Size, torch.Tensor, torch.Tensor]]:
         """
@@ -104,16 +101,11 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         coding_unit_shape = input_shape[-self.coding_ndim:]
         broadcast_shape = coding_unit_shape[:-len(self.prior.batch_shape)]
 
-        if skip_quantization:
-            if return_dequantized:
-                rounded_x_or_dequantized_x = self.dequantize(x)
-            else:
-                rounded_x_or_dequantized_x = x
-            quantized_x = x.to(torch.int32)
+        if self.quantize_bottleneck_in_eval is True:
+            quantized_x, dequantized_x = self.quantize(x)
         else:
-            quantized_x, rounded_x_or_dequantized_x = self.quantize(
-                x, return_dequantized=return_dequantized
-            )
+            dequantized_x = x
+            quantized_x = x.to(torch.int32)
         # collapse batch dimensions and coding_unit dimensions
         collapsed_x = quantized_x.reshape(-1, coding_unit_shape.numel())
         indexes = self.build_indexes(broadcast_shape).reshape(-1).tolist()  # shape: coding_unit_shape.numel()
@@ -139,17 +131,16 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
 
         if estimate_bits is True:
             estimated_bits = self.prior.log_prob(quantized_x).sum() / (-math.log(2))
-            return bytes_list, batch_shape, rounded_x_or_dequantized_x, estimated_bits
+            return bytes_list, batch_shape, dequantized_x, estimated_bits
 
         else:
-            return bytes_list, batch_shape, rounded_x_or_dequantized_x
+            return bytes_list, batch_shape, dequantized_x
 
     @torch.no_grad()
     @minkowski_tensor_wrapped_fn({'<del>sparse_tensor_coords_tuple': 0})
     def decompress(self, bytes_list: List[bytes],
                    batch_shape: torch.Size,
-                   target_device: torch.device,
-                   skip_dequantization: bool = False):
+                   target_device: torch.device):
         if sum(self.broadcast_shape_bytes) != 0:
             broadcast_shape = []
             broadcast_shape_total_bytes = sum(self.broadcast_shape_bytes)
@@ -174,10 +165,10 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                 )[0]
             )
         symbols = torch.tensor(symbols, device=target_device)
-        if skip_dequantization:
-            symbols = symbols.to(torch.float)
-        else:
+        if self.quantize_bottleneck_in_eval is True:
             symbols = self.dequantize(symbols)
+        else:
+            symbols = symbols.to(torch.float)
         symbols = symbols.reshape(batch_shape + broadcast_shape + self.prior.batch_shape)
         return symbols
 
@@ -187,6 +178,8 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
                  batch_shape: torch.Size,
                  coding_ndim: int,
                  num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
+                 bottleneck_process: str = 'noise',
+                 quantize_bottleneck_in_eval: bool = True,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  lower_bound: Union[int, torch.Tensor] = 0,
@@ -206,6 +199,8 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
                 biases=prior_biases,
                 factors=prior_factors),
             coding_ndim=coding_ndim,
+            bottleneck_process=bottleneck_process,
+            quantize_bottleneck_in_eval=quantize_bottleneck_in_eval,
             init_scale=init_scale,
             tail_mass=tail_mass,
             lower_bound=lower_bound,

@@ -12,8 +12,12 @@ import torch.nn.functional as F
 from torchvision.ops import sigmoid_focal_loss
 import MinkowskiEngine as ME
 from MinkowskiEngine.MinkowskiSparseTensor import SparseTensorQuantizationMode
+try:
+    from pytorch3d.ops.knn import knn_points, knn_gather
+except ImportError: pass
 
 from lib.utils import Timer
+from lib.metrics.misc import gen_rgb_to_yuvbt709_param
 from lib.mpeg_gpcc_utils import gpcc_octree_lossless_geom_encode, gpcc_decode
 from lib.torch_utils import MLPBlock, TorchCudaMaxMemoryAllocated, concat_loss_dicts
 from lib.data_utils import PCData, write_ply_file
@@ -76,6 +80,10 @@ class PCC(nn.Module):
             self.input_feature_channels = 1
         elif cfg.input_feature_type == 'Color':
             self.input_feature_channels = 3
+            if not self.cfg.lossless_color_enabled:
+                rgb_to_yuvbt709_param = gen_rgb_to_yuvbt709_param()
+                self.register_buffer('rgb_to_yuvbt709_weight', rgb_to_yuvbt709_param[0], False)
+                self.register_buffer('rgb_to_yuvbt709_bias', rgb_to_yuvbt709_param[1], False)
         else:
             raise NotImplementedError
         self.hyper_dec_fea_chnls = cfg.compressed_channels * (
@@ -129,7 +137,8 @@ class PCC(nn.Module):
                     coding_ndim=2,
                     parameter_fns_factory=parameter_fns_factory,
                     num_filters=(1, 3, 3, 3, 1),
-                    quantize_indexes=True
+                    bottleneck_process=self.cfg.bottleneck_process,
+                    quantize_indexes=self.cfg.quantize_indexes
                 )
                 self.decoder = Decoder(
                     (cfg.compressed_channels,) * len(cfg.decoder_channels),
@@ -215,9 +224,10 @@ class PCC(nn.Module):
         if self.cfg.hyperprior == 'None':
             em = PriorEM(
                 batch_shape=torch.Size([self.cfg.compressed_channels]),
-                broadcast_shape_bytes=(3,) if not self.cfg.recurrent_part_enabled else (0,),
                 coding_ndim=2,
-                init_scale=2
+                bottleneck_process=self.cfg.bottleneck_process,
+                init_scale=2,
+                broadcast_shape_bytes=(3,) if not self.cfg.recurrent_part_enabled else (0,),
             )
         else:
             hyper_encoder = HyperEncoder(
@@ -246,7 +256,9 @@ class PCC(nn.Module):
                     coding_ndim=2,
                     num_scales=self.cfg.prior_indexes_range[0],
                     scale_min=0.11,
-                    scale_max=64
+                    scale_max=64,
+                    bottleneck_process=self.cfg.bottleneck_process,
+                    quantize_indexes=self.cfg.quantize_indexes
                 )
             elif self.cfg.hyperprior == 'NoisyDeepFactorized':
                 em = HyperPriorNoisyDeepFactorizedEM(
@@ -260,7 +272,8 @@ class PCC(nn.Module):
                     parameter_fns_type='transform',
                     parameter_fns_factory=parameter_fns_factory,
                     num_filters=(1, 3, 3, 3, 1),
-                    quantize_indexes=True
+                    bottleneck_process=self.cfg.bottleneck_process,
+                    quantize_indexes=self.cfg.quantize_indexes
                 )
             else:
                 raise NotImplementedError
@@ -286,7 +299,8 @@ class PCC(nn.Module):
             fea_parameter_fns_factory=parameter_fns_factory,
             fea_num_filters=(1, 3, 3, 3, 3, 1),
             skip_encoding_top_fea=skip_encoding_top_fea,
-            quantize_indexes=True
+            bottleneck_fea_process=self.cfg.bottleneck_process,
+            quantize_indexes=self.cfg.quantize_indexes
         )
         return em_lossless_based
     
@@ -381,7 +395,7 @@ class PCC(nn.Module):
                     device=xyz.device
                 )
             elif self.cfg.input_feature_type == 'Color':
-                # Input point clouds are expected to be unnormalized discrete (0~255) float32 tensor.
+                # Input point clouds are expected to be unnormalized discrete (0~255 RGB) float32 tensor.
                 sparse_pc_feature = color
             else:
                 raise NotImplementedError
@@ -535,9 +549,7 @@ class PCC(nn.Module):
             else:
                 sparse_tensor_coords = bottom_fea_recon.C
         else:
-            em_bytes_list, coding_batch_shape, fea_recon = self.em.compress(
-                feature, return_dequantized=True
-            )
+            em_bytes_list, coding_batch_shape, fea_recon = self.em.compress(feature)
             assert coding_batch_shape == torch.Size([1])
             em_bytes = em_bytes_list[0]
             sparse_tensor_coords = feature.C
@@ -745,20 +757,39 @@ class PCC(nn.Module):
             recon_loss *= factor
         return recon_loss
 
+    def rgb_to_yuvbt709(self, rgb: torch.Tensor):
+        assert rgb.dtype == torch.float32
+        assert rgb.ndim == 2 and rgb.shape[1] == 3
+        return F.linear(rgb, self.rgb_to_yuvbt709_weight, self.rgb_to_yuvbt709_bias)
+
     def get_color_recon_loss(self, sparse_pc, color_pred):
-        kernel_map = sparse_pc.coordinate_manager.kernel_map(  # TODO: unmatched points?
-            sparse_pc.coordinate_map_key,
-            color_pred.coordinate_map_key,
-            kernel_size=1
-        )[0].to(torch.long)
-        if self.cfg.color_recon_loss_type == 'SmoothL1':
-            loss_func = F.smooth_l1_loss
+        if not self.cfg.color_recon_loss_type.endswith('YUVBT709'):
+            raise NotImplementedError
+
+        target_fea_list = []
+        ori_coord_list, ori_fea_list = sparse_pc.decomposed_coordinates_and_features
+        pred_coord_list, pred_fea_list = color_pred.decomposed_coordinates_and_features
+        batch_size = len(ori_coord_list)
+        for idx in range(batch_size):
+            nearest_idx = knn_points(
+                pred_coord_list[idx][None].to(torch.float),
+                ori_coord_list[idx][None].to(torch.float),
+                K=1, return_sorted=False
+            ).idx
+            target_fea = self.rgb_to_yuvbt709(ori_fea_list[idx][nearest_idx[0, :, 0]])
+            target_fea_list.append(target_fea)
+            pred_fea_list[idx] = self.rgb_to_yuvbt709(pred_fea_list[idx].clip_(0, 255))
+
+        if self.cfg.color_recon_loss_type.startswith('MSE'):
+            loss_func = partial(F.mse_loss, reduction='sum')
+        elif self.cfg.color_recon_loss_type.startswith('SmoothL1'):
+            loss_func = partial(F.smooth_l1_loss, reduction='sum')
         else:
             raise NotImplementedError
-        recon_loss = loss_func(
-            sparse_pc.F[kernel_map[0]],
-            color_pred.F[kernel_map[1]]
-        )
+
+        recon_loss = sum(
+            [loss_func(t, p) for t, p in zip(pred_fea_list, target_fea_list)]
+        ) / color_pred.shape[0]
         factor = self.cfg.color_recon_loss_factor
         if factor != 1:
             recon_loss *= factor

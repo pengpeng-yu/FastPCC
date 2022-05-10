@@ -9,8 +9,6 @@ from torch.distributions import Distribution
 from .utils import quantization_offset
 from .rans_coder import batched_pmf_to_quantized_cdf, IndexedRansCoder
 
-from lib.torch_utils import minkowski_tensor_wrapped_fn
-
 
 class DistributionQuantizedCDFTable(nn.Module):
     """
@@ -291,6 +289,7 @@ class ContinuousEntropyModelBase(nn.Module):
     def __init__(self,
                  prior: Distribution,
                  coding_ndim: int,
+                 bottleneck_process: str,
                  init_scale: int,
                  tail_mass: float,
                  lower_bound: Union[int, torch.Tensor],
@@ -309,6 +308,14 @@ class ContinuousEntropyModelBase(nn.Module):
             cdf_precision=range_coder_precision,
             overflow_coding=overflow_coding
         )
+        self.quantize_bottleneck = 'quantization' in bottleneck_process
+        if self.quantize_bottleneck:
+            bottleneck_process = bottleneck_process.replace('quantization', '', 1)
+        self.perturb_bottleneck = 'noise' in bottleneck_process
+        if self.perturb_bottleneck:
+            bottleneck_process = bottleneck_process.replace('noise', '', 1)
+        assert bottleneck_process in (',', '_', ' ', '+', ''), \
+            f'Unexpected bottleneck_process: {bottleneck_process}'
         self.coding_ndim = coding_ndim
 
     def perturb(self, x: torch.Tensor) -> torch.Tensor:
@@ -319,16 +326,20 @@ class ContinuousEntropyModelBase(nn.Module):
         x = x + self._noise
         return x
 
+    def process(self, x: torch.Tensor) -> torch.Tensor:
+        if self.quantize_bottleneck is True:
+            x = x + (x.detach().round() - x.detach())
+        if self.perturb_bottleneck is True:
+            x = self.perturb(x)
+        return x
+
     @torch.no_grad()
-    @minkowski_tensor_wrapped_fn({1: [0, 1]})
-    def quantize(self, x: torch.Tensor, offset=None, return_dequantized: bool = False) \
-            -> Tuple[torch.Tensor, torch.Tensor]:
+    def quantize(self, x: torch.Tensor, offset=None) -> Tuple[torch.Tensor, torch.Tensor]:
         if offset is None: offset = quantization_offset(self.prior.base)
         x -= offset
         torch.round_(x)
         quantized_x = x.to(torch.int32)
-        if return_dequantized is True:
-            x += offset
+        x += offset
         return quantized_x, x
 
     @torch.no_grad()

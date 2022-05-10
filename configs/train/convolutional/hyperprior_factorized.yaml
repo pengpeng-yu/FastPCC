@@ -6,3 +6,4 @@ model:
   hyper_compressed_channels: 8
   hyper_decoder_channels: [64]
   prior_indexes_range: [16, 16, 16, 16]
+  quantize_indexes: True

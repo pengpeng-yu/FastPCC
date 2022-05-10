@@ -19,8 +19,10 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                  index_ranges: Tuple[int, ...],
                  parameter_fns: Dict[str, Callable[[torch.Tensor], Any]],
                  coding_ndim: int,
+                 bottleneck_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
+                 quantize_bottleneck_in_eval: bool = True,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  lower_bound: Union[int, torch.Tensor] = 0,
@@ -51,12 +53,14 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         self.index_ranges = index_ranges
         self.indexes_bound_gradient = indexes_bound_gradient
         self.quantize_indexes = quantize_indexes
+        self.quantize_bottleneck_in_eval = quantize_bottleneck_in_eval
         range_coding_prior_indexes = self.make_range_coding_prior()
         with torch.no_grad():
             prior = self.make_prior(range_coding_prior_indexes)
         super(ContinuousIndexedEntropyModel, self).__init__(
             prior=prior,
             coding_ndim=coding_ndim,
+            bottleneck_process=bottleneck_process,
             init_scale=init_scale,
             tail_mass=tail_mass,
             lower_bound=lower_bound,
@@ -90,7 +94,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             indexes = torch.arange(self.index_ranges[0])
         else:
             indexes = [torch.arange(r) for r in self.index_ranges]
-            indexes = torch.meshgrid(indexes)
+            indexes = torch.meshgrid(*indexes, indexing='ij')
             indexes = torch.stack(indexes, dim=-1)
         indexes = indexes.to(torch.float)
         return indexes
@@ -113,8 +117,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
 
     @minkowski_tensor_wrapped_fn({1: 0, 2: None})
     def forward(self, x: torch.Tensor, indexes: torch.Tensor,
-                return_aux_loss: bool = True,
-                additive_uniform_noise: bool = True,
+                is_first_forward: bool = True,
                 x_grad_scaler_for_bits_loss: float = 1.0) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, List[bytes]]]:
@@ -125,18 +128,16 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         indexes = self.normalize_indexes(indexes)
         prior = self.make_prior(indexes)
         if self.training:
-            self.update_prior()
-            if additive_uniform_noise is True:
-                x_perturbed = self.perturb(x)
-            else:
-                x_perturbed = x
-            log_probs = prior.log_prob(grad_scaler(x_perturbed, x_grad_scaler_for_bits_loss))
+            if is_first_forward:
+                self.update_prior()
+            processed_x = self.process(x)
+            log_probs = prior.log_prob(grad_scaler(processed_x, x_grad_scaler_for_bits_loss))
             loss_dict = {'bits_loss': log_probs.sum() / (-math.log(2))}
-            if return_aux_loss:
+            if is_first_forward:
                 aux_loss = self.prior.aux_loss()
                 if aux_loss is not None:
                     loss_dict['aux_loss'] = aux_loss
-            return x_perturbed, loss_dict
+            return processed_x, loss_dict
 
         else:
             bytes_list, _ = self.compress(x, indexes)
@@ -164,8 +165,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
     @minkowski_tensor_wrapped_fn({1: 1, 2: None})
     def compress(self, x: torch.Tensor,
                  indexes: torch.Tensor,
-                 skip_quantization: bool = False,
-                 return_dequantized: bool = False,
                  estimate_bits: bool = False) \
             -> Union[Tuple[List[bytes], torch.Tensor],
                      Tuple[List[bytes], torch.Tensor, torch.Tensor]]:
@@ -191,16 +190,13 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         # collapse batch dimensions and coding_unit dimensions
         flat_indexes = flat_indexes.reshape(-1, coding_unit_shape.numel())
         prior = self.make_prior(indexes)
-        if skip_quantization is True:
-            if return_dequantized:
-                rounded_x_or_dequantized_x = self.dequantize(x, offset=quantization_offset(prior))
-            else:
-                rounded_x_or_dequantized_x = x
-            quantized_x = x.to(torch.int32)
-        else:
-            quantized_x, rounded_x_or_dequantized_x = self.quantize(
-                x, offset=quantization_offset(prior), return_dequantized=return_dequantized
+        if self.quantize_bottleneck_in_eval is True:
+            quantized_x, dequantized_x = self.quantize(
+                x, offset=quantization_offset(prior)
             )
+        else:
+            dequantized_x = x
+            quantized_x = x.to(torch.int32)
         collapsed_x = quantized_x.reshape(-1, coding_unit_shape.numel())
 
         bytes_list = self.prior.range_coder.encode_with_indexes(
@@ -210,16 +206,15 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
 
         if estimate_bits:
             estimated_bits = prior.log_prob(quantized_x).sum() / (-math.log(2))
-            return bytes_list, rounded_x_or_dequantized_x, estimated_bits
+            return bytes_list, dequantized_x, estimated_bits
         else:
-            return bytes_list, rounded_x_or_dequantized_x
+            return bytes_list, dequantized_x
 
     @torch.no_grad()
     @minkowski_tensor_wrapped_fn({'<del>sparse_tensor_coords_tuple': 0, 2: None})
     def decompress(self, bytes_list: List[bytes],
                    indexes: torch.Tensor,
-                   target_device: torch.device,
-                   skip_dequantization: bool = False):
+                   target_device: torch.device):
         indexes = self.normalize_indexes(indexes)
         flat_indexes = self.flatten_indexes(indexes)
 
@@ -231,10 +226,10 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             bytes_list, flat_indexes.tolist()
         )
         symbols = torch.tensor(symbols, device=target_device)
-        if skip_dequantization:
-            symbols = symbols.to(torch.float)
-        else:
+        if self.quantize_bottleneck_in_eval is True:
             symbols = self.dequantize(symbols, offset=quantization_offset(self.make_prior(indexes)))
+        else:
+            symbols = symbols.to(torch.float)
         symbols = symbols.reshape(input_shape)
         return symbols
 
@@ -350,8 +345,10 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
                  parameter_fns_type: str = 'transform',
                  parameter_fns_factory: Callable[..., nn.Module] = None,
                  num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1),
+                 bottleneck_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
+                 quantize_bottleneck_in_eval: bool = True,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  lower_bound: Union[int, torch.Tensor] = 0,
@@ -364,7 +361,8 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
             )
         super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).__init__(
             NoisyDeepFactorized, index_ranges, parameter_fns,
-            coding_ndim, indexes_bound_gradient, quantize_indexes,
+            coding_ndim, bottleneck_process, indexes_bound_gradient,
+            quantize_indexes, quantize_bottleneck_in_eval,
             init_scale, tail_mass, lower_bound, upper_bound,
             range_coder_precision, overflow_coding
         )
@@ -373,25 +371,23 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
 
     @minkowski_tensor_wrapped_fn({1: 0, 2: None})
     def forward(self, x: torch.Tensor, indexes: torch.Tensor,
-                return_aux_loss: bool = True,
-                additive_uniform_noise: bool = True) \
+                is_first_forward: bool = True,
+                x_grad_scaler_for_bits_loss: float = 1.0) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, List[bytes]]]:
         return super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).forward(
-            x, self.indexes_view_fn(indexes), return_aux_loss, additive_uniform_noise
+            x, self.indexes_view_fn(indexes), is_first_forward, x_grad_scaler_for_bits_loss
         )
 
     @torch.no_grad()
     @minkowski_tensor_wrapped_fn({1: 1, 2: None})
     def compress(self, x: torch.Tensor,
                  indexes: torch.Tensor,
-                 skip_quantization: bool = False,
-                 return_dequantized: bool = False,
                  estimate_bits: bool = False) \
             -> Union[Tuple[List[bytes], torch.Tensor],
                      Tuple[List[bytes], torch.Tensor, torch.Tensor]]:
         return super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).compress(
-            x, self.indexes_view_fn(indexes), skip_quantization, return_dequantized, estimate_bits
+            x, self.indexes_view_fn(indexes), estimate_bits
         )
 
     @torch.no_grad()
@@ -415,7 +411,9 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
                  num_scales: int,
                  scale_fn: Dict[str, Callable[..., Union[int, float, torch.Tensor]]],
                  coding_ndim: int,
+                 bottleneck_process: str = 'noise',
                  quantize_indexes: bool = False,
+                 quantize_bottleneck_in_eval: bool = True,
                  init_scale: int = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16):
@@ -424,21 +422,22 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
             index_ranges=(num_scales,),
             parameter_fns={'loc': lambda _: 0, 'scale': scale_fn},
             coding_ndim=coding_ndim,
+            bottleneck_process=bottleneck_process,
             quantize_indexes=quantize_indexes,
+            quantize_bottleneck_in_eval=quantize_bottleneck_in_eval,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
         )
 
     def forward(self, x: torch.Tensor, scale_indexes: torch.Tensor, loc=None,
-                return_aux_loss: bool = True,
-                additive_uniform_noise: bool = True) \
+                is_first_forward: bool = True) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, List[bytes]]]:
         if loc is not None:
             x = x - loc
         values, *ret = super(LocationScaleIndexedEntropyModel, self).forward(
-            x, scale_indexes, return_aux_loss, additive_uniform_noise)
+            x, scale_indexes, is_first_forward)
         if loc is not None:
             values = values + loc
         return (values, *ret)

@@ -94,9 +94,7 @@ class Decoder(nn.Module):
                 *self.res_lfa_list[idx].neighbor_feature_generator(encoder_cached_xyz.pop(), msg.xyz)
             )).feature
             pred_feature = self.mlp_pred_fea_list[idx](msg.feature)
-            bytes_strings, msg.feature = self.res_em.compress(
-                res_feature, pred_feature, return_dequantized=True
-            )
+            bytes_strings, msg.feature = self.res_em.compress(res_feature, pred_feature)
             bytes_dict[f'{msg.feature.shape[2]}c'] = bytes_strings[0]
         return msg, self.concat_strings(bytes_dict.values())
 
@@ -265,9 +263,7 @@ class PCC(nn.Module):
                         PointLayerMessage(xyz=sub_xyz, feature=sub_xyz)
                     )
                     enc_msg.feature = self.encoder_out_mlp(enc_msg.feature).contiguous()
-                    (bottom_bytes, ), coding_batch_shape, bottom_fea_recon = self.em.compress(
-                        enc_msg.feature, return_dequantized=True
-                    )
+                    (bottom_bytes, ), coding_batch_shape, bottom_fea_recon = self.em.compress(enc_msg.feature)
                     bottom_bytes_list.append(bottom_bytes)
 
                     dec_msg = PointLayerMessage(xyz=enc_msg.xyz, feature=bottom_fea_recon)

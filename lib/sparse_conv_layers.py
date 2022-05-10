@@ -209,7 +209,7 @@ class GenerativeUpsample(nn.Module):
                 res_fea = self.residual_block(cached_feature, coordinates=cm_key)
                 res_fea_indexes = self.predict_block(message.fea)
                 res_fea_tilde, fea_loss_dict = message.indexed_em(
-                    res_fea, res_fea_indexes
+                    res_fea, res_fea_indexes, is_first_forward=len(message.em_loss_dict_list) == 0
                 )
                 message.fea = res_fea_tilde
                 message.em_loss_dict_list.append(fea_loss_dict)
@@ -219,7 +219,7 @@ class GenerativeUpsample(nn.Module):
                 res_fea = self.residual_block(cached_feature, coordinates=cm_key)
                 res_fea_indexes = self.predict_block(message.fea)
                 (res_fea_bytes,), res_fea_recon = message.indexed_em.compress(
-                    res_fea, res_fea_indexes, return_dequantized=True
+                    res_fea, res_fea_indexes
                 )
                 message.fea = res_fea_recon
                 message.em_bytes_list.append(res_fea_bytes)

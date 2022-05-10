@@ -43,6 +43,7 @@ class EntropyModel(nn.Module):
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
                  prior_bytes_num_bytes: int = 2,
 
+                 bottleneck_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
@@ -59,6 +60,7 @@ class EntropyModel(nn.Module):
             batch_shape=hyperprior_batch_shape,
             coding_ndim=coding_ndim,
             num_filters=hyperprior_num_filters,
+            bottleneck_process=bottleneck_process,
             init_scale=hyperprior_init_scale,
             tail_mass=hyperprior_tail_mass,
             range_coder_precision=range_coder_precision,
@@ -69,6 +71,7 @@ class EntropyModel(nn.Module):
             index_ranges=index_ranges,
             parameter_fns=parameter_fns,
             coding_ndim=coding_ndim,
+            bottleneck_process=bottleneck_process,
             indexes_bound_gradient=indexes_bound_gradient,
             quantize_indexes=quantize_indexes,
             init_scale=init_scale,
@@ -76,17 +79,17 @@ class EntropyModel(nn.Module):
             range_coder_precision=range_coder_precision
         )
 
-    def forward(self, y, return_aux_loss: bool = True):
+    def forward(self, y, is_first_forward: bool = True):
         if self.training:
             z = self.hyper_encoder_post_op(self.hyper_encoder(y))
-            z_tilde, hyperprior_loss_dict = self.hyperprior_entropy_model(z, return_aux_loss)
+            z_tilde, hyperprior_loss_dict = self.hyperprior_entropy_model(z, is_first_forward)
             indexes = self.hyper_decoder_post_op(self.hyper_decoder(z_tilde))
-            y_tilde, prior_loss_dict = self.prior_entropy_model(y, indexes, return_aux_loss)
+            y_tilde, prior_loss_dict = self.prior_entropy_model(y, indexes, is_first_forward)
             loss_dict = concat_loss_dicts(prior_loss_dict, hyperprior_loss_dict, lambda k: 'hyper_' + k)
             return y_tilde, loss_dict
 
         else:
-            concat_bytes_list, coding_batch_shape, rounded_y = self.compress(y)
+            concat_bytes_list, coding_batch_shape, dequantized_y = self.compress(y)
             sparse_tensor_coords_tuple = get_minkowski_tensor_coords_tuple(y)
             y_recon = self.decompress(
                 concat_bytes_list,
@@ -96,25 +99,25 @@ class EntropyModel(nn.Module):
             )
             return y_recon, concat_bytes_list, coding_batch_shape
 
-    def compress(self, y, return_dequantized: bool = False, estimate_bits: bool = False) \
+    def compress(self, y, estimate_bits: bool = False) \
             -> Union[Tuple[List[bytes], torch.Size, torch.Tensor],
                      Tuple[List[bytes], torch.Size, torch.Tensor, torch.Tensor]]:
         z = self.hyper_encoder_post_op(self.hyper_encoder(y))
         prior_bytes_list, coding_batch_shape, z_recon, *estimated_prior_bits = \
             self.hyperprior_entropy_model.compress(
-                z, return_dequantized=True, estimate_bits=estimate_bits
+                z, estimate_bits=estimate_bits
             )
         indexes = self.hyper_decoder_post_op(self.hyper_decoder(z_recon))
-        bytes_list, rounded_y_or_dequantized_y, *estimated_bits = \
+        bytes_list, dequantized_y, *estimated_bits = \
             self.prior_entropy_model.compress(
-                y, indexes, return_dequantized=return_dequantized, estimate_bits=estimate_bits
+                y, indexes, estimate_bits=estimate_bits
             )
         concat_bytes_list = self.concat_bytes_lists(prior_bytes_list, bytes_list)
         if estimated_bits:
-            return concat_bytes_list, coding_batch_shape, rounded_y_or_dequantized_y, \
+            return concat_bytes_list, coding_batch_shape, dequantized_y, \
                    estimated_prior_bits[0] + estimated_bits[0]
         else:
-            return concat_bytes_list, coding_batch_shape, rounded_y_or_dequantized_y,
+            return concat_bytes_list, coding_batch_shape, dequantized_y,
 
     def decompress(self,
                    concat_bytes_list: List[bytes],
@@ -175,6 +178,7 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
                  prior_bytes_num_bytes: int = 2,
 
+                 bottleneck_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
@@ -191,19 +195,19 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
             lambda x: x, lambda x: x,
             hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
             hyperprior_broadcast_shape_bytes, prior_bytes_num_bytes,
-            indexes_bound_gradient, quantize_indexes,
+            bottleneck_process, indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )
 
-    def forward(self, y, return_aux_loss: bool = True):
+    def forward(self, y, is_first_forward: bool = True):
         y = minkowski_tensor_wrapped_op(y, torch.abs)
-        return super(ScaleNoisyNormalEntropyModel, self).forward(y, return_aux_loss)
+        return super(ScaleNoisyNormalEntropyModel, self).forward(y, is_first_forward)
 
-    def compress(self, y, return_dequantized: bool = False, estimate_bits: bool = False) \
+    def compress(self, y, estimate_bits: bool = False) \
             -> Union[Tuple[List[bytes], torch.Size, torch.Tensor],
                      Tuple[List[bytes], torch.Size, torch.Tensor, torch.Tensor]]:
         y = minkowski_tensor_wrapped_op(y, torch.abs)
-        return super(ScaleNoisyNormalEntropyModel, self).compress(y, return_dequantized, estimate_bits)
+        return super(ScaleNoisyNormalEntropyModel, self).compress(y, estimate_bits)
 
 
 class NoisyDeepFactorizedEntropyModel(EntropyModel):
@@ -224,6 +228,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
                  parameter_fns_type: str = 'transform',
                  parameter_fns_factory: Callable[..., nn.Module] = None,
                  num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1),
+                 bottleneck_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
                  init_scale: int = 10,
@@ -241,7 +246,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
             lambda x: x, indexes_view_fn,
             hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
             hyperprior_broadcast_shape_bytes, prior_bytes_num_bytes,
-            indexes_bound_gradient, quantize_indexes,
+            bottleneck_process,indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )
         for module_name, module in modules_to_add.items():

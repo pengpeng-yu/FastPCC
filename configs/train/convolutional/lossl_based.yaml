@@ -4,6 +4,7 @@ model:
   compressed_channels: 32
   prior_indexes_scaler: 10.0
   prior_indexes_range: [16, 16, 16, 16]
+  quantize_indexes: True
   hyperprior: 'None'
   recurrent_part_enabled: True
   recurrent_part_channels: 64
