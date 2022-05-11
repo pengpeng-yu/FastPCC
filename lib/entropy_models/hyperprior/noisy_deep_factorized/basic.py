@@ -126,14 +126,14 @@ class EntropyModel(nn.Module):
                    sparse_tensor_coords_tuple: Tuple = None) -> Any:
         prior_bytes_list, bytes_list = self.split_bytes_lists(concat_bytes_list)
         z_recon = self.hyperprior_entropy_model.decompress(
-            prior_bytes_list, coding_batch_shape, target_device, False,
+            prior_bytes_list, coding_batch_shape, target_device,
             sparse_tensor_coords_tuple=sparse_tensor_coords_tuple
         )
         pre_indexes = self.hyper_decoder(z_recon)
         sparse_tensor_coords_tuple = get_minkowski_tensor_coords_tuple(pre_indexes)
         indexes = self.hyper_decoder_post_op(pre_indexes)
         y_recon = self.prior_entropy_model.decompress(
-            bytes_list, indexes, target_device, False,
+            bytes_list, indexes, target_device,
             sparse_tensor_coords_tuple=sparse_tensor_coords_tuple
         )
         return y_recon
