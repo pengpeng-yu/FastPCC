@@ -71,7 +71,7 @@ std::vector<py::bytes> IndexedRansCoderNoSymbol::encode_with_indexes(
             max_symbols_num = symbols_num;
         }
     }
-    size_t out_max_size = 4 * max_symbols_num;
+    size_t out_max_size = 4 * (max_symbols_num + 1);
     uint8_t *out_buf = new uint8_t[out_max_size];
 
     for (size_t unit_idx = 0; unit_idx < coding_units_num; ++unit_idx)
