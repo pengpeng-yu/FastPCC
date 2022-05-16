@@ -299,6 +299,7 @@ class PCC(nn.Module):
             fea_parameter_fns_factory=parameter_fns_factory,
             fea_num_filters=(1, 3, 3, 3, 3, 1),
             skip_encoding_top_fea=skip_encoding_top_fea,
+            upper_fea_grad_scaler_for_bits_loss=self.cfg.lossless_part_upper_fea_grad_scaler,
             bottleneck_fea_process=self.cfg.bottleneck_process,
             quantize_indexes=self.cfg.quantize_indexes
         )

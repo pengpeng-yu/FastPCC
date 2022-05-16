@@ -97,6 +97,7 @@ class GeoLosslessEntropyModel(nn.Module):
                  hyper_decoder_fea_post_op: Callable = lambda x: x,
 
                  skip_encoding_top_fea: str = 'no_skip',
+                 upper_fea_grad_scaler_for_bits_loss: float = 1.0,
                  bottleneck_fea_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
@@ -113,6 +114,7 @@ class GeoLosslessEntropyModel(nn.Module):
         self.hyper_decoder_coord_post_op = hyper_decoder_coord_post_op
         self.hyper_decoder_fea_post_op = hyper_decoder_fea_post_op
         self.skip_encoding_top_fea = skip_encoding_top_fea
+        self.upper_fea_grad_scaler_for_bits_loss = upper_fea_grad_scaler_for_bits_loss
         assert self.skip_encoding_top_fea in ['no_skip', 'skip']
         self.indexed_entropy_model_coord = ContinuousIndexedEntropyModel(
             prior_fn=coord_prior_fn,
@@ -202,7 +204,8 @@ class GeoLosslessEntropyModel(nn.Module):
                     )
                     fea_indexes = self.hyper_decoder_fea_post_op(pre_fea_indexes)[None]
                     fea_pred_res_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
-                        (fea.F - fea_pred)[None], fea_indexes, is_first_forward=idx == coder_num - 1
+                        (fea.F - fea_pred)[None], fea_indexes, is_first_forward=idx == coder_num - 1,
+                        x_grad_scaler_for_bits_loss=self.upper_fea_grad_scaler_for_bits_loss
                     )
                     lower_fea_tilde = ME.SparseTensor(
                         features=fea_pred_res_tilde[0] + fea_pred,
@@ -214,7 +217,8 @@ class GeoLosslessEntropyModel(nn.Module):
                         sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key)
                     )
                     fea_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
-                        fea.F[None], fea_indexes, is_first_forward=idx == coder_num - 1
+                        fea.F[None], fea_indexes, is_first_forward=idx == coder_num - 1,
+                        x_grad_scaler_for_bits_loss=self.upper_fea_grad_scaler_for_bits_loss
                     )
                     lower_fea_tilde = ME.SparseTensor(
                         features=fea_tilde[0],
@@ -459,6 +463,7 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
                  fea_index_scale_max: float = 256,
 
                  skip_encoding_top_fea: str = 'no_skip',
+                 upper_fea_grad_scaler_for_bits_loss: float = 1.0,
                  bottleneck_fea_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
@@ -478,8 +483,8 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
             NoisyNormal, (coord_index_num_scales,), coord_parameter_fns,
             NoisyNormal, (fea_index_num_scales,), fea_parameter_fns,
             lambda x: x, lambda x: x,
-            skip_encoding_top_fea, bottleneck_fea_process,
-            indexes_bound_gradient, quantize_indexes,
+            skip_encoding_top_fea, upper_fea_grad_scaler_for_bits_loss,
+            bottleneck_fea_process, indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )
 
@@ -504,6 +509,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  fea_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1),
 
                  skip_encoding_top_fea: str = 'no_skip',
+                 upper_fea_grad_scaler_for_bits_loss: float = 1.0,
                  bottleneck_fea_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
@@ -527,8 +533,8 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
             NoisyDeepFactorized, coord_index_ranges, coord_parameter_fns,
             NoisyDeepFactorized, fea_index_ranges, fea_parameter_fns,
             coord_indexes_view_fn, fea_indexes_view_fn,
-            skip_encoding_top_fea, bottleneck_fea_process,
-            indexes_bound_gradient, quantize_indexes,
+            skip_encoding_top_fea, upper_fea_grad_scaler_for_bits_loss,
+            bottleneck_fea_process, indexes_bound_gradient, quantize_indexes,
             init_scale, tail_mass, range_coder_precision
         )
         for module_name, module in coord_modules_to_add.items():

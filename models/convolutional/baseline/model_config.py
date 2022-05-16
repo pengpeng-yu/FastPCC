@@ -43,6 +43,7 @@ class ModelConfig(SimpleConfig):
     lossless_color_enabled: bool = False
     lossless_coord_indexes_range: Tuple[int, ...] = (8, 8, 8, 8)
     lossless_hybrid_hyper_decoder_fea: bool = False
+    lossless_part_upper_fea_grad_scaler: float = 1.0
 
     # Loss items
     bpp_loss_factor: float = 0.2
