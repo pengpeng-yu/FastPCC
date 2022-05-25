@@ -67,7 +67,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
 
     dataloader = torch.utils.data.DataLoader(
         dataset, cfg.test.batch_size, shuffle=False,
-        num_workers=cfg.test.num_workers, drop_last=False, pin_memory=True,
+        num_workers=cfg.test.num_workers, drop_last=False, pin_memory=cfg.test.pin_memory,
         collate_fn=dataset.collate_fn
     )
     if model is not None:

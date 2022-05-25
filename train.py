@@ -104,6 +104,7 @@ def main():
 def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_dir=None):
     # Parallel training
     world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
+    local_world_size = int(os.environ['LOCAL_WORLD_SIZE']) if 'LOCAL_WORLD_SIZE' in os.environ else 1
     global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
     device, cuda_ids = torch_utils.select_device(logger, local_rank, cfg.train.device, cfg.train.batch_size)
 
@@ -114,7 +115,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
     else:
         process_batch_size = cfg.train.batch_size
-    logger.info(f'world_size: {world_size}, global_rank: {global_rank}, local_rank: {local_rank}')
+    logger.info(f'world_size: {world_size}, global_rank: {global_rank}, '
+                f'local_world_size: {local_world_size}, local_rank: {local_rank}')
 
     # Initialize random number generator (RNG) seeds
     if not cfg.train.more_reproducible:
@@ -179,8 +181,9 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     # cache
     dataset: torch.utils.data.Dataset = Dataset(cfg.train.dataset, True, logger)
     if hasattr(dataset, 'gen_cache') and dataset.gen_cache is True:
-        datacache_sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=False) \
-            if global_rank != -1 else None
+        datacache_sampler = torch.utils.data.distributed.DistributedSampler(
+            dataset, num_replicas=local_world_size, rank=local_rank, shuffle=False, drop_last=False
+        ) if global_rank != -1 else None
         datacache_loader = torch.utils.data.DataLoader(
             dataset, process_batch_size,
             sampler=datacache_sampler,
@@ -189,19 +192,21 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         )
         for _ in tqdm(datacache_loader):
             pass
+        dist.barrier()
         with open(os.path.join(dataset.cache_root, 'train_all_cached'), 'w') as f:
             pass
         logger.info('finish caching')
         # rebuild dataset to use cache
         dataset: torch.utils.data.Dataset = Dataset(cfg.train.dataset, True, logger)
 
-    dataset_sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=cfg.train.shuffle) \
-        if global_rank != -1 else None
+    dataset_sampler = torch.utils.data.distributed.DistributedSampler(
+        dataset, shuffle=cfg.train.shuffle, drop_last=True
+    ) if global_rank != -1 else None
     dataloader = torch.utils.data.DataLoader(
         dataset, process_batch_size,
         cfg.train.shuffle if dataset_sampler is None else None,
         sampler=dataset_sampler, num_workers=cfg.train.num_workers, drop_last=True,
-        pin_memory=True, collate_fn=dataset.collate_fn
+        pin_memory=cfg.train.pin_memory, collate_fn=dataset.collate_fn
     )
     steps_one_epoch = len(dataloader)
 
@@ -301,8 +306,10 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         if global_rank != -1:
             dataloader.sampler.set_epoch(epoch)
 
-        for step_idx, batch_data in enumerate(dataloader):
+        dataloader_iter = iter(dataloader)
+        for step_idx in range(len(dataloader)):
             start_time = time.time()
+            batch_data = next(dataloader_iter)
             if isinstance(batch_data, torch.Tensor):
                 batch_data = batch_data.to(device, non_blocking=True)
             elif isinstance(batch_data, list) or isinstance(batch_data, tuple):
@@ -416,6 +423,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
         torch.cuda.empty_cache()
 
+    dist.barrier()
     logger.info('train end')
 
 

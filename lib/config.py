@@ -18,6 +18,7 @@ class TrainConfig(SimpleConfig):
     shuffle: bool = True
     num_workers: int = 4
     epochs: int = 100
+    pin_memory: bool = True
 
     optimizer: str_or_seq = ('SGD', 'SGD')
     learning_rate: float_or_seq = 0.05
@@ -90,6 +91,7 @@ class TestConfig(SimpleConfig):
     device: Union[int, str] = '0'  # 0 or 1 or cpu (only single gpu supported)
     batch_size: int = 8
     num_workers: int = 4
+    pin_memory: bool = True
     weights_from_ckpt: str = ''
     log_frequency: int = 50  # (steps) used for logging
     save_results: bool = False  # save outputs of model in runs/rundir_name/results
