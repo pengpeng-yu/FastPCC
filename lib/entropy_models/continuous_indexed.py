@@ -391,10 +391,9 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
     @minkowski_tensor_wrapped_fn({'<del>sparse_tensor_coords_tuple': 0, 2: None})
     def decompress(self, bytes_list: List[bytes],
                    indexes: torch.Tensor,
-                   target_device: torch.device,
-                   skip_dequantization: bool = False):
+                   target_device: torch.device):
         return super(ContinuousNoisyDeepFactorizedIndexedEntropyModel, self).decompress(
-            bytes_list, self.indexes_view_fn(indexes), target_device, skip_dequantization
+            bytes_list, self.indexes_view_fn(indexes), target_device
         )
 
     def _apply(self, fn):
