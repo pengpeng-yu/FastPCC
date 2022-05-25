@@ -92,6 +92,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 f'{filelist_abs_path} '
                 f'{cfg.mesh_sample_points_num} '
                 f'{cfg.mesh_sample_point_method} '
+                f'{cfg.mesh_sample_point_resolution} '
                 f'{cfg.ply_cache_dtype} '
                 f'{cfg.kd_tree_partition_max_points_num}'.encode('utf-8')
             ).hexdigest()
@@ -148,6 +149,12 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                     self.cfg.mesh_sample_points_num,
                     sample_method=self.cfg.mesh_sample_point_method,
                 )[0]
+                if self.cfg.mesh_sample_point_resolution != 0:
+                    xyz = normalize_coords(xyz)
+                    xyz *= (self.cfg.mesh_sample_point_resolution - 1)
+                    xyz = np.round(xyz)
+                    unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
+                    xyz = xyz[unique_map]
                 if self.cfg.kd_tree_partition_max_points_num != 0:
                     xyz = torch.cat(kd_tree_partition(
                         torch.from_numpy(xyz), self.cfg.kd_tree_partition_max_points_num
@@ -164,17 +171,10 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         xyz = normalize_coords(xyz)
 
         if self.cfg.resolution != 0:
-            assert self.cfg.resolution > 1
             xyz *= (self.cfg.resolution - 1)
             xyz = np.round(xyz)
             unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
             xyz = xyz[unique_map]
-
-            if self.cfg.data_format == '.obj' and \
-                    self.cfg.mesh_sample_points_num / xyz.shape[0] < 2:
-                print(f'Warring: '
-                      f'cfg.mesh_sample_points_num = {self.cfg.mesh_sample_points_num}, '
-                      f'sparse quantized points_num = {xyz.shape[0]}')
 
         return PCData(
             xyz=torch.from_numpy(xyz),

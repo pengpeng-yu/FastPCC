@@ -41,7 +41,7 @@ class DistributionQuantizedCDFTable(nn.Module):
 
         is_valid = upper_bound >= lower_bound
         if isinstance(is_valid, torch.Tensor):
-            is_valid = torch.all(is_valid)
+            is_valid = torch.all(is_valid).item()
         self.if_estimate_tail = not is_valid
 
         if self.if_estimate_tail:

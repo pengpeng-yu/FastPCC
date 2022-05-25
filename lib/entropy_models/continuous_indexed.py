@@ -257,7 +257,7 @@ def noisy_deep_factorized_indexed_entropy_model_init(
         parameter_fns_factory: Callable[..., nn.Module],
         num_filters: Tuple[int, ...]
 ) -> Tuple[Dict[str, Callable[[torch.Tensor], Any]], Callable, Dict[str, nn.Module]]:
-    assert len(num_filters) >= 3 and num_filters[0] == num_filters[-1] == 1
+    assert len(num_filters) >= 2 and num_filters[0] == num_filters[-1] == 1
     assert parameter_fns_type in ('split', 'transform')
     if not len(index_ranges) > 1:
         raise NotImplementedError

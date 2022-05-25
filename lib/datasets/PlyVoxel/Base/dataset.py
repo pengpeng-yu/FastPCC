@@ -30,9 +30,10 @@ class PlyVoxel(torch.utils.data.Dataset):
         file_path_patterns = get_collections(cfg.file_path_pattern, len(roots))
         ori_resolutions = get_collections(cfg.ori_resolution, len(roots))
         resolutions = get_collections(cfg.resolution, len(roots))
-        assert all([ori == tgt or tgt == 0 for ori, tgt in zip(ori_resolutions, resolutions)])
 
         self.voxelized = all([r != 0 for r in resolutions])
+        if not self.voxelized:
+            assert all([r == 0 for r in resolutions])
 
         # define files list path
         for root, filelist_path, file_path_pattern in zip(roots, filelist_paths, file_path_patterns):
@@ -66,6 +67,8 @@ class PlyVoxel(torch.utils.data.Dataset):
     def __getitem__(self, index):
         # load
         file_path = self.file_list[index]
+        ori_resolution = self.file_ori_resolutions[index]
+        resolution = self.file_resolutions[index]
         try:
             point_cloud = o3d.io.read_point_cloud(file_path)  # colors are normalized by 255!
         except Exception as e:
@@ -79,8 +82,10 @@ class PlyVoxel(torch.utils.data.Dataset):
         xyz = np.asarray(point_cloud.points)
 
         if not self.voxelized:
-            xyz = xyz / (self.file_ori_resolutions[index] - 1)
+            xyz = xyz / (ori_resolution - 1)
         else:
+            if resolution != ori_resolution:
+                xyz = xyz * ((resolution - 1) / (ori_resolution - 1))
             xyz = np.round(xyz)
 
         if self.cfg.with_color:
@@ -101,8 +106,8 @@ class PlyVoxel(torch.utils.data.Dataset):
             color=color,
             normal=normal,
             file_path=file_path,
-            ori_resolution=self.file_ori_resolutions[index],
-            resolution=self.file_resolutions[index]
+            ori_resolution=ori_resolution,
+            resolution=resolution
         )
 
     def collate_fn(self, batch):
