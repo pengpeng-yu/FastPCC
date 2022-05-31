@@ -1,4 +1,5 @@
 import os
+from glob import glob
 import hashlib
 
 import numpy as np
@@ -67,9 +68,6 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                     f'"{line}" in "{filelist_abs_path}" is inconsistent with ' \
                     f'data format "{cfg.data_format}" in config'
                 self.file_list.append(os.path.join(cfg.root, line))
-        logger.info(f'filelist[0]: {self.file_list[0]}')
-        logger.info(f'filelist[1]: {self.file_list[1]}')
-        logger.info(f'length of filelist: {len(self.file_list)}')
 
         try:
             if cfg.data_format == '.surface.binvox':
@@ -105,7 +103,14 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 self.cache_root,
                 'train_all_cached' if is_training else 'test_all_cached'
             )):
-                self.file_list = self.cached_file_list
+                logger.info(f'using cache : {self.cache_root}')
+                if cfg.kd_tree_partition_max_points_num != 0:
+                    self.file_list = []
+                    for cached_file_path in self.cached_file_list:
+                        self.file_list.extend(glob(f'{cached_file_path[:-4]}_*.ply'))
+                else:
+                    self.file_list = self.cached_file_list
+                self.cached_file_list = None
                 self.use_cache = True
                 self.gen_cache = False
             else:
@@ -118,10 +123,9 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             self.cached_file_list = None
             self.use_cache = self.gen_cache = False
 
-        if cfg.data_format == '.obj' and cfg.kd_tree_partition_max_points_num != 0:
-            # For caching.
-            assert cfg.mesh_sample_points_num % cfg.kd_tree_partition_max_points_num == 0
-
+        logger.info(f'filelist[0]: {self.file_list[0]}')
+        logger.info(f'filelist[1]: {self.file_list[1]}')
+        logger.info(f'length of filelist: {len(self.file_list)}')
         self.cfg = cfg
 
     def __len__(self):
@@ -139,10 +143,6 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         else:
             if self.use_cache:
                 xyz = np.asarray(o3d.io.read_point_cloud(file_path).points)
-                if self.cfg.kd_tree_partition_max_points_num != 0:
-                    partitions_num = self.cfg.mesh_sample_points_num // self.cfg.kd_tree_partition_max_points_num
-                    xyz = xyz.reshape((partitions_num, -1, 3))
-                    xyz = xyz[np.random.randint(partitions_num)]
             else:
                 xyz = o3d_coords_sampled_from_triangle_mesh(
                     file_path,
@@ -156,10 +156,18 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                     unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
                     xyz = xyz[unique_map]
                 if self.cfg.kd_tree_partition_max_points_num != 0:
-                    xyz = torch.cat(kd_tree_partition(
+                    xyz_pars_list = kd_tree_partition(
                         torch.from_numpy(xyz), self.cfg.kd_tree_partition_max_points_num
-                    ), 0).numpy()
-                if self.gen_cache:
+                    )
+                    cache_file_base_path = self.cached_file_list[index][:-4]
+                    os.makedirs(os.path.dirname(cache_file_base_path), exist_ok=True)
+                    for par_idx, xyz_par in enumerate(xyz_pars_list):
+                        write_ply_file(
+                            xyz_par.numpy(), f'{cache_file_base_path}_{par_idx}.ply',
+                            xyz_dtype=self.cfg.ply_cache_dtype
+                        )
+                    return
+                else:
                     cache_file_path = self.cached_file_list[index]
                     os.makedirs(os.path.dirname(cache_file_path), exist_ok=True)
                     write_ply_file(xyz, self.cached_file_list[index], xyz_dtype=self.cfg.ply_cache_dtype)
@@ -168,10 +176,12 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         if self.cfg.random_rotation:
             xyz = R.random().apply(xyz)
 
-        xyz = normalize_coords(xyz)
+        if self.cfg.normalize_coords:
+            xyz = normalize_coords(xyz)
 
         if self.cfg.resolution != 0:
-            xyz *= (self.cfg.resolution - 1)
+            if self.cfg.normalize_coords:
+                xyz *= (self.cfg.resolution - 1)
             xyz = np.round(xyz)
             unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
             xyz = xyz[unique_map]

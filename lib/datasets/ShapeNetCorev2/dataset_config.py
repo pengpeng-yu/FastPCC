@@ -20,6 +20,7 @@ class DatasetConfig(SimpleConfig):
     mesh_sample_point_resolution: int = 0
     ply_cache_dtype: str = '<f4'
     random_rotation: bool = False
+    normalize_coords: bool = True
     kd_tree_partition_max_points_num: int = 0
 
     resolution: int = 128
