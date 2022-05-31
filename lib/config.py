@@ -25,6 +25,7 @@ class TrainConfig(SimpleConfig):
     momentum: float_or_seq = 0.9
     weight_decay: float_or_seq = 0.0
     max_grad_norm: float_or_seq = 0.0
+    grad_acc_steps: int = 1
 
     scheduler: str_or_seq = 'Step'  # Step or OneCycle
     # StepLR
@@ -42,6 +43,7 @@ class TrainConfig(SimpleConfig):
     log_frequency: int = 10  # (steps) used for both logging and tensorboard
     ckpt_frequency: int = 2  # (epochs)
     test_frequency: int = 0  # (epochs) 0 means no test in training phase
+    cuda_empty_cache_frequency: int = 0  # (steps)
 
     dataset_path: str = 'lib.datasets.ModelNet'  # dataset_path.Dataset and dataset_path.Config are required
     dataset: SimpleConfig = None

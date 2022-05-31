@@ -8,9 +8,9 @@ from copy import deepcopy
 import torch
 import torch.utils.data
 
-from lib import torch_utils
 from lib.config import Config
-from lib import utils
+from lib.utils import autoindex_obj
+from lib.torch_utils import select_device, is_parallel
 from lib.data_utils import SampleData
 
 
@@ -21,7 +21,7 @@ def main():
     cfg.check()
 
     os.makedirs('runs', exist_ok=True)
-    run_dir = pathlib.Path(utils.autoindex_obj(os.path.join('runs', cfg.test.rundir_name)))
+    run_dir = pathlib.Path(autoindex_obj(os.path.join('runs', cfg.test.rundir_name)))
     os.makedirs(run_dir, exist_ok=False)
     with open(run_dir / 'config.yaml', 'w') as f:
         f.write(cfg.to_yaml())
@@ -80,7 +80,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
             raise ImportError(*e.args)
         model = Model(cfg.model)
         if cfg.test.weights_from_ckpt != '':
-            ckpt_path = utils.autoindex_obj(cfg.test.weights_from_ckpt)
+            ckpt_path = autoindex_obj(cfg.test.weights_from_ckpt)
             logger.info(f'loading weights from {ckpt_path}')
             try:
                 incompatible_keys = model.load_state_dict(
@@ -93,7 +93,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
                 logger.warning(incompatible_keys)
         else:
             logger.warning(f'no weight is loaded')
-        device, cuda_ids = torch_utils.select_device(
+        device, cuda_ids = select_device(
             logger,
             local_rank=-1,
             device=cfg.test.device
@@ -126,7 +126,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
             logger.info(f'test step {step_idx}/{steps_one_epoch - 1}')
 
     try:
-        if torch_utils.is_parallel(model):
+        if is_parallel(model):
             metric_results = model.module.evaluator.show(results_dir)
         else:
             metric_results = model.evaluator.show(results_dir)

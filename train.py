@@ -20,8 +20,8 @@ from torch.nn.modules.module import _EXTRA_STATE_KEY_SUFFIX as MODULE_EXTRA_STAT
 
 from test import test
 from lib.config import Config
-from lib import utils
-from lib import torch_utils
+from lib.utils import autoindex_obj, make_new_dirs, eta_by_seconds, totaltime_by_seconds
+from lib.torch_utils import select_device, init_torch_seeds, is_parallel
 from lib.data_utils import SampleData
 
 
@@ -45,14 +45,13 @@ def main():
     if local_rank in (-1, 0):
         loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> |' \
                         ' <level>{level: <8}</level> |' \
-                        ' <cyan>{name}</cyan>:<cyan>{line}</cyan>  ' \
-                        '<level>{message}</level>'
+                        ' <level>{message}</level>'
         logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
         os.makedirs('runs', exist_ok=True)
-        run_dir = pathlib.Path(utils.autoindex_obj(os.path.join('runs', cfg.train.rundir_name)))
+        run_dir = pathlib.Path(autoindex_obj(os.path.join('runs', cfg.train.rundir_name)))
         ckpts_dir = run_dir / 'ckpts'
-        utils.make_new_dirs(run_dir, logger)
-        utils.make_new_dirs(ckpts_dir, logger)
+        make_new_dirs(run_dir, logger)
+        make_new_dirs(ckpts_dir, logger)
         logger.add(run_dir / 'log.txt', format=loguru_format, level=0, mode='w')
         logger.info('preparing for training...')
         with open(run_dir / 'config.yaml', 'w') as f:
@@ -60,7 +59,7 @@ def main():
 
         # Tensorboard
         tb_logdir = run_dir / 'tb_logdir'
-        utils.make_new_dirs(tb_logdir, logger)
+        make_new_dirs(tb_logdir, logger)
         if cfg.train.resume_tensorboard:
             try:
                 last_tb_dir = pathlib.Path(cfg.train.resume_from_ckpt).parent.parent / 'tb_logdir'
@@ -106,7 +105,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     local_world_size = int(os.environ['LOCAL_WORLD_SIZE']) if 'LOCAL_WORLD_SIZE' in os.environ else 1
     global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
-    device, cuda_ids = torch_utils.select_device(logger, local_rank, cfg.train.device, cfg.train.batch_size)
+    device, cuda_ids = select_device(logger, local_rank, cfg.train.device, cfg.train.batch_size)
 
     if local_rank != -1:
         dist.init_process_group(backend='nccl', init_method='env://')
@@ -121,10 +120,10 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     # Initialize random number generator (RNG) seeds
     if not cfg.train.more_reproducible:
         np.random.seed(global_rank + 2)
-        torch_utils.init_torch_seeds(global_rank + 2)
+        init_torch_seeds(global_rank + 2)
     else:
         np.random.seed(0)
-        torch_utils.init_torch_seeds(0)
+        init_torch_seeds(0)
 
     # Initialize model
     try:
@@ -192,7 +191,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         )
         for _ in tqdm(datacache_loader):
             pass
-        dist.barrier()
+        if isinstance(model, DDP):
+            dist.barrier()
         with open(os.path.join(dataset.cache_root, 'train_all_cached'), 'w') as f:
             pass
         logger.info('finish caching')
@@ -266,11 +266,11 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     # Resume checkpoint
     start_epoch = 0
     if cfg.train.resume_from_ckpt != '':
-        ckpt_path = utils.autoindex_obj(cfg.train.resume_from_ckpt)
+        ckpt_path = autoindex_obj(cfg.train.resume_from_ckpt)
         ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
         if 'state_dict' in cfg.train.resume_items:
             try:
-                if torch_utils.is_parallel(model):
+                if is_parallel(model):
                     incompatible_keys = model.module.load_state_dict(ckpt['state_dict'], strict=False)
                 else: incompatible_keys = model.load_state_dict(ckpt['state_dict'], strict=False)
             except RuntimeError as e:
@@ -326,25 +326,12 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             if cfg.train.amp:
                 with amp.autocast():
                     loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
-                for idx, optimizer in enumerate(optimizer_list):
-                    if optimizer is not None:
-                        optimizer.zero_grad()
-                scaler.scale(loss_dict['loss']).backward()
-                for idx, optimizer in enumerate(optimizer_list):
-                    if optimizer is not None:
-                        if cfg.train.max_grad_norm[idx] != 0:
-                            torch.nn.utils.clip_grad_norm_(
-                                optimizer.param_groups[0]['params'],
-                                cfg.train.max_grad_norm[idx]
-                            )
-                        scaler.step(optimizer)
-                scaler.update()
+                scaler.scale(loss_dict['loss'] / cfg.train.grad_acc_steps).backward()
             else:
                 loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
-                for idx, optimizer in enumerate(optimizer_list):
-                    if optimizer is not None:
-                        optimizer.zero_grad()
-                loss_dict['loss'].backward()
+                (loss_dict['loss'] / cfg.train.grad_acc_steps).backward()
+
+            if (step_idx + 1) % cfg.train.grad_acc_steps == 0:
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
                         if cfg.train.max_grad_norm[idx] != 0:
@@ -352,21 +339,29 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                                 optimizer.param_groups[0]['params'],
                                 cfg.train.max_grad_norm[idx]
                             )
-                        optimizer.step()
+                        if cfg.train.amp:
+                            scaler.step(optimizer)
+                        else:
+                            optimizer.step()
+                if cfg.train.amp:
+                    scaler.update()
+                for idx, optimizer in enumerate(optimizer_list):
+                    if optimizer is not None:
+                        optimizer.zero_grad()
 
             # logging
             time_this_step = time.time() - start_time
             ave_time_onestep = time_this_step if ave_time_onestep is None else \
                 ave_time_onestep * 0.9 + time_this_step * 0.1
             if cfg.train.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.train.log_frequency == 0):
-                expected_total_time, eta = utils.eta_by_seconds((total_steps - global_step - 1) * ave_time_onestep)
+                expected_total_time, eta = eta_by_seconds((total_steps - global_step - 1) * ave_time_onestep)
                 logger.info(
                     f'step '
                     f'{step_idx}/{steps_one_epoch - 1} of epoch {epoch}/{cfg.train.epochs - 1}, '
                     f'speed: '
-                    f'{utils.totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/epoch, '
+                    f'{totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/epoch, '
                     f'eta(current): '
-                    f'{utils.eta_by_seconds((steps_one_epoch - step_idx - 1) * ave_time_onestep)[1]}, '
+                    f'{eta_by_seconds((steps_one_epoch - step_idx - 1) * ave_time_onestep)[1]}, '
                     f'eta(total): '
                     f'{eta} in {expected_total_time}'
                 )
@@ -391,6 +386,10 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
                     scheduler.step()
 
+            if cfg.train.cuda_empty_cache_frequency != 0 and \
+                    (step_idx + 1) % cfg.train.cuda_empty_cache_frequency == 0:
+                torch.cuda.empty_cache()
+
         for idx, scheduler in enumerate(scheduler_list):
             if isinstance(scheduler, torch.optim.lr_scheduler.StepLR):
                 scheduler.step()
@@ -404,7 +403,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             ckpt_name = 'epoch_{}.pt'.format(epoch)
             ckpt = {
                 'state_dict':
-                    model.module.state_dict() if torch_utils.is_parallel(model) else model.state_dict(),
+                    model.module.state_dict() if is_parallel(model) else model.state_dict(),
                 'optimizer_state_dict': [
                     optimizer.state_dict() if optimizer is not None else None
                     for optimizer in optimizer_list],
@@ -421,9 +420,10 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             test_items = test(cfg, logger, run_dir, model)
             for item_name, item in test_items.items():
                 tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
-        torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
 
-    dist.barrier()
+    if isinstance(model, DDP):
+        dist.barrier()
     logger.info('train end')
 
 
