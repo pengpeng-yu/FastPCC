@@ -12,8 +12,8 @@ try:
     import MinkowskiEngine as ME
 except ImportError: ME = None
 
-from lib.torch_utils import kd_tree_partition
-from lib.data_utils import binvox_rw, PCData, pc_data_collate_fn, write_ply_file
+from lib.data_utils import PCData, pc_data_collate_fn, \
+    binvox_rw, write_ply_file, kd_tree_partition_base_randomly
 from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
 from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coords
 
@@ -21,12 +21,16 @@ from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coor
 class ShapeNetCorev2(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(ShapeNetCorev2, self).__init__()
+        assert cfg.resolution > 1
         if cfg.data_format in ['.solid.binvox', '.surface.binvox'] or \
                 cfg.data_format == ['.solid.binvox', '.surface.binvox'] or \
                 cfg.data_format == ['.surface.binvox', '.solid.binvox']:
-            assert cfg.resolution in [128, 0]
-        elif cfg.data_format != '.obj':
-            raise NotImplementedError
+            self.use_binvox = True
+        elif cfg.data_format == '.obj':
+            assert cfg.mesh_sample_point_resolution > 1
+            self.use_binvox = False
+        else:
+            raise RuntimeError
         data_format = [cfg.data_format] if isinstance(cfg.data_format, str) else cfg.data_format
 
         # define files list path and cache path
@@ -91,8 +95,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 f'{cfg.mesh_sample_points_num} '
                 f'{cfg.mesh_sample_point_method} '
                 f'{cfg.mesh_sample_point_resolution} '
-                f'{cfg.ply_cache_dtype} '
-                f'{cfg.kd_tree_partition_max_points_num}'.encode('utf-8')
+                f'{cfg.ply_cache_dtype} '.encode('utf-8')
             ).hexdigest()
         )
         if cfg.data_format == '.obj':
@@ -104,12 +107,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 'train_all_cached' if is_training else 'test_all_cached'
             )):
                 logger.info(f'using cache : {self.cache_root}')
-                if cfg.kd_tree_partition_max_points_num != 0:
-                    self.file_list = []
-                    for cached_file_path in self.cached_file_list:
-                        self.file_list.extend(glob(f'{cached_file_path[:-4]}_*.ply'))
-                else:
-                    self.file_list = self.cached_file_list
+                self.file_list = self.cached_file_list
                 self.cached_file_list = None
                 self.use_cache = True
                 self.gen_cache = False
@@ -127,19 +125,18 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         logger.info(f'filelist[1]: {self.file_list[1]}')
         logger.info(f'length of filelist: {len(self.file_list)}')
         self.cfg = cfg
+        self.logger = logger
 
     def __len__(self):
         return len(self.file_list)
 
     def __getitem__(self, index):
         file_path = self.file_list[index]
-        if self.cfg.data_format != '.obj':
+        if self.use_binvox:
             with open(file_path, 'rb') as f:
                 xyz = binvox_rw.read_as_coord_array(f).data.T.astype(np.float64)
                 xyz = np.ascontiguousarray(xyz)
-                if self.cfg.kd_tree_partition_max_points_num != 0:
-                    xyz = kd_tree_partition(torch.from_numpy(xyz), self.cfg.kd_tree_partition_max_points_num)
-                    xyz = xyz[np.random.randint(len(xyz))].numpy()
+            ori_resolution = 128
         else:
             if self.use_cache:
                 xyz = np.asarray(o3d.io.read_point_cloud(file_path).points)
@@ -149,52 +146,45 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                     self.cfg.mesh_sample_points_num,
                     sample_method=self.cfg.mesh_sample_point_method,
                 )[0]
-                if self.cfg.mesh_sample_point_resolution != 0:
-                    xyz = normalize_coords(xyz)
-                    xyz *= (self.cfg.mesh_sample_point_resolution - 1)
-                    xyz = np.round(xyz)
-                    unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
-                    xyz = xyz[unique_map]
-                if self.cfg.kd_tree_partition_max_points_num != 0:
-                    xyz_pars_list = kd_tree_partition(
-                        torch.from_numpy(xyz), self.cfg.kd_tree_partition_max_points_num
-                    )
-                    cache_file_base_path = self.cached_file_list[index][:-4]
-                    os.makedirs(os.path.dirname(cache_file_base_path), exist_ok=True)
-                    for par_idx, xyz_par in enumerate(xyz_pars_list):
-                        write_ply_file(
-                            xyz_par.numpy(), f'{cache_file_base_path}_{par_idx}.ply',
-                            xyz_dtype=self.cfg.ply_cache_dtype
-                        )
-                    return
-                else:
-                    cache_file_path = self.cached_file_list[index]
-                    os.makedirs(os.path.dirname(cache_file_path), exist_ok=True)
-                    write_ply_file(xyz, self.cached_file_list[index], xyz_dtype=self.cfg.ply_cache_dtype)
-                    return
+                xyz = normalize_coords(xyz)
+                xyz *= (self.cfg.mesh_sample_point_resolution - 1)
+                xyz = np.round(xyz)
+                unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
+                xyz = xyz[unique_map]
+                cache_file_path = self.cached_file_list[index]
+                os.makedirs(os.path.dirname(cache_file_path), exist_ok=True)
+                write_ply_file(xyz, cache_file_path, xyz_dtype=self.cfg.ply_cache_dtype)
+                return
+            ori_resolution = self.cfg.mesh_sample_point_resolution
 
         if self.cfg.random_rotation:
             xyz = R.random().apply(xyz)
 
-        if self.cfg.normalize_coords:
-            xyz = normalize_coords(xyz)
+        if self.cfg.resolution != ori_resolution:
+            xyz *= (self.cfg.resolution / ori_resolution)
+        xyz = np.round(xyz)
+        unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
+        xyz = xyz[unique_map]
 
-        if self.cfg.resolution != 0:
-            if self.cfg.normalize_coords:
-                xyz *= (self.cfg.resolution - 1)
-            xyz = np.round(xyz)
-            unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
-            xyz = xyz[unique_map]
+        par_num = self.cfg.kd_tree_partition_max_points_num
+        if par_num != 0:
+            if xyz.shape[0] > par_num:
+                xyz = kd_tree_partition_base_randomly(xyz, par_num)
+                assert xyz.shape[0] == par_num, f'Target num: {par_num}, xyz.shape[0]: {xyz.shape[0]}'
+            # else:
+            #     if xyz.shape[0] < par_num:
+            #         self.logger.info(f'number of points in {file_path} ({xyz.shape[0]}) '
+            #                          f'is less than {par_num}')
 
         return PCData(
             xyz=torch.from_numpy(xyz),
             file_path=file_path,
-            ori_resolution=None if self.cfg.data_format == '.obj' else 128,
+            ori_resolution=None,
             resolution=self.cfg.resolution
         )
 
     def collate_fn(self, batch):
-        return pc_data_collate_fn(batch, sparse_collate=self.cfg.resolution != 0)
+        return pc_data_collate_fn(batch, sparse_collate=True)
 
 
 if __name__ == '__main__':
@@ -202,6 +192,7 @@ if __name__ == '__main__':
     config.data_format = '.obj'
     config.train_filelist_path = 'train_list_obj.txt'
     config.mesh_sample_points_num = 500000
+    config.mesh_sample_point_resolution = 256
     config.resolution = 256
 
     from loguru import logger

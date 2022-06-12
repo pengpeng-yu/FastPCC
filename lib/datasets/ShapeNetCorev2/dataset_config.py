@@ -15,12 +15,13 @@ class DatasetConfig(SimpleConfig):
     # '.obj' or '.solid.binvox' or '.surface.binvox' or ['.solid.binvox', '.surface.binvox']
     data_format: Union[str, Tuple[str, ...]] = '.surface.binvox'
 
+    # For '.obj' files.
     mesh_sample_points_num: int = 0
     mesh_sample_point_method: str = 'uniform'
     mesh_sample_point_resolution: int = 0
     ply_cache_dtype: str = '<f4'
+
     random_rotation: bool = False
-    normalize_coords: bool = True
     kd_tree_partition_max_points_num: int = 0
 
     resolution: int = 128

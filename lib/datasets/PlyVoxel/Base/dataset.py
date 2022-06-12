@@ -12,15 +12,14 @@ try:
 except ImportError:
     pass
 
-from lib.data_utils import PCData, pc_data_collate_fn
+from lib.data_utils import PCData, pc_data_collate_fn, kd_tree_partition
 from lib.datasets.PlyVoxel.Base.dataset_config import DatasetConfig
 
 
 class PlyVoxel(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training: bool, logger):
         super(PlyVoxel, self).__init__()
-        if is_training is True and cfg.kd_tree_partition_max_points_num != 0:
-            raise NotImplementedError
+        self.is_training = is_training
 
         def get_collections(x, repeat):
             return x if isinstance(x, tuple) or isinstance(x, list) else (x,) * repeat
@@ -82,29 +81,38 @@ class PlyVoxel(torch.utils.data.Dataset):
         xyz = np.asarray(point_cloud.points)
 
         if not self.voxelized:
-            xyz = xyz / (ori_resolution - 1)
+            xyz /= (ori_resolution - 1)
         else:
             if resolution != ori_resolution:
-                xyz = xyz * ((resolution - 1) / (ori_resolution - 1))
+                xyz *= ((resolution - 1) / (ori_resolution - 1))
             xyz = np.round(xyz)
 
         if self.cfg.with_color:
-            color = torch.from_numpy(np.asarray(point_cloud.colors, dtype=np.float32))
+            color = np.asarray(point_cloud.colors, dtype=np.float32)
             color *= 255
             assert np.prod(color.shape) != 0
         else:
             color = None
 
         if self.cfg.with_normal:
-            normal = torch.from_numpy(np.asarray(point_cloud.normals, dtype=np.float32))
+            normal = np.asarray(point_cloud.normals, dtype=np.float32)
             assert np.prod(normal.shape) != 0
         else:
             normal = None
 
+        if self.is_training and self.cfg.kd_tree_partition_max_points_num != 0:
+            xyz, (color, normal) = kd_tree_partition(
+                xyz,
+                self.cfg.kd_tree_partition_max_points_num,
+                [color, normal]
+            )
+            choice = np.random.randint(0, len(xyz))
+            xyz, color, normal = xyz[choice], color[choice], normal[choice]
+
         return PCData(
             xyz=torch.from_numpy(xyz),
-            color=color,
-            normal=normal,
+            color=torch.from_numpy(color) if color is not None else None,
+            normal=torch.from_numpy(normal) if normal is not None else None,
             file_path=file_path,
             ori_resolution=ori_resolution,
             resolution=resolution
@@ -114,6 +122,7 @@ class PlyVoxel(torch.utils.data.Dataset):
         return pc_data_collate_fn(
             batch, sparse_collate=self.voxelized,
             kd_tree_partition_max_points_num=self.cfg.kd_tree_partition_max_points_num
+            if not self.is_training else 0
         )
 
 

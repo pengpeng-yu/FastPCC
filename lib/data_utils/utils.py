@@ -1,7 +1,7 @@
 import math
 import os
 from collections import defaultdict
-from typing import Tuple, List, Optional, Union, Dict
+from typing import Tuple, List, Optional, Union, Dict, Callable
 
 import numpy as np
 import cv2
@@ -13,8 +13,6 @@ import torch
 try:
     import MinkowskiEngine as ME
 except ImportError: ME = None
-
-from lib.torch_utils import kd_tree_partition
 
 
 class SampleData:
@@ -263,6 +261,125 @@ def im_pad(
     valid_range = np.array([[0, im.shape[0]],
                             [0, im.shape[1]]], dtype=np.int)
     return holder, valid_range
+
+
+class KDNode:
+    def __init__(self, point: np.ndarray):
+        super(KDNode, self).__init__()
+        self.point = point
+        self.left: Union[np.ndarray, KDNode, None] = None
+        self.right: Union[np.ndarray, KDNode, None] = None
+
+
+def create_kd_tree(data: np.ndarray, max_num: int = 1) -> Union[KDNode, np.ndarray]:
+    if len(data) <= max_num:
+        return data
+
+    dim_index = np.argmax(np.var(data, dim=0)).item()
+    split_point = len(data) // 2
+    data_sorted = data[np.argpartition(data[:, dim_index], split_point)]
+
+    kd_node = KDNode(data_sorted[split_point])
+    kd_node.left = create_kd_tree(data_sorted[:split_point], max_num)
+    kd_node.right = create_kd_tree(data_sorted[split_point:], max_num)
+    return kd_node
+
+
+def kd_tree_partition(data: Union[np.ndarray, torch.Tensor], max_num: int,
+                      extras: Union[List[np.ndarray], List[torch.Tensor]] = None)\
+        -> Union[List[np.ndarray], List[torch.Tensor],
+                 Tuple[List[np.ndarray], List[List[np.ndarray]]],
+                 Tuple[List[torch.Tensor], List[List[torch.Tensor]]]]:
+    is_torch_tensor = isinstance(data, torch.Tensor)
+    if extras is None or extras == []:
+        if is_torch_tensor:
+            data = data.numpy()
+        data_list = kd_tree_partition_base(data, max_num)
+        if is_torch_tensor:
+            data_list = [torch.from_numpy(_) for _ in data_list]
+        return data_list
+    else:
+        if is_torch_tensor:
+            data = data.numpy()
+            extras = [_.numpy() for _ in extras]
+        data_list, extras_lists = kd_tree_partition_extended(data, max_num, extras)
+        if is_torch_tensor:
+            data_list = [torch.from_numpy(_) for _ in data_list]
+            extras_lists = [[torch.from_numpy(_) for _ in extras_list]
+                            for extras_list in extras_lists]
+        return data_list, extras_lists
+
+
+def kd_tree_partition_base(data: np.ndarray, max_num: int) -> List[np.ndarray]:
+    if len(data) <= max_num:
+        return [data]
+
+    dim_index = np.argmax(np.var(data, 0)).item()
+    split_point = len(data) // 2
+    data_sorted = data[np.argpartition(data[:, dim_index], split_point)]
+
+    left_partitions = kd_tree_partition_base(data_sorted[:split_point], max_num)
+    right_partitions = kd_tree_partition_base(data_sorted[split_point:], max_num)
+    left_partitions.extend(right_partitions)
+
+    return left_partitions
+
+
+def kd_tree_partition_extended(data: np.ndarray, max_num: int, extras: List[np.ndarray])\
+        -> Tuple[List[np.ndarray], List[List[np.ndarray]]]:
+    if len(data) <= max_num:
+        return [data], [[extra] for extra in extras]
+
+    dim_index = np.argmax(np.var(data, 0)).item()
+    split_point = len(data) // 2
+    arg_sorted = np.argpartition(data[:, dim_index], split_point)
+    data_sorted = data[arg_sorted]
+
+    for idx, extra in enumerate(extras):
+        if extra is not None:
+            extras[idx] = extra[arg_sorted]
+    del arg_sorted
+
+    left_partitions, left_extra_partitions = kd_tree_partition_extended(
+        data_sorted[:split_point], max_num,
+        [extra[:split_point] if extra is not None else extra for extra in extras]
+    )
+    right_partitions, right_extra_partitions = kd_tree_partition_extended(
+        data_sorted[split_point:], max_num,
+        [extra[split_point:] if extra is not None else extra for extra in extras]
+    )
+    left_partitions.extend(right_partitions)
+    for idx, p in enumerate(right_extra_partitions):
+        left_extra_partitions[idx].extend(p)
+
+    return left_partitions, left_extra_partitions
+
+
+def kd_tree_partition_base_randomly(
+        data: np.ndarray, target_num: int,
+        choice_fn: Callable[[np.ndarray], int] = lambda d: np.argmax(np.var(d, 0)).item()
+) -> np.ndarray:
+    len_data = len(data)
+    if len_data <= target_num:
+        return data
+
+    dim_index = choice_fn(data)
+    is_left = np.random.rand() < 0.5
+
+    if len_data // 2 >= target_num:
+        split_point = len_data // 2
+        arg_sorted = np.argpartition(data[:, dim_index], split_point)
+        if is_left:
+            arg_sorted = arg_sorted[:split_point]
+        else:
+            arg_sorted = arg_sorted[split_point:]
+    else:
+        if is_left:
+            arg_sorted = np.argpartition(data[:, dim_index], target_num)[:target_num]
+        else:
+            arg_sorted = np.argpartition(data[:, dim_index], -target_num)[-target_num:]
+
+    return kd_tree_partition_base_randomly(data[arg_sorted], target_num, choice_fn)
 
 
 def write_ply_file(
