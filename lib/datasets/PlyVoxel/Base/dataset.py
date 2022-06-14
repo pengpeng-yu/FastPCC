@@ -12,7 +12,7 @@ try:
 except ImportError:
     pass
 
-from lib.data_utils import PCData, pc_data_collate_fn, kd_tree_partition
+from lib.data_utils import PCData, pc_data_collate_fn, kd_tree_partition_randomly
 from lib.datasets.PlyVoxel.Base.dataset_config import DatasetConfig
 
 
@@ -101,13 +101,11 @@ class PlyVoxel(torch.utils.data.Dataset):
             normal = None
 
         if self.is_training and self.cfg.kd_tree_partition_max_points_num != 0:
-            xyz, (color, normal) = kd_tree_partition(
+            xyz, (color, normal) = kd_tree_partition_randomly(
                 xyz,
                 self.cfg.kd_tree_partition_max_points_num,
-                [color, normal]
+                (color, normal)
             )
-            choice = np.random.randint(0, len(xyz))
-            xyz, color, normal = xyz[choice], color[choice], normal[choice]
 
         return PCData(
             xyz=torch.from_numpy(xyz),

@@ -355,13 +355,16 @@ def kd_tree_partition_extended(data: np.ndarray, max_num: int, extras: List[np.n
     return left_partitions, left_extra_partitions
 
 
-def kd_tree_partition_base_randomly(
-        data: np.ndarray, target_num: int,
+def kd_tree_partition_randomly(
+        data: np.ndarray, target_num: int, extras: Tuple[Optional[np.ndarray], ...] = (),
         choice_fn: Callable[[np.ndarray], int] = lambda d: np.argmax(np.var(d, 0)).item()
-) -> np.ndarray:
+) -> Union[np.ndarray, Tuple[np.ndarray, Tuple[Optional[np.ndarray], ...]]]:
     len_data = len(data)
     if len_data <= target_num:
-        return data
+        if len(extras) != 0:
+            return data, extras
+        else:
+            return data
 
     dim_index = choice_fn(data)
     is_left = np.random.rand() < 0.5
@@ -379,7 +382,11 @@ def kd_tree_partition_base_randomly(
         else:
             arg_sorted = np.argpartition(data[:, dim_index], -target_num)[-target_num:]
 
-    return kd_tree_partition_base_randomly(data[arg_sorted], target_num, choice_fn)
+    return kd_tree_partition_randomly(
+        data[arg_sorted], target_num,
+        tuple(extra[arg_sorted] if isinstance(extra, np.ndarray) else extra for extra in extras),
+        choice_fn
+    )
 
 
 def write_ply_file(

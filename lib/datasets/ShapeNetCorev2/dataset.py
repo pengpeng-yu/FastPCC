@@ -13,7 +13,7 @@ try:
 except ImportError: ME = None
 
 from lib.data_utils import PCData, pc_data_collate_fn, \
-    binvox_rw, write_ply_file, kd_tree_partition_base_randomly
+    binvox_rw, write_ply_file, kd_tree_partition_randomly
 from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
 from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coords
 
@@ -161,7 +161,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             xyz = R.random().apply(xyz)
 
         if self.cfg.resolution != ori_resolution:
-            xyz *= (self.cfg.resolution / ori_resolution)
+            xyz *= ((self.cfg.resolution - 1) / (ori_resolution - 1))
         xyz = np.round(xyz)
         unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
         xyz = xyz[unique_map]
@@ -169,7 +169,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         par_num = self.cfg.kd_tree_partition_max_points_num
         if par_num != 0:
             if xyz.shape[0] > par_num:
-                xyz = kd_tree_partition_base_randomly(xyz, par_num)
+                xyz = kd_tree_partition_randomly(xyz, par_num)
                 assert xyz.shape[0] == par_num, f'Target num: {par_num}, xyz.shape[0]: {xyz.shape[0]}'
             # else:
             #     if xyz.shape[0] < par_num:
