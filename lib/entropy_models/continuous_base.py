@@ -25,12 +25,13 @@ class DistributionQuantizedCDFTable(nn.Module):
     """
     def __init__(self,
                  base: Distribution,
-                 init_scale: int,
+                 init_scale: float,
                  tail_mass: float,
                  lower_bound: Union[int, torch.Tensor],
                  upper_bound: Union[int, torch.Tensor],
                  cdf_precision: int,
-                 overflow_coding: bool
+                 overflow_coding: bool,
+                 bottleneck_scaler: int
                  ):
         super(DistributionQuantizedCDFTable, self).__init__()
         self.base = base
@@ -38,6 +39,7 @@ class DistributionQuantizedCDFTable(nn.Module):
         self.tail_mass = tail_mass
         self.cdf_precision = cdf_precision
         self.overflow_coding = overflow_coding
+        self.bottleneck_scaler = bottleneck_scaler
 
         is_valid = upper_bound >= lower_bound
         if isinstance(is_valid, torch.Tensor):
@@ -177,6 +179,12 @@ class DistributionQuantizedCDFTable(nn.Module):
     def batch_ndim(self):
         return len(self.base.batch_shape)
 
+    def prob(self, value):
+        if hasattr(self.base, 'prob'):
+            return self.base.prob(value)
+        else:
+            raise NotImplementedError
+
     def log_prob(self, value):
         return self.base.log_prob(value)
 
@@ -210,12 +218,12 @@ class DistributionQuantizedCDFTable(nn.Module):
         offset = quantization_offset(self.base)
 
         if not self.if_estimate_tail:
-            minima = self.lower_bound
-            maxima = self.upper_bound
+            minima = self.lower_bound * self.bottleneck_scaler
+            maxima = self.upper_bound * self.bottleneck_scaler
 
         else:
-            lower_tail = self.lower_tail()
-            upper_tail = self.upper_tail()
+            lower_tail = self.lower_tail() * self.bottleneck_scaler
+            upper_tail = self.upper_tail() * self.bottleneck_scaler
 
             # minima < lower_tail - offset
             # maxima > upper_tail - offset
@@ -236,14 +244,13 @@ class DistributionQuantizedCDFTable(nn.Module):
             print(f"Very wide PMF with {max_length} elements may lead to out of memory issues. "
                   "Consider priors with smaller dispersion or increasing `tail_mass` parameter.")
         samples = torch.arange(max_length, device=pmf_start.device)
-        samples = samples.reshape(max_length,
-                                  *[1] * len(self.base.batch_shape))
+        samples = samples.reshape(max_length, *[1] * len(self.base.batch_shape))
         samples = samples + pmf_start[None, ...]  # broadcast
 
-        if hasattr(self.base, 'prob'):
-            pmf = self.base.prob(samples)
-        else:
-            pmf = torch.exp(self.base.log_prob(samples))
+        try:
+            pmf = self.prob(samples / self.bottleneck_scaler)
+        except NotImplementedError:
+            pmf = torch.exp(self.log_prob(samples / self.bottleneck_scaler))
 
         # Collapse batch dimensions of distribution.
         pmf = pmf.reshape(max_length, -1).T
@@ -290,7 +297,8 @@ class ContinuousEntropyModelBase(nn.Module):
                  prior: Distribution,
                  coding_ndim: int,
                  bottleneck_process: str,
-                 init_scale: int,
+                 bottleneck_scaler: int,
+                 init_scale: float,
                  tail_mass: float,
                  lower_bound: Union[int, torch.Tensor],
                  upper_bound: Union[int, torch.Tensor],
@@ -306,7 +314,8 @@ class ContinuousEntropyModelBase(nn.Module):
             lower_bound=lower_bound,
             upper_bound=upper_bound,
             cdf_precision=range_coder_precision,
-            overflow_coding=overflow_coding
+            overflow_coding=overflow_coding,
+            bottleneck_scaler=bottleneck_scaler
         )
         self.quantize_bottleneck = 'quantization' in bottleneck_process
         if self.quantize_bottleneck:

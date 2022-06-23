@@ -19,9 +19,11 @@ class ModelConfig(SimpleConfig):
     # Basic compression settings
     compressed_channels: int = 8
     bottleneck_process: str = 'noise'
+    bottleneck_scaler: int = 1
     prior_indexes_scaler: float = 1.0
-    prior_indexes_post_scaler: float = 1.0  # only valid for deep factorized conditional em.
     prior_indexes_range: Tuple[int, ...] = (64, )
+    fea_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1)
+    parameter_fns_mlp_num: int = 2
     quantize_indexes: bool = False  # during training
 
     # Normal part of network
@@ -42,8 +44,19 @@ class ModelConfig(SimpleConfig):
     lossless_coord_enabled: bool = False
     lossless_color_enabled: bool = False
     lossless_coord_indexes_range: Tuple[int, ...] = (8, 8, 8, 8)
-    lossless_hybrid_hyper_decoder_fea: bool = False
-    lossless_part_upper_fea_grad_scaler: float = 1.0
+    lossless_fea_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1)
+
+    # For geo lossless based EM and residual-aided GenerativeUpsample
+    hybrid_hyper_decoder_fea: bool = False
+    upper_fea_grad_scaler: float = 1.0
+
+    # For residual-aided GenerativeUpsample
+    coord_lossy_residuals: bool = False
+    decoder_aware_residuals: bool = False
+
+    # Geo lossless based EM settings
+    # Valid if recurrent_part_enabled or lossless_coord_enabled
+    skip_encoding_fea: Tuple[int, ...] = ()
 
     # Loss items
     bpp_loss_factor: float = 0.2
@@ -56,8 +69,8 @@ class ModelConfig(SimpleConfig):
     color_recon_loss_factor: float = 1.0
     warmup_steps: int = 0
     warmup_bpp_loss_factor: float = 0.2
+    linear_warmup: bool = False
 
     # Only for test phase:
-    chamfer_dist_test_phase: bool = False
     mpeg_pcc_error_command: str = 'pc_error_d'
     mpeg_pcc_error_threads: int = 8

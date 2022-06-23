@@ -33,7 +33,7 @@ from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
 from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
     GeoLosslessNoisyDeepFactorizedEntropyModel
 
-from models.convolutional.baseline.layers import Scaler, \
+from models.convolutional.baseline.layers import \
     Encoder, Decoder, \
     HyperEncoder, HyperDecoder, \
     HyperDecoderGenUpsample, HyperDecoderUpsample, \
@@ -66,8 +66,7 @@ class PCC(nn.Module):
         self.minkowski_algorithm = getattr(ME.MinkowskiAlgorithm, cfg.minkowski_algorithm)
         self.evaluator = PCGCEvaluator(
             cfg.mpeg_pcc_error_command,
-            cfg.mpeg_pcc_error_threads,
-            cfg.chamfer_dist_test_phase
+            cfg.mpeg_pcc_error_threads
         )
         self.basic_block_args = (
             cfg.basic_block_type,
@@ -80,7 +79,7 @@ class PCC(nn.Module):
             self.input_feature_channels = 1
         elif cfg.input_feature_type == 'Color':
             self.input_feature_channels = 3
-            if not self.cfg.lossless_color_enabled:
+            if not cfg.lossless_color_enabled:
                 rgb_to_yuvbt709_param = gen_rgb_to_yuvbt709_param()
                 self.register_buffer('rgb_to_yuvbt709_weight', rgb_to_yuvbt709_param[0], False)
                 self.register_buffer('rgb_to_yuvbt709_bias', rgb_to_yuvbt709_param[1], False)
@@ -88,19 +87,26 @@ class PCC(nn.Module):
             raise NotImplementedError
         self.hyper_dec_fea_chnls = cfg.compressed_channels * (
             len(cfg.prior_indexes_range)
-            if not cfg.lossless_hybrid_hyper_decoder_fea
+            if not cfg.hybrid_hyper_decoder_fea
             else len(cfg.prior_indexes_range) + 1
         )
+        assert len(cfg.encoder_channels) == len(cfg.decoder_channels) + 1
+        self.normal_part_coder_num = len(cfg.decoder_channels)
 
         def parameter_fns_factory(in_channels, out_channels):
             ret = [
-                MLPBlock(in_channels, out_channels,
-                         bn=None, act=self.cfg.activation),
-                nn.Linear(out_channels, out_channels,
-                          bias=True)
+                *(MLPBlock(
+                    in_channels, in_channels,
+                    bn='nn.bn1d' if cfg.use_batch_norm else None,
+                    act=cfg.activation
+                ) for _ in range(cfg.parameter_fns_mlp_num - 2)),
+                MLPBlock(
+                    in_channels, out_channels,
+                    bn='nn.bn1d' if cfg.use_batch_norm else None,
+                    act=cfg.activation
+                ),
+                nn.Linear(out_channels, out_channels, bias=True)
             ]
-            if self.cfg.prior_indexes_post_scaler != 1.0:
-                ret.insert(0, Scaler(self.cfg.prior_indexes_post_scaler))
             return nn.Sequential(*ret)
 
         encoder = Encoder(
@@ -111,78 +117,110 @@ class PCC(nn.Module):
             cfg.first_conv_kernel_size,
             cfg.adaptive_pruning,
             cfg.adaptive_pruning_num_scaler,
-            (0 if not cfg.lossless_coord_enabled and cfg.input_feature_type == 'Occupation'
-                else cfg.compressed_channels),
+            cfg.compressed_channels if cfg.lossless_coord_enabled or (
+                cfg.input_feature_type == 'Color' and cfg.coord_lossy_residuals
+            ) else 0,
             cfg.input_feature_type == 'Color' and cfg.lossless_color_enabled,
             *self.basic_block_args,
             None if not cfg.recurrent_part_enabled else cfg.activation
         )
 
         if not cfg.lossless_coord_enabled:
-            assert not self.cfg.lossless_color_enabled
+            assert not cfg.lossless_color_enabled
             self.encoder = encoder
             if cfg.input_feature_type == 'Occupation':
                 self.decoder = Decoder(
                     cfg.compressed_channels,
                     0,
                     cfg.decoder_channels,
-                    None, None, None,
+                    None, None, None, False, False, 0.0,
                     *self.basic_block_args,
                     loss_type=cfg.coord_recon_loss_type,
                     dist_upper_bound=cfg.dist_upper_bound
                 )
             elif cfg.input_feature_type == 'Color':
-                indexed_em_fea = IndexedNoisyDeepFactorizedEM(
-                    index_ranges=cfg.prior_indexes_range,
-                    coding_ndim=2,
-                    parameter_fns_factory=parameter_fns_factory,
-                    num_filters=(1, 3, 3, 3, 1),
-                    bottleneck_process=self.cfg.bottleneck_process,
-                    quantize_indexes=self.cfg.quantize_indexes
-                )
-                self.decoder = Decoder(
-                    (cfg.compressed_channels,) * len(cfg.decoder_channels),
-                    (self.hyper_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
-                    + (self.hyper_dec_fea_chnls // self.cfg.compressed_channels
-                       * self.input_feature_channels,),
-                    cfg.decoder_channels,
-                    (cfg.compressed_channels,) * (len(cfg.decoder_channels) - 1)
-                    + (self.input_feature_channels,),
-                    cfg.prior_indexes_scaler,
-                    indexed_em_fea,
-                    *self.basic_block_args,
-                    loss_type=cfg.coord_recon_loss_type,
-                    dist_upper_bound=cfg.dist_upper_bound
-                )
+                if not cfg.coord_lossy_residuals:
+                    self.decoder = Decoder(
+                        cfg.compressed_channels,
+                        self.input_feature_channels,
+                        cfg.decoder_channels,
+                        None, None, None, False, False, 0.0,
+                        *self.basic_block_args,
+                        loss_type=cfg.coord_recon_loss_type,
+                        dist_upper_bound=cfg.dist_upper_bound
+                    )
+                else:
+                    indexed_em_fea = IndexedNoisyDeepFactorizedEM(
+                        index_ranges=cfg.prior_indexes_range,
+                        coding_ndim=2,
+                        parameter_fns_factory=parameter_fns_factory,
+                        num_filters=cfg.fea_num_filters,
+                        bottleneck_process=cfg.bottleneck_process,
+                        bottleneck_scaler=255,
+                        quantize_indexes=cfg.quantize_indexes,
+                        indexes_scaler=cfg.prior_indexes_scaler,
+                        init_scale=1
+                    )
+                    lossy_decoder_residual_out_channels = \
+                        (cfg.compressed_channels,) * (self.normal_part_coder_num - 1)\
+                        + (self.input_feature_channels,)
+                    lossy_decoder_residual_in_channels = \
+                        lossy_decoder_residual_out_channels if not cfg.decoder_aware_residuals \
+                        else tuple(_ * 2 for _ in lossy_decoder_residual_out_channels)
+                    decoder_blocks_out_channels = (self.hyper_dec_fea_chnls,) * (self.normal_part_coder_num - 1) \
+                        + (self.hyper_dec_fea_chnls // cfg.compressed_channels
+                           * self.input_feature_channels,)
+                    self.decoder = Decoder(
+                        (cfg.compressed_channels,) * self.normal_part_coder_num,
+                        decoder_blocks_out_channels,
+                        cfg.decoder_channels,
+                        lossy_decoder_residual_in_channels,
+                        lossy_decoder_residual_out_channels,
+                        indexed_em_fea,
+                        cfg.hybrid_hyper_decoder_fea,
+                        cfg.decoder_aware_residuals,
+                        cfg.upper_fea_grad_scaler,
+                        *self.basic_block_args,
+                        loss_type=cfg.coord_recon_loss_type,
+                        dist_upper_bound=cfg.dist_upper_bound
+                    )
             else:
                 raise NotImplementedError
             if not cfg.recurrent_part_enabled:
                 enc_lossl = None
                 hyper_dec_coord = None
                 hyper_dec_fea = None
-                skip_encoding_top_fea = None
             else:
                 enc_lossl = self.init_enc_rec()
                 hyper_dec_coord = self.init_hyper_dec_gen_up()
                 hyper_dec_fea = self.init_hyper_dec_up()
-                skip_encoding_top_fea = 'no_skip'
+                assert len(cfg.skip_encoding_fea) == 0
 
         else:  # cfg.lossless_coord_enabled
             self.encoder = self.decoder = None
+            hyper_dec_coord_in_chnls = [cfg.compressed_channels] * self.normal_part_coder_num
             hyper_dec_coord_out_chnls = \
-                (len(cfg.lossless_coord_indexes_range),) * len(cfg.decoder_channels)
+                (len(cfg.lossless_coord_indexes_range),) * self.normal_part_coder_num
             hyper_dec_coord_intra_chnls = cfg.decoder_channels[::-1]
 
+            hyper_dec_fea_in_chnls = [0] + [cfg.compressed_channels] * (self.normal_part_coder_num - 1)
             if cfg.input_feature_type == 'Occupation':
-                hyper_dec_fea_out_chnls = (self.hyper_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
-                hyper_dec_fea_intra_chnls = cfg.decoder_channels[-2::-1]
-                skip_encoding_top_fea = 'skip'
-            elif cfg.input_feature_type == 'Color':
+                assert 0 in cfg.skip_encoding_fea
+                hyper_dec_fea_out_chnls = [0] + [self.hyper_dec_fea_chnls] * (self.normal_part_coder_num - 1)
+                hyper_dec_fea_intra_chnls = [0, *cfg.decoder_channels[-2::-1]]
+                for idx in cfg.skip_encoding_fea:
+                    if idx == 0: continue
+                    else:
+                        hyper_dec_fea_out_chnls[idx] = hyper_dec_fea_in_chnls[idx - 1] = \
+                            hyper_dec_coord_in_chnls[idx - 1] = hyper_dec_fea_intra_chnls[idx]
+            elif cfg.input_feature_type == 'Color':  # TODO: skip_encoding_fea in color case
+                if len(cfg.skip_encoding_fea) != 0:
+                    raise NotImplementedError
                 hyper_dec_fea_out_chnls = \
-                    (self.hyper_dec_fea_chnls // self.cfg.compressed_channels
+                    (self.hyper_dec_fea_chnls // cfg.compressed_channels
                      * self.input_feature_channels,) + \
-                    (self.hyper_dec_fea_chnls,) * (len(cfg.decoder_channels) - 1)
-                skip_encoding_top_fea = 'no_skip'
+                    (self.hyper_dec_fea_chnls,) * (self.normal_part_coder_num - 1)
+                assert 0 not in cfg.skip_encoding_fea
                 hyper_dec_fea_intra_chnls = cfg.decoder_channels[::-1]
             else:
                 raise NotImplementedError
@@ -191,17 +229,21 @@ class PCC(nn.Module):
                 enc_lossl = EncoderPartiallyRecurrent(encoder)
             else:
                 enc_lossl = EncoderPartiallyRecurrent(encoder, self.init_enc_rec())
+                hyper_dec_coord_in_chnls += (cfg.compressed_channels,)
                 hyper_dec_coord_out_chnls += (len(cfg.lossless_coord_indexes_range),)
                 hyper_dec_coord_intra_chnls += (cfg.recurrent_part_channels,)
+                hyper_dec_fea_in_chnls += (cfg.compressed_channels,)
                 hyper_dec_fea_out_chnls += (self.hyper_dec_fea_chnls,)
                 hyper_dec_fea_intra_chnls += (cfg.recurrent_part_channels,)
 
             hyper_dec_coord = self.init_hyper_dec_gen_up_rec(
+                tuple(hyper_dec_coord_in_chnls),
                 hyper_dec_coord_out_chnls,
                 hyper_dec_coord_intra_chnls,
             )
             hyper_dec_fea = self.init_hyper_dec_up_rec(
-                hyper_dec_fea_out_chnls,
+                tuple(hyper_dec_fea_in_chnls),
+                tuple(hyper_dec_fea_out_chnls),
                 hyper_dec_fea_intra_chnls
             )
 
@@ -211,7 +253,7 @@ class PCC(nn.Module):
             self.em_lossless_based = self.init_em_lossless_based(
                 em, enc_lossl,
                 hyper_dec_coord, hyper_dec_fea,
-                parameter_fns_factory, skip_encoding_top_fea
+                parameter_fns_factory, cfg.skip_encoding_fea
             )
         else:
             self.em = em
@@ -226,19 +268,18 @@ class PCC(nn.Module):
                 batch_shape=torch.Size([self.cfg.compressed_channels]),
                 coding_ndim=2,
                 bottleneck_process=self.cfg.bottleneck_process,
-                init_scale=2,
+                bottleneck_scaler=self.cfg.bottleneck_scaler,
+                init_scale=2 / self.cfg.bottleneck_scaler,
                 broadcast_shape_bytes=(3,) if not self.cfg.recurrent_part_enabled else (0,),
             )
         else:
             hyper_encoder = HyperEncoder(
-                1,
                 self.cfg.compressed_channels,
                 self.cfg.hyper_compressed_channels,
                 self.cfg.hyper_encoder_channels,
                 *self.basic_block_args
             )
             hyper_decoder = HyperDecoder(
-                self.cfg.prior_indexes_scaler,
                 self.cfg.hyper_compressed_channels,
                 self.cfg.compressed_channels * len(self.cfg.prior_indexes_range),
                 self.cfg.hyper_decoder_channels,
@@ -247,6 +288,8 @@ class PCC(nn.Module):
 
             if self.cfg.hyperprior == 'ScaleNoisyNormal':
                 assert len(self.cfg.prior_indexes_range) == 1
+                if self.cfg.bottleneck_scaler != 1:
+                    raise NotImplementedError
                 em = HyperPriorScaleNoisyNormalEM(
                     hyper_encoder=hyper_encoder,
                     hyper_decoder=hyper_decoder,
@@ -258,7 +301,9 @@ class PCC(nn.Module):
                     scale_min=0.11,
                     scale_max=64,
                     bottleneck_process=self.cfg.bottleneck_process,
-                    quantize_indexes=self.cfg.quantize_indexes
+                    quantize_indexes=self.cfg.quantize_indexes,
+                    indexes_scaler=self.cfg.prior_indexes_scaler,
+                    init_scale=10 / self.cfg.bottleneck_scaler,
                 )
             elif self.cfg.hyperprior == 'NoisyDeepFactorized':
                 em = HyperPriorNoisyDeepFactorizedEM(
@@ -271,9 +316,12 @@ class PCC(nn.Module):
                     index_ranges=self.cfg.prior_indexes_range,
                     parameter_fns_type='transform',
                     parameter_fns_factory=parameter_fns_factory,
-                    num_filters=(1, 3, 3, 3, 1),
+                    num_filters=self.cfg.fea_num_filters,
                     bottleneck_process=self.cfg.bottleneck_process,
-                    quantize_indexes=self.cfg.quantize_indexes
+                    bottleneck_scaler=self.cfg.bottleneck_scaler,
+                    quantize_indexes=self.cfg.quantize_indexes,
+                    indexes_scaler=self.cfg.prior_indexes_scaler,
+                    init_scale=10 / self.cfg.bottleneck_scaler
                 )
             else:
                 raise NotImplementedError
@@ -282,14 +330,14 @@ class PCC(nn.Module):
     def init_em_lossless_based(
             self, bottom_fea_entropy_model, encoder_geo_lossless,
             hyper_decoder_coord_geo_lossless, hyper_decoder_fea_geo_lossless,
-            parameter_fns_factory, skip_encoding_top_fea
+            parameter_fns_factory, skip_encoding_fea
     ):
         em_lossless_based = GeoLosslessNoisyDeepFactorizedEntropyModel(
             bottom_fea_entropy_model=bottom_fea_entropy_model,
             encoder=encoder_geo_lossless,
             hyper_decoder_coord=hyper_decoder_coord_geo_lossless,
             hyper_decoder_fea=hyper_decoder_fea_geo_lossless,
-            hybrid_hyper_decoder_fea=self.cfg.lossless_hybrid_hyper_decoder_fea,
+            hybrid_hyper_decoder_fea=self.cfg.hybrid_hyper_decoder_fea,
             coord_index_ranges=self.cfg.lossless_coord_indexes_range,
             coord_parameter_fns_type='transform',
             coord_parameter_fns_factory=parameter_fns_factory,
@@ -297,11 +345,14 @@ class PCC(nn.Module):
             fea_index_ranges=self.cfg.prior_indexes_range,
             fea_parameter_fns_type='transform',
             fea_parameter_fns_factory=parameter_fns_factory,
-            fea_num_filters=(1, 3, 3, 3, 3, 1),
-            skip_encoding_top_fea=skip_encoding_top_fea,
-            upper_fea_grad_scaler_for_bits_loss=self.cfg.lossless_part_upper_fea_grad_scaler,
+            fea_num_filters=self.cfg.lossless_fea_num_filters,
+            skip_encoding_fea=skip_encoding_fea,
+            upper_fea_grad_scaler_for_bits_loss=self.cfg.upper_fea_grad_scaler,
             bottleneck_fea_process=self.cfg.bottleneck_process,
-            quantize_indexes=self.cfg.quantize_indexes
+            bottleneck_scaler=self.cfg.bottleneck_scaler,
+            quantize_indexes=self.cfg.quantize_indexes,
+            indexes_scaler=self.cfg.prior_indexes_scaler,
+            init_scale=10 / self.cfg.bottleneck_scaler
         )
         return em_lossless_based
     
@@ -315,7 +366,6 @@ class PCC(nn.Module):
     
     def init_hyper_dec_gen_up(self):
         hyper_dec_gen_up = HyperDecoderGenUpsample(
-            self.cfg.prior_indexes_scaler,
             self.cfg.compressed_channels,
             len(self.cfg.lossless_coord_indexes_range),
             (self.cfg.recurrent_part_channels,),
@@ -325,7 +375,6 @@ class PCC(nn.Module):
 
     def init_hyper_dec_up(self):
         hyper_dec_up = HyperDecoderUpsample(
-            self.cfg.prior_indexes_scaler,
             self.cfg.compressed_channels,
             self.hyper_dec_fea_chnls,
             (self.cfg.recurrent_part_channels,),
@@ -334,11 +383,11 @@ class PCC(nn.Module):
         return hyper_dec_up
 
     def init_hyper_dec_gen_up_rec(
-            self, out_channels: Tuple[int, ...],
+            self, in_channels: Tuple[int, ...],
+            out_channels: Tuple[int, ...],
             intra_channels: Tuple[int, ...]):
         hyper_dec_gen_up_rec = HyperDecoderGenUpsamplePartiallyRecurrent(
-            self.cfg.prior_indexes_scaler,
-            self.cfg.compressed_channels,
+            in_channels,
             out_channels,
             intra_channels,
             *self.basic_block_args
@@ -346,11 +395,11 @@ class PCC(nn.Module):
         return hyper_dec_gen_up_rec
 
     def init_hyper_dec_up_rec(
-            self, out_channels: Tuple[int, ...],
+            self, in_channels: Tuple[int, ...],
+            out_channels: Tuple[int, ...],
             intra_channels: Tuple[int, ...]):
         hyper_dec_up_rec = HyperDecoderUpsamplePartiallyRecurrent(
-            self.cfg.prior_indexes_scaler,
-            self.cfg.compressed_channels,
+            in_channels,
             out_channels,
             intra_channels,
             *self.basic_block_args
@@ -396,8 +445,12 @@ class PCC(nn.Module):
                     device=xyz.device
                 )
             elif self.cfg.input_feature_type == 'Color':
-                # Input point clouds are expected to be unnormalized discrete (0~255 RGB) float32 tensor.
-                sparse_pc_feature = color
+                if self.cfg.lossless_color_enabled:
+                    # Input point clouds are expected to be unnormalized discrete (-127~128 RGB) float32 tensor.
+                    sparse_pc_feature = color - 127
+                else:
+                    # otherwise normalized (-0.5~0.5) float32 tensor.
+                    sparse_pc_feature = (color / 255) - 0.5
             else:
                 raise NotImplementedError
             sparse_pc = ME.SparseTensor(
@@ -445,7 +498,7 @@ class PCC(nn.Module):
                     cached_fea_list=strided_fea_list[:-1]
                 )
             )
-            if self.cfg.input_feature_type == 'Color':
+            if self.cfg.input_feature_type == 'Color' and self.cfg.coord_lossy_residuals:
                 assert len(decoder_message.em_loss_dict_list) == 1
                 concat_loss_dicts(loss_dict, decoder_message.em_loss_dict_list[0])
             loss_dict['coord_recon_loss'] = self.get_coord_recon_loss(
@@ -459,16 +512,22 @@ class PCC(nn.Module):
                 bottleneck_feature if self.cfg.lossless_coord_enabled else decoder_message.fea
             )
 
+        if warmup_forward and self.cfg.linear_warmup:
+            warmup_bpp_loss_factor = self.cfg.warmup_bpp_loss_factor - \
+                (self.cfg.warmup_bpp_loss_factor - self.cfg.bpp_loss_factor) \
+                / self.cfg.warmup_steps * training_step
+        else:
+            warmup_bpp_loss_factor = self.cfg.warmup_bpp_loss_factor
         for key in loss_dict:
             if key.endswith('bits_loss'):
                 if not self.cfg.lossless_coord_enabled:
                     # TODO: if self.em_lossless_based is None?
                     flag_warmup = warmup_forward
                 else:
-                    flag_warmup = warmup_forward and key.startswith('fea')
+                    flag_warmup = warmup_forward and key.startswith('coord')
                 if flag_warmup:
                     loss_dict[key] = loss_dict[key] * (
-                        self.cfg.warmup_bpp_loss_factor / sparse_pc.shape[0])
+                        warmup_bpp_loss_factor / sparse_pc.shape[0])
                 else:
                     loss_dict[key] = loss_dict[key] * (
                         self.cfg.bpp_loss_factor / sparse_pc.shape[0])
@@ -555,7 +614,8 @@ class PCC(nn.Module):
             em_bytes = em_bytes_list[0]
             sparse_tensor_coords = feature.C
 
-        if not self.cfg.lossless_coord_enabled and self.cfg.input_feature_type == 'Color':
+        if not self.cfg.lossless_coord_enabled and self.cfg.input_feature_type == 'Color' \
+                and self.cfg.coord_lossy_residuals:
             decoder_message: GenerativeUpsampleMessage = self.decoder.compress(
                 GenerativeUpsampleMessage(
                     fea=fea_recon,
@@ -617,7 +677,7 @@ class PCC(nn.Module):
         with io.BytesIO(compressed_bytes) as bs:
             if not self.cfg.lossless_coord_enabled and self.cfg.adaptive_pruning:
                 points_num_list = []
-                for idx in range(len(self.cfg.decoder_channels)):
+                for idx in range(self.normal_part_coder_num):
                     points_num_list.append([int.from_bytes(bs.read(3), 'little', signed=False)])
             else:
                 points_num_list = None
@@ -628,10 +688,11 @@ class PCC(nn.Module):
                 if not self.cfg.lossless_coord_enabled:
                     lossless_coder_num = None
                 else:
-                    lossless_coder_num = len(self.cfg.decoder_channels)
+                    lossless_coder_num = self.normal_part_coder_num
                 sparse_tensor_coords_bytes_len = int.from_bytes(bs.read(3), 'little', signed=False)
                 sparse_tensor_coords_bytes = bs.read(sparse_tensor_coords_bytes_len)
-            if not self.cfg.lossless_coord_enabled and self.cfg.input_feature_type == 'Color':
+            if not self.cfg.lossless_coord_enabled and self.cfg.input_feature_type == 'Color' \
+                    and self.cfg.coord_lossy_residuals:
                 lossy_em_bytes_len = int.from_bytes(bs.read(3), 'little', signed=False)
                 lossy_em_bytes = bs.read(lossy_em_bytes_len)
             else:
@@ -641,7 +702,7 @@ class PCC(nn.Module):
         if self.cfg.recurrent_part_enabled:
             tensor_stride = 2 ** lossless_coder_num
             if not self.cfg.lossless_coord_enabled:
-                tensor_stride *= 2 ** len(self.cfg.decoder_channels)
+                tensor_stride *= 2 ** self.normal_part_coder_num
             fea_recon = self.em_lossless_based.decompress(
                 em_bytes,
                 self.get_sparse_pc(
@@ -655,7 +716,7 @@ class PCC(nn.Module):
                 em_bytes,
                 self.get_sparse_pc(
                     sparse_tensor_coords,
-                    tensor_stride=2 ** len(self.cfg.decoder_channels),
+                    tensor_stride=2 ** self.normal_part_coder_num,
                     only_return_coords=True
                 ), lossless_coder_num
             )
@@ -664,7 +725,7 @@ class PCC(nn.Module):
                 [em_bytes], torch.Size([1]), device,
                 sparse_tensor_coords_tuple=self.get_sparse_pc(
                     sparse_tensor_coords,
-                    tensor_stride=2 ** len(self.cfg.decoder_channels),
+                    tensor_stride=2 ** self.normal_part_coder_num,
                     only_return_coords=True
                 )
             )
@@ -677,17 +738,25 @@ class PCC(nn.Module):
             )
             if self.cfg.input_feature_type == 'Occupation':
                 decoder_message = self.decoder(decoder_message)
-            elif self.cfg.input_feature_type == 'Color':
+            elif self.cfg.input_feature_type == 'Color' and not self.cfg.coord_lossy_residuals:
+                decoder_message = self.decoder(decoder_message)
+            elif self.cfg.input_feature_type == 'Color' and self.cfg.coord_lossy_residuals:
                 decoder_message = self.decoder.decompress(
-                    decoder_message, em_bytes_list_len=len(self.cfg.decoder_channels)
+                    decoder_message, em_bytes_list_len=self.normal_part_coder_num
                 )
+            else:
+                raise NotImplementedError
             coord_recon = decoder_message.fea.C[:, 1:]
             color_recon_raw = decoder_message.fea.F
         else:
             coord_recon = fea_recon.C[:, 1:]
             color_recon_raw = fea_recon.F
         if self.cfg.input_feature_type == 'Color':
-            color_recon = color_recon_raw.clip_(0, 255).round_()
+            if self.cfg.lossless_color_enabled:
+                color_recon = color_recon_raw.clip_(-127, 128).round_() + 127
+            else:
+                # Inverse transform is supposed to be done in the decoder
+                color_recon = (color_recon_raw * 255).round_()
         else:
             color_recon = None
         return coord_recon, color_recon
@@ -718,17 +787,14 @@ class PCC(nn.Module):
         return coord_recon_concat, color_recon_concat
 
     def get_lossless_coder_num(self, resolution: Union[int, List[int]]) -> Optional[int]:
-        assert len(self.cfg.encoder_channels) == len(self.cfg.decoder_channels) + 1
         if self.em_lossless_based is not None:
             if not isinstance(resolution, int):
-                for r in resolution[1:]:
-                    assert r == resolution[0]
-                resolution = resolution[0]
+                resolution = max(resolution)
             lossless_coder_num = math.ceil(math.log2(resolution))
             if not self.cfg.lossless_coord_enabled:
-                lossless_coder_num -= len(self.cfg.decoder_channels)
+                lossless_coder_num -= self.normal_part_coder_num
             if not self.cfg.recurrent_part_enabled:
-                lossless_coder_num = len(self.cfg.decoder_channels)
+                lossless_coder_num = self.normal_part_coder_num
         else:
             lossless_coder_num = None
         return lossless_coder_num
@@ -764,7 +830,8 @@ class PCC(nn.Module):
         return F.linear(rgb, self.rgb_to_yuvbt709_weight, self.rgb_to_yuvbt709_bias)
 
     def get_color_recon_loss(self, sparse_pc, color_pred):
-        if not self.cfg.color_recon_loss_type.endswith('YUVBT709'):
+        use_yuv = self.cfg.color_recon_loss_type.endswith('YUVBT709')
+        if self.cfg.lossless_color_enabled:
             raise NotImplementedError
 
         target_fea_list = []
@@ -772,19 +839,24 @@ class PCC(nn.Module):
         pred_coord_list, pred_fea_list = color_pred.decomposed_coordinates_and_features
         batch_size = len(ori_coord_list)
         for idx in range(batch_size):
-            nearest_idx = knn_points(
-                pred_coord_list[idx][None].to(torch.float),
+            nearest_idx = knn_points(  # TODO: test color loss
                 ori_coord_list[idx][None].to(torch.float),
+                pred_coord_list[idx][None].to(torch.float),
                 K=1, return_sorted=False
             ).idx
-            target_fea = self.rgb_to_yuvbt709(ori_fea_list[idx][nearest_idx[0, :, 0]])
-            target_fea_list.append(target_fea)
-            pred_fea_list[idx] = self.rgb_to_yuvbt709(pred_fea_list[idx].clip_(0, 255))
+            target_fea_list.append((ori_fea_list[idx] + 0.5) * 255)
+            # Inverse transform is supposed to be done in the decoder
+            pred_fea_list[idx] = pred_fea_list[idx][nearest_idx[0, :, 0]] * 255
+            if use_yuv:
+                target_fea_list[idx] = self.rgb_to_yuvbt709(target_fea_list[idx])
+                pred_fea_list[idx] = self.rgb_to_yuvbt709(pred_fea_list[idx])
 
         if self.cfg.color_recon_loss_type.startswith('MSE'):
             loss_func = partial(F.mse_loss, reduction='sum')
         elif self.cfg.color_recon_loss_type.startswith('SmoothL1'):
             loss_func = partial(F.smooth_l1_loss, reduction='sum')
+        elif self.cfg.color_recon_loss_type.startswith('L1'):
+            loss_func = partial(F.l1_loss, reduction='sum')
         else:
             raise NotImplementedError
 

@@ -18,6 +18,5 @@ class ModelConfig(SimpleConfig):
     bpp_loss_factor: float = 1.
 
     # only for test phase:
-    chamfer_dist_test_phase: bool = False
     mpeg_pcc_error_command: str = 'pc_error_d'
     mpeg_pcc_error_threads: int = 16

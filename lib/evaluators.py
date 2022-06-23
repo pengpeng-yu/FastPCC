@@ -8,10 +8,6 @@ import numpy as np
 import torch
 
 from lib.data_utils import PCData, write_ply_file
-try:
-    from lib.loss_functions import chamfer_loss
-except ImportError:
-    chamfer_loss = None
 from lib.metrics.misc import batch_image_psnr
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 
@@ -33,12 +29,10 @@ class Evaluator:
 class PCGCEvaluator(Evaluator):
     def __init__(self,
                  mpeg_pcc_error_command: str,
-                 mpeg_pcc_error_threads: int,
-                 compute_chamfer_loss: bool = False):
+                 mpeg_pcc_error_threads: int):
         super(PCGCEvaluator, self).__init__()
         self.mpeg_pcc_error_command = mpeg_pcc_error_command
         self.mpeg_pcc_error_threads = mpeg_pcc_error_threads
-        self.compute_chamfer_loss = compute_chamfer_loss
 
     def reset(self):
         self.file_path_to_info: Dict[str, Dict[str, Union[int, float]]] = {}
@@ -59,8 +53,6 @@ class PCGCEvaluator(Evaluator):
         """
         batch_size = len(preds)
         assert batch_size == len(targets) == len(compressed_bytes_list)
-        if self.compute_chamfer_loss:
-            assert batch_size == len(pc_data.resolution)
         if pc_data.results_dir is not None:
             assert batch_size == len(pc_data.resolution) == len(pc_data.file_path)
         if preds_color is not None or targets_color is not None:
@@ -79,12 +71,6 @@ class PCGCEvaluator(Evaluator):
             assert pred.shape[1] == target.shape[1] == 3
             compressed_bytes = compressed_bytes_list[idx]
             resolution = pc_data.resolution[idx]
-
-            if self.compute_chamfer_loss:
-                file_info_dict['chamfer_loss'] = chamfer_loss(
-                    pred[None].to(torch.float) / resolution,
-                    target[None].to(torch.float) / resolution
-                ).item()
 
             bpp = len(compressed_bytes) * 8 / target.shape[0]
 
@@ -118,12 +104,16 @@ class PCGCEvaluator(Evaluator):
                         os.path.abspath(reconstructed_path),
                         resolution=resolution, color=have_color,
                         threads=self.mpeg_pcc_error_threads,
-                        command=self.mpeg_pcc_error_command,)
+                        command=self.mpeg_pcc_error_command
+                    )
                     assert mpeg_pc_error_dict != {}, \
                         f'Error when calling mpeg pc error software with ' \
                         f'infile1={os.path.abspath(file_path)} ' \
                         f'infile2={os.path.abspath(reconstructed_path)}'
                     file_info_dict.update(mpeg_pc_error_dict)
+                    file_info_dict["mse1+mse2 (p2point)"] = \
+                        mpeg_pc_error_dict["mse1      (p2point)"] + \
+                        mpeg_pc_error_dict["mse2      (p2point)"]
             assert file_path not in self.file_path_to_info
             self.file_path_to_info[file_path] = file_info_dict
 
@@ -139,8 +129,6 @@ class PCGCEvaluator(Evaluator):
         exclusion = ['fea_points_num',
                      'input_points_num',
                      'output_points_num']
-        if not self.compute_chamfer_loss:
-            exclusion.append('chamfer_loss')
         for _, info in self.file_path_to_info.items():
             for key, value in info.items():
                 if key not in exclusion:

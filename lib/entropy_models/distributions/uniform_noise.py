@@ -21,9 +21,10 @@ def _logsum_expbig_minus_expsmall(big, small):
 class UniformNoiseAdapter(Distribution):
     arg_constraints = {}
 
-    def __init__(self, base: Distribution):
+    def __init__(self, base: Distribution, noise_width: float = 1):
         super(UniformNoiseAdapter, self).__init__(base.batch_shape)
         self.base = base
+        self.half_width = noise_width / 2
         assert hasattr(self.base, 'log_cdf') or hasattr(self.base, 'cdf')
 
     def log_prob(self, y):
@@ -34,7 +35,7 @@ class UniformNoiseAdapter(Distribution):
 
     def _log_prob_with_logcdf(self, y):
         return _logsum_expbig_minus_expsmall(
-            self.base.log_cdf(y + .5), self.base.log_cdf(y - .5))
+            self.base.log_cdf(y + self.half_width), self.base.log_cdf(y - self.half_width))
 
     # noinspection PyTypeChecker
     def _log_prob_with_logsf_and_logcdf(self, y):
@@ -44,10 +45,10 @@ class UniformNoiseAdapter(Distribution):
         #   = Log[ exp{logsf(y - .5)} - exp{logsf(y + .5)} ]
         # Log[ cdf(y + .5) - cdf(y - .5) ]
         #   = Log[ exp{logcdf(y + .5)} - exp{logcdf(y - .5)} ]
-        logsf_y_plus = self.base.log_survival_function(y + .5)
-        logsf_y_minus = self.base.log_survival_function(y - .5)
-        logcdf_y_plus = self.base.log_cdf(y + .5)
-        logcdf_y_minus = self.base.log_cdf(y - .5)
+        logsf_y_plus = self.base.log_survival_function(y + self.half_width)
+        logsf_y_minus = self.base.log_survival_function(y - self.half_width)
+        logcdf_y_plus = self.base.log_cdf(y + self.half_width)
+        logcdf_y_minus = self.base.log_cdf(y - self.half_width)
 
         # Important:  Here we use select in a way such that no input is inf, this
         # prevents the troublesome case where the output of select can be finite,
@@ -68,16 +69,16 @@ class UniformNoiseAdapter(Distribution):
             return self._prob_with_cdf(value)
 
     def _prob_with_cdf(self, y):
-        return self.base.cdf(y + .5) - self.base.cdf(y - .5)
+        return self.base.cdf(y + self.half_width) - self.base.cdf(y - self.half_width)
 
     def _prob_with_sf_and_cdf(self, y):
         # There are two options that would be equal if we had infinite precision:
         # sf(y - .5) - sf(y + .5)
         # cdf(y + .5) - cdf(y - .5)
-        sf_y_plus = self.base.survival_function(y + .5)
-        sf_y_minus = self.base.survival_function(y - .5)
-        cdf_y_plus = self.base.cdf(y + .5)
-        cdf_y_minus = self.base.cdf(y - .5)
+        sf_y_plus = self.base.survival_function(y + self.half_width)
+        sf_y_minus = self.base.survival_function(y - self.half_width)
+        cdf_y_plus = self.base.cdf(y + self.half_width)
+        cdf_y_minus = self.base.cdf(y - self.half_width)
 
         # sf_prob has greater precision if we're on the right side of the median.
         # noinspection PyTypeChecker
@@ -103,12 +104,16 @@ class NoisyDeepFactorized(UniformNoiseAdapter):
                  batch_shape: torch.Size,
                  weights: Union[List[torch.Tensor], nn.ParameterList] = None,
                  biases: Union[List[torch.Tensor], nn.ParameterList] = None,
-                 factors: Union[List[torch.Tensor], nn.ParameterList] = None):
+                 factors: Union[List[torch.Tensor], nn.ParameterList] = None,
+                 noise_width: float = 1):
         super(NoisyDeepFactorized, self).__init__(
-            DeepFactorized(batch_shape=batch_shape,
-                           weights=weights,
-                           biases=biases,
-                           factors=factors))
+            DeepFactorized(
+                batch_shape=batch_shape,
+                weights=weights,
+                biases=biases,
+                factors=factors),
+            noise_width=noise_width
+        )
 
 
 class Normal(torch.distributions.Normal):

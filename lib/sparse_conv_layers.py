@@ -69,10 +69,16 @@ class BaseConvBlock(nn.Module):
         return x
 
     def __repr__(self):
-        return f'{str(self.conv).replace("Minkowski", "ME", 1)}, ' \
-               f'region_type={self.region_type.name}, ' \
-               f'bn={self.bn is not None}, ' \
-               f'act={str(self.act_module).replace("Minkowski", "ME", 1).rstrip("()")}'
+        return \
+            f'{self.conv.__class__.__name__.replace("Minkowski", "ME", 1).replace("Convolution", "Conv", 1)}(' \
+            f'in={self.conv.in_channels}, out={self.conv.out_channels}, ' \
+            f'region_type={self.conv.kernel_generator.region_type}, ' \
+            f'kernel_volume={self.conv.kernel_generator.kernel_volume}, ' \
+            f'kernel_size={self.conv.kernel_generator.kernel_size}, ' \
+            f'stride={self.conv.kernel_generator.kernel_stride}, ' \
+            f'dilation={self.conv.kernel_generator.kernel_dilation}, ' \
+            f'bn={self.bn is not None}, ' \
+            f'act={self.act_module.__class__.__name__.replace("Minkowski", "ME", 1)})'
 
 
 class ConvBlock(BaseConvBlock):
@@ -135,9 +141,13 @@ class GenerativeUpsampleMessage:
         self.cached_pred_list: List[Union[ME.SparseTensor]] = []
         self.cached_target_list: List[ME.SparseTensor] = []
         self.cached_metric_list: List[Dict[str, Union[int, float]]] = []
+        self.post_fea_hook: Optional[Callable] = None
         self.indexed_em: Optional[ContinuousIndexedEntropyModel] = None
         self.em_loss_dict_list: List[Dict[str, torch.Tensor]] = []
         self.em_flag: str = ''
+        self.em_hybrid_hyper_decoder: bool = False
+        self.em_decoder_aware_residuals: bool = False
+        self.em_upper_fea_grad_scaler: float = 0.0
         self.em_bytes_list: List[bytes] = em_bytes_list or []
 
 
@@ -203,35 +213,139 @@ class GenerativeUpsample(nn.Module):
         message.fea = self.pruning(fea, keep)
 
         if self.use_residual:
+            cm = message.fea.coordinate_manager
             cm_key = message.fea.coordinate_map_key
             if self.training:
                 cached_feature = message.cached_fea_list.pop()
-                res_fea = self.residual_block(cached_feature, coordinates=cm_key)
-                res_fea_indexes = self.predict_block(message.fea)
-                res_fea_tilde, fea_loss_dict = message.indexed_em(
-                    res_fea, res_fea_indexes, is_first_forward=len(message.em_loss_dict_list) == 0
-                )
-                message.fea = res_fea_tilde
+                if message.em_hybrid_hyper_decoder is True:
+                    fea_info_pred = self.predict_block(message.fea).F
+                    fea_pred, fea_indexes = torch.split(
+                        fea_info_pred,
+                        [cached_feature.shape[1], fea_info_pred.shape[1] - cached_feature.shape[1]],
+                        dim=1
+                    )
+                    if message.em_decoder_aware_residuals is True:
+                        union = ME.MinkowskiUnion()
+                        cached_feature = union(
+                            ME.SparseTensor(
+                                torch.cat((cached_feature.F, torch.zeros_like(cached_feature.F)), 1),
+                                coordinate_map_key=cached_feature.coordinate_map_key,
+                                coordinate_manager=cm
+                            ),
+                            ME.SparseTensor(
+                                torch.cat((torch.zeros_like(fea_pred), fea_pred), 1),
+                                coordinate_map_key=cm_key,
+                                coordinate_manager=cm
+                            )
+                        )
+                    fea = self.residual_block(cached_feature, coordinates=cm_key).F
+                    assert fea.shape[1] * (
+                        len(message.indexed_em.index_ranges) + 1
+                    ) == fea_info_pred.shape[1]
+                    if message.post_fea_hook is not None:
+                        fea = message.post_fea_hook(fea)
+                        fea_pred = message.post_fea_hook(fea_pred)
+                    fea_pred_res_tilde, fea_loss_dict = message.indexed_em(
+                        (fea - fea_pred), fea_indexes,
+                        is_first_forward=len(message.em_loss_dict_list) == 0,  # Assume that the EM is shared
+                        x_grad_scaler_for_bits_loss=message.em_upper_fea_grad_scaler
+                    )
+                    fea_tilde = ME.SparseTensor(
+                        features=fea_pred_res_tilde + fea_pred,
+                        coordinate_map_key=cm_key,
+                        coordinate_manager=cm
+                    )
+                else:
+                    fea = self.residual_block(cached_feature, coordinates=cm_key)
+                    if message.post_fea_hook is not None:
+                        fea = message.post_fea_hook(fea)
+                    fea_indexes = self.predict_block(message.fea)
+                    fea_tilde, fea_loss_dict = message.indexed_em(
+                        fea, fea_indexes, is_first_forward=len(message.em_loss_dict_list) == 0,
+                        x_grad_scaler_for_bits_loss=message.em_upper_fea_grad_scaler
+                    )
+                message.fea = fea_tilde
                 message.em_loss_dict_list.append(fea_loss_dict)
 
             elif message.em_flag == 'compress':
                 cached_feature = message.cached_fea_list.pop()
-                res_fea = self.residual_block(cached_feature, coordinates=cm_key)
-                res_fea_indexes = self.predict_block(message.fea)
-                (res_fea_bytes,), res_fea_recon = message.indexed_em.compress(
-                    res_fea, res_fea_indexes
-                )
-                message.fea = res_fea_recon
-                message.em_bytes_list.append(res_fea_bytes)
+                if message.em_hybrid_hyper_decoder is True:
+                    fea_info_pred = self.predict_block(message.fea).F
+                    fea_pred, fea_indexes = torch.split(
+                        fea_info_pred,
+                        [cached_feature.shape[1], fea_info_pred.shape[1] - cached_feature.shape[1]],
+                        dim=1
+                    )
+                    if message.em_decoder_aware_residuals is True:
+                        union = ME.MinkowskiUnion()
+                        cached_feature = union(
+                            ME.SparseTensor(
+                                torch.cat((cached_feature.F, torch.zeros_like(cached_feature.F)), 1),
+                                coordinate_map_key=cached_feature.coordinate_map_key,
+                                coordinate_manager=cm
+                            ),
+                            ME.SparseTensor(
+                                torch.cat((torch.zeros_like(fea_pred), fea_pred), 1),
+                                coordinate_map_key=cm_key,
+                                coordinate_manager=cm
+                            )
+                        )
+                    fea = self.residual_block(cached_feature, coordinates=cm_key).F
+                    if message.post_fea_hook is not None:
+                        fea = message.post_fea_hook(fea)
+                        fea_pred = message.post_fea_hook(fea_pred)
+                    (fea_bytes,), fea_pred_res_recon = message.indexed_em.compress(
+                        fea - fea_pred, fea_indexes,
+                    )
+                    fea_recon = ME.SparseTensor(
+                        features=fea_pred_res_recon + fea_pred,
+                        coordinate_map_key=cm_key,
+                        coordinate_manager=cm
+                    )
+                else:
+                    fea = self.residual_block(cached_feature, coordinates=cm_key)
+                    if message.post_fea_hook is not None:
+                        fea = message.post_fea_hook(fea)
+                    fea_indexes = self.predict_block(message.fea)
+                    (fea_bytes,), fea_recon = message.indexed_em.compress(
+                        fea, fea_indexes
+                    )
+                message.fea = fea_recon
+                message.em_bytes_list.append(fea_bytes)
 
             elif message.em_flag == 'decompress':
-                res_fea_bytes = message.em_bytes_list.pop(0)
-                res_fea_indexes = self.predict_block(message.fea)
-                res_fea_recon = message.indexed_em.decompress(
-                    [res_fea_bytes], res_fea_indexes, next(self.parameters()).device,
-                    sparse_tensor_coords_tuple=(cm_key, res_fea_indexes.coordinate_manager)
-                )
-                message.fea = res_fea_recon
+                fea_bytes = message.em_bytes_list.pop(0)
+                if message.em_hybrid_hyper_decoder is True:
+                    fea_info_pred = self.predict_block(message.fea).F
+                    fea_recon_channels = fea_info_pred.shape[1] // (
+                        len(message.indexed_em.index_ranges) + 1
+                    )
+                    fea_pred, fea_indexes = torch.split(
+                        fea_info_pred,
+                        [fea_recon_channels, fea_info_pred.shape[1] - fea_recon_channels], dim=1
+                    )
+                    if message.post_fea_hook is not None:
+                        fea_pred = message.post_fea_hook(fea_pred)
+                    fea_pred_res_recon = message.indexed_em.decompress(
+                        [fea_bytes], fea_indexes, next(self.parameters()).device
+                    )
+                    fea_recon = ME.SparseTensor(
+                        features=fea_pred_res_recon + fea_pred,
+                        coordinate_map_key=cm_key,
+                        coordinate_manager=cm
+                    )
+                else:
+                    fea_indexes = self.predict_block(message.fea)
+                    fea_recon = message.indexed_em.decompress(
+                        [fea_bytes], fea_indexes, next(self.parameters()).device,
+                        sparse_tensor_coords_tuple=(cm_key, fea_indexes.coordinate_manager)
+                    )
+                message.fea = fea_recon
+
+        elif self.predict_block is not None:  # if not self.use_residual
+            fea_pred = self.predict_block(message.fea)
+            if message.post_fea_hook is not None:
+                message.fea = message.post_fea_hook(fea_pred)
 
         return message
 

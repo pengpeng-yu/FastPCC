@@ -1,4 +1,5 @@
 from typing import List, Tuple, Union, Dict, Any, Callable
+from functools import partial
 
 import torch
 import torch.nn as nn
@@ -38,15 +39,17 @@ class EntropyModel(nn.Module):
                  hyper_encoder_post_op: Callable = lambda x: x,
                  hyper_decoder_post_op: Callable = lambda x: x,
                  hyperprior_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
-                 hyperprior_init_scale: int = 10,
+                 hyperprior_init_scale: float = 10,
                  hyperprior_tail_mass: float = 2 ** -8,
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
                  prior_bytes_num_bytes: int = 2,
 
                  bottleneck_process: str = 'noise',
+                 bottleneck_scaler: int = 1,
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
-                 init_scale: int = 10,
+                 indexes_scaler: float = 1,
+                 init_scale: float = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16,
                  ):
@@ -61,6 +64,7 @@ class EntropyModel(nn.Module):
             coding_ndim=coding_ndim,
             num_filters=hyperprior_num_filters,
             bottleneck_process=bottleneck_process,
+            bottleneck_scaler=bottleneck_scaler,
             init_scale=hyperprior_init_scale,
             tail_mass=hyperprior_tail_mass,
             range_coder_precision=range_coder_precision,
@@ -72,8 +76,10 @@ class EntropyModel(nn.Module):
             parameter_fns=parameter_fns,
             coding_ndim=coding_ndim,
             bottleneck_process=bottleneck_process,
+            bottleneck_scaler=bottleneck_scaler,
             indexes_bound_gradient=indexes_bound_gradient,
             quantize_indexes=quantize_indexes,
+            indexes_scaler=indexes_scaler,
             init_scale=init_scale,
             tail_mass=tail_mass,
             range_coder_precision=range_coder_precision
@@ -173,7 +179,7 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
                  scale_max: float = 256,
 
                  hyperprior_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
-                 hyperprior_init_scale: int = 10,
+                 hyperprior_init_scale: float = 10,
                  hyperprior_tail_mass: float = 2 ** -8,
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
                  prior_bytes_num_bytes: int = 2,
@@ -181,7 +187,8 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
                  bottleneck_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
-                 init_scale: int = 10,
+                 indexes_scaler: float = 1,
+                 init_scale: float = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16
                  ):
@@ -195,7 +202,8 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
             lambda x: x, lambda x: x,
             hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
             hyperprior_broadcast_shape_bytes, prior_bytes_num_bytes,
-            bottleneck_process, indexes_bound_gradient, quantize_indexes,
+            bottleneck_process, 1,
+            indexes_bound_gradient, quantize_indexes, indexes_scaler,
             init_scale, tail_mass, range_coder_precision
         )
 
@@ -219,7 +227,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
                  coding_ndim: int,
 
                  hyperprior_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
-                 hyperprior_init_scale: int = 10,
+                 hyperprior_init_scale: float = 10,
                  hyperprior_tail_mass: float = 2 ** -8,
                  hyperprior_broadcast_shape_bytes: Tuple[int, ...] = (2,),
                  prior_bytes_num_bytes: int = 2,
@@ -228,10 +236,13 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
                  parameter_fns_type: str = 'transform',
                  parameter_fns_factory: Callable[..., nn.Module] = None,
                  num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1),
+
                  bottleneck_process: str = 'noise',
+                 bottleneck_scaler: int = 1,
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
-                 init_scale: int = 10,
+                 indexes_scaler: float = 1,
+                 init_scale: float = 10,
                  tail_mass: float = 2 ** -8,
                  range_coder_precision: int = 16
                  ):
@@ -242,11 +253,12 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
         super(NoisyDeepFactorizedEntropyModel, self).__init__(
             hyper_encoder, hyper_decoder,
             hyperprior_batch_shape, coding_ndim,
-            NoisyDeepFactorized, index_ranges, parameter_fns,
-            lambda x: x, indexes_view_fn,
+            partial(NoisyDeepFactorized, noise_width=1 / bottleneck_scaler),
+            index_ranges, parameter_fns, lambda x: x, indexes_view_fn,
             hyperprior_num_filters, hyperprior_init_scale, hyperprior_tail_mass,
             hyperprior_broadcast_shape_bytes, prior_bytes_num_bytes,
-            bottleneck_process,indexes_bound_gradient, quantize_indexes,
+            bottleneck_process, bottleneck_scaler,
+            indexes_bound_gradient, quantize_indexes, indexes_scaler,
             init_scale, tail_mass, range_coder_precision
         )
         for module_name, module in modules_to_add.items():

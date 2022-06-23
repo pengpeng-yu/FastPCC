@@ -18,8 +18,9 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                  prior: Distribution,
                  coding_ndim: int,
                  bottleneck_process: str = 'noise',
+                 bottleneck_scaler: int = 1,
                  quantize_bottleneck_in_eval: bool = True,
-                 init_scale: int = 10,
+                 init_scale: float = 10,
                  tail_mass: float = 2 ** -8,
                  lower_bound: Union[int, torch.Tensor] = 0,
                  upper_bound: Union[int, torch.Tensor] = -1,
@@ -42,6 +43,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             prior=prior,
             coding_ndim=coding_ndim,
             bottleneck_process=bottleneck_process,
+            bottleneck_scaler=bottleneck_scaler,
             init_scale=init_scale,
             tail_mass=tail_mass,
             lower_bound=lower_bound,
@@ -50,6 +52,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             overflow_coding=overflow_coding
         )
         assert coding_ndim >= self.prior.batch_ndim
+        self.bottleneck_scaler = bottleneck_scaler
         self.quantize_bottleneck_in_eval = quantize_bottleneck_in_eval
         self.broadcast_shape_bytes = broadcast_shape_bytes
 
@@ -70,8 +73,12 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         least `self.coding_ndim` dimensions, and the innermost dimensions must
         be broadcastable to `self.prior_shape`.
         """
+        if self.bottleneck_scaler != 1:
+            x = x * self.bottleneck_scaler
         if self.training:
             processed_x = self.process(x)
+            if self.bottleneck_scaler != 1:
+                processed_x = processed_x / self.bottleneck_scaler
             log_probs = self.prior.log_prob(processed_x)
             loss_dict = {'bits_loss': log_probs.sum() / (-math.log(2))}
             if is_first_forward:
@@ -96,6 +103,8 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                 = batch_shape + broadcast_shape + prior_batch_shape
                 (prior_event_shape = torch.Size([]))
         """
+        if self.bottleneck_scaler != 1:
+            x = x * self.bottleneck_scaler
         input_shape = x.shape
         batch_shape = input_shape[:-self.coding_ndim]
         coding_unit_shape = input_shape[-self.coding_ndim:]
@@ -129,10 +138,13 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             # All the samples in a batch share the same broadcast_shape.
             bytes_list = [broadcast_shape_encoded + s for s in bytes_list]
 
+        if self.bottleneck_scaler != 1:
+            dequantized_x = dequantized_x / self.bottleneck_scaler
         if estimate_bits is True:
-            estimated_bits = self.prior.log_prob(quantized_x).sum() / (-math.log(2))
+            estimated_bits = self.prior.log_prob(
+                quantized_x / self.bottleneck_scaler
+            ).sum() / (-math.log(2))
             return bytes_list, batch_shape, dequantized_x, estimated_bits
-
         else:
             return bytes_list, batch_shape, dequantized_x
 
@@ -170,6 +182,8 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         else:
             symbols = symbols.to(torch.float)
         symbols = symbols.reshape(batch_shape + broadcast_shape + self.prior.batch_shape)
+        if self.bottleneck_scaler != 1:
+            symbols /= self.bottleneck_scaler
         return symbols
 
 
@@ -179,8 +193,9 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
                  coding_ndim: int,
                  num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1),
                  bottleneck_process: str = 'noise',
+                 bottleneck_scaler: int = 1,
                  quantize_bottleneck_in_eval: bool = True,
-                 init_scale: int = 10,
+                 init_scale: float = 10,
                  tail_mass: float = 2 ** -8,
                  lower_bound: Union[int, torch.Tensor] = 0,
                  upper_bound: Union[int, torch.Tensor] = -1,
@@ -197,9 +212,11 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
                 batch_shape=batch_shape,
                 weights=prior_weights,
                 biases=prior_biases,
-                factors=prior_factors),
+                factors=prior_factors,
+                noise_width=1 / bottleneck_scaler),
             coding_ndim=coding_ndim,
             bottleneck_process=bottleneck_process,
+            bottleneck_scaler=bottleneck_scaler,
             quantize_bottleneck_in_eval=quantize_bottleneck_in_eval,
             init_scale=init_scale,
             tail_mass=tail_mass,

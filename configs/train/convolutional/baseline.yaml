@@ -11,7 +11,7 @@ model:
   coord_recon_loss_type: 'BCE'
   adaptive_pruning: True
   adaptive_pruning_num_scaler: 1.0
-  bpp_loss_factor: 0.2
+  bpp_loss_factor: 0.3
   warmup_steps: 1000
   warmup_bpp_loss_factor: 0.01
 
