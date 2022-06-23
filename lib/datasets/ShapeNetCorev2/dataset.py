@@ -7,10 +7,7 @@ from scipy.spatial.transform import Rotation as R
 import open3d as o3d
 import torch
 import torch.utils.data
-
-try:
-    import MinkowskiEngine as ME
-except ImportError: ME = None
+import MinkowskiEngine as ME
 
 from lib.data_utils import PCData, pc_data_collate_fn, \
     binvox_rw, write_ply_file, kd_tree_partition_randomly
@@ -36,8 +33,12 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         # define files list path and cache path
         if is_training:
             filelist_abs_path = os.path.join(cfg.root, cfg.train_filelist_path)
+            official_divisions = cfg.train_divisions
         else:
             filelist_abs_path = os.path.join(cfg.root, cfg.test_filelist_path)
+            official_divisions = cfg.test_divisions
+        if isinstance(official_divisions, str):
+            official_divisions = (official_divisions,)
 
         # generate files list
         if not os.path.exists(filelist_abs_path):
@@ -55,11 +56,10 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                     ]
                     for file_path in file_paths:
                         if os.path.exists(os.path.join(cfg.root, file_path)):
-                            if (is_training and split == 'train') or \
-                                    not is_training and split == 'test':
+                            if split in official_divisions:
                                 file_list.append(file_path)
             with open(filelist_abs_path, 'w') as f:
-                f.writelines([_ + '\n' for _ in file_list])
+                f.writelines((_ + '\n' for _ in file_list))
 
         # load files list
         self.file_list = []
@@ -75,9 +75,11 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         try:
             if cfg.data_format == '.surface.binvox':
-                if is_training:
+                if is_training and len(official_divisions) == 1 \
+                        and official_divisions[0] == ('train',):
                     assert len(self.file_list) == 35765 - 80 - 1  # 80 have no binvox files
-                else:
+                elif not is_training and len(official_divisions) == 1 \
+                        and official_divisions[0] == ('test',):
                     assert len(self.file_list) == 10266 - 13  # 13 have no binvox files
             elif cfg.data_format == '.solid.binvox':
                 pass
@@ -152,8 +154,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
                 xyz = xyz[unique_map]
                 cache_file_path = self.cached_file_list[index]
-                os.makedirs(os.path.dirname(cache_file_path), exist_ok=True)
-                write_ply_file(xyz, cache_file_path, xyz_dtype=self.cfg.ply_cache_dtype)
+                write_ply_file(xyz, cache_file_path, self.cfg.ply_cache_dtype, make_dirs=True)
                 return
             ori_resolution = self.cfg.mesh_sample_point_resolution
 

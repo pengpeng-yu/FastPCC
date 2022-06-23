@@ -11,6 +11,8 @@ class DatasetConfig(SimpleConfig):
     train_filelist_path: str = 'train_list.txt'
     val_filelist_path: str = 'val_list.txt'  # not used for now.
     test_filelist_path: str = 'test_list.txt'
+    train_divisions: Union[str, Tuple[str, ...]] = 'train'
+    test_divisions: Union[str, Tuple[str, ...]] = 'test'
 
     # '.obj' or '.solid.binvox' or '.surface.binvox' or ['.solid.binvox', '.surface.binvox']
     data_format: Union[str, Tuple[str, ...]] = '.surface.binvox'
