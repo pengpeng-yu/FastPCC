@@ -88,14 +88,14 @@ class PlyVoxel(torch.utils.data.Dataset):
             xyz = np.round(xyz)
 
         if self.cfg.with_color:
-            color = np.asarray(point_cloud.colors, dtype=np.float32)
+            color = np.asarray(point_cloud.colors).astype(np.float32)
             color *= 255
             assert np.prod(color.shape) != 0
         else:
             color = None
 
         if self.cfg.with_normal:
-            normal = np.asarray(point_cloud.normals, dtype=np.float32)
+            normal = np.asarray(point_cloud.normals).astype(np.float32)
             assert np.prod(normal.shape) != 0
         else:
             normal = None

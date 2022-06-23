@@ -5,15 +5,15 @@ import subprocess
 def gpcc_octree_lossless_geom_encode(in_path, out_path, command='tmc3'):
     args = ' --mode=0' \
         ' --trisoupNodeSizeLog2=0' \
-        ' --mergeDuplicatedPoints=0' \
+        ' --mergeDuplicatedPoints=1' \
         ' --neighbourAvailBoundaryLog2=8' \
         ' --intra_pred_max_node_size_log2=6' \
         ' --positionQuantizationScale=1' \
-        ' --inferredDirectCodingMode=1' \
         ' --maxNumQtBtBeforeOt=4' \
         ' --minQtbtSizeLog2=0' \
         ' --planarEnabled=1' \
         ' --planarModeIdcmUse=0' \
+        '--disableAttributeCoding=1' \
         f' --uncompressedDataPath={in_path}' \
         f' --compressedStreamPath={out_path}'
     cmd_args = command + args

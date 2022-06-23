@@ -166,7 +166,7 @@ class MLPBlock(nn.Module):
     def __repr__(self):
         return f'MLPBlock(in_ch={self.in_channels}, out_ch={self.out_channels}, ' \
                f'act={self.act}, bn={self.bn}, version={self.version}, ' \
-               f'skip={self.skip_connection}'
+               f'skip={self.skip_connection})'
 
 
 class BatchNorm1dChnlLast(nn.Module):

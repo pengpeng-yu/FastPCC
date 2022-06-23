@@ -37,7 +37,7 @@ class PCGCv2Data(torch.utils.data.Dataset):
                 if cfg.train_split_ratio == 1.0: pass
                 else: file_list = file_list[int(cfg.train_split_ratio * len(file_list)):]
             with open(filelist_abs_path, 'w') as f:
-                f.writelines([str(_.relative_to(cfg.root)) + '\n' for _ in file_list])
+                f.writelines((str(_.relative_to(cfg.root)) + '\n' for _ in file_list))
 
         # load files list
         logger.info(f'using filelist: "{filelist_abs_path}"')
