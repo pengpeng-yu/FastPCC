@@ -131,6 +131,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     except Exception as e:
         raise ImportError(*e.args)
     model = Model(cfg.model)
+    logger.info(f'repr(model): \n{repr(model)}')
 
     if hasattr(model, 'params_divider'):
         params_divider = model.params_divider
@@ -388,6 +389,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
             if cfg.train.cuda_empty_cache_frequency != 0 and \
                     (step_idx + 1) % cfg.train.cuda_empty_cache_frequency == 0:
+                logger.info(f'torch.cuda.max_memory_reserved(): {torch.cuda.max_memory_reserved()}. '
+                            f'Call torch.cuda.empty_cache() now')
                 torch.cuda.empty_cache()
 
         for idx, scheduler in enumerate(scheduler_list):
