@@ -130,57 +130,44 @@ def read_json_results(info_paths, info_keys=None) -> INFO_DICTS_TYPE:
     return info_concat
 
 
-def compute_bd_rate(info_dicts_a, info_dicts_b,
-                    slice_a_start=0, slice_a_end=None, slice_b_start=0,  slice_b_end=None
-                    ) -> Dict[str, float]:
+def compute_bd_rate(info_dicts_a, info_dicts_b) -> Dict[str, float]:
+    def sort_key_func(bpp_psnr): return bpp_psnr[0]
     bd_rate_results = {}
     for key in info_dicts_a:
         if key in info_dicts_b:
             bpp_psnr_a = list(zip(info_dicts_a[key]['bpp'], info_dicts_a[key]['mseF,PSNR (p2point)']))
             bpp_psnr_b = list(zip(info_dicts_b[key]['bpp'], info_dicts_b[key]['mseF,PSNR (p2point)']))
-            if slice_a_end is not None:
-                bpp_psnr_a = bpp_psnr_a[slice_a_start:slice_a_end]
-            else:
-                bpp_psnr_a = bpp_psnr_a[slice_a_start:]
-            if slice_b_end is not None:
-                bpp_psnr_b = bpp_psnr_b[slice_b_start:slice_b_end]
-            else:
-                bpp_psnr_b = bpp_psnr_b[slice_b_start:]
-            bd_rate_results[key] = bdrate(bpp_psnr_a, bpp_psnr_b)
+            bd_rate_results[key] = bdrate(
+                sorted(bpp_psnr_a, key=sort_key_func),
+                sorted(bpp_psnr_b, key=sort_key_func)
+            )
     return bd_rate_results
 
 
-def compare_with_vpcc(json_path_pattern,
-                      slice_a_start=0, slice_a_end=None, slice_b_start=0,  slice_b_end=None
-                      ) -> Tuple[INFO_DICTS_TYPE, INFO_DICTS_TYPE, Dict[str, float]]:
+def compare_with_vpcc(json_path_pattern) -> Tuple[INFO_DICTS_TYPE, INFO_DICTS_TYPE, Dict[str, float]]:
     vpcc_info_dicts = read_all_vpcc_logs()
 
     json_info_paths = glob.glob(json_path_pattern)
-    json_info_paths.sort(reverse=True)
     json_info_dicts = read_json_results(json_info_paths)
 
     bd_rate_results = compute_bd_rate(
-        vpcc_info_dicts, json_info_dicts,
-        slice_a_start, slice_a_end, slice_b_start, slice_b_end
+        vpcc_info_dicts, json_info_dicts
     )
     print(json.dumps(bd_rate_results, indent=2, sort_keys=False))
     return vpcc_info_dicts, json_info_dicts, bd_rate_results
 
 
-def compare_with_jsons(json_path_pattern_a, json_path_pattern_b,
-                       slice_a_start=0, slice_a_end=None, slice_b_start=0,  slice_b_end=None
-                       ) -> Tuple[INFO_DICTS_TYPE, INFO_DICTS_TYPE, Dict[str, float]]:
+def compare_with_jsons(
+        json_path_pattern_a, json_path_pattern_b
+) -> Tuple[INFO_DICTS_TYPE, INFO_DICTS_TYPE, Dict[str, float]]:
     json_info_paths_a = glob.glob(json_path_pattern_a)
-    json_info_paths_a.sort(reverse=True)  # to be consistent with the order of vpcc r1-r5
     json_info_dicts_a = read_json_results(json_info_paths_a)
 
     json_info_paths_b = glob.glob(json_path_pattern_b)
-    json_info_paths_b.sort(reverse=True)
     json_info_dicts_b = read_json_results(json_info_paths_b)
 
     bd_rate_results = compute_bd_rate(
-        json_info_dicts_a, json_info_dicts_b,
-        slice_a_start, slice_a_end, slice_b_start, slice_b_end
+        json_info_dicts_a, json_info_dicts_b
     )
     print(json.dumps(bd_rate_results, indent=2, sort_keys=False))
     return json_info_dicts_a, json_info_dicts_b, bd_rate_results
