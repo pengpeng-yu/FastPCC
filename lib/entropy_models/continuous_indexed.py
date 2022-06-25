@@ -262,10 +262,9 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
 
     def train(self, mode: bool = True):
         """
-        Use model.train() to invalidate cached cdf table.
-        Use model.eval() to update the prior function and the cdf table.
+        Use model.eval() to update the prior function.
         """
-        if mode is False and self.prior.requires_updating_cdf_table:
+        if mode is False:
             self.update_prior()
         return super(ContinuousIndexedEntropyModel, self).train(mode=mode)
 
