@@ -160,6 +160,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         if self.cfg.random_rotation:
             xyz = R.random().apply(xyz)
+            xyz -= xyz.min(0)
 
         if self.cfg.resolution != ori_resolution:
             xyz *= ((self.cfg.resolution - 1) / (ori_resolution - 1))

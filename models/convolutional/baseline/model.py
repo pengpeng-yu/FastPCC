@@ -408,6 +408,7 @@ class PCC(nn.Module):
 
     def forward(self, pc_data: PCData):
         lossless_coder_num = self.get_lossless_coder_num(pc_data.resolution)
+        assert pc_data.xyz.min() >= 0
         if self.training:
             sparse_pc = self.get_sparse_pc(pc_data.xyz, pc_data.color)
             return self.train_forward(sparse_pc, pc_data.training_step, lossless_coder_num)
@@ -840,13 +841,13 @@ class PCC(nn.Module):
         batch_size = len(ori_coord_list)
         for idx in range(batch_size):
             nearest_idx = knn_points(  # TODO: test color loss
-                ori_coord_list[idx][None].to(torch.float),
                 pred_coord_list[idx][None].to(torch.float),
+                ori_coord_list[idx][None].to(torch.float),
                 K=1, return_sorted=False
             ).idx
-            target_fea_list.append((ori_fea_list[idx] + 0.5) * 255)
+            target_fea_list.append(((ori_fea_list[idx] + 0.5) * 255)[nearest_idx[0, :, 0]])
             # Inverse transform is supposed to be done in the decoder
-            pred_fea_list[idx] = pred_fea_list[idx][nearest_idx[0, :, 0]] * 255
+            pred_fea_list[idx] = pred_fea_list[idx] * 255
             if use_yuv:
                 target_fea_list[idx] = self.rgb_to_yuvbt709(target_fea_list[idx])
                 pred_fea_list[idx] = self.rgb_to_yuvbt709(pred_fea_list[idx])

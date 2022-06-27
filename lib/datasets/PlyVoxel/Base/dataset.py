@@ -74,11 +74,12 @@ class PlyVoxel(torch.utils.data.Dataset):
             print(f'Error when loading {file_path}')
             raise e
 
-        if self.cfg.random_rotation:
-            point_cloud.rotate(R.random().as_matrix())
-
         # xyz
         xyz = np.asarray(point_cloud.points)
+
+        if self.cfg.random_rotation:
+            xyz = R.random().apply(xyz)
+            xyz -= xyz.min(0)
 
         if not self.voxelized:
             xyz /= (ori_resolution - 1)
