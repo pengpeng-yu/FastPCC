@@ -1,3 +1,7 @@
+"""
+This script is based on commit c3c9798a0f63970bd17ce191900ded478a8aa0f6 of mpeg-pcc-tmc13.
+"""
+
 from glob import glob
 import os
 import shutil

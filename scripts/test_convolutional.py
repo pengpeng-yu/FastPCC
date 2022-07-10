@@ -45,7 +45,10 @@ key_mappings = {
 
 
 def test():
-    for run_dirname, par_num in (('convolutional_all_no_par', 0), ('convolutional_all_par', 1500000)):
+    for run_dirname, par_num in (
+        ('convolutional_all_no_par', 0),
+        ('convolutional_all_par6e5', 600000)
+    ):
         run_dir = osp.join('runs', base_run_dirname, run_dirname)
         for config_path, glob_weights_path in zip(config_paths, glob_weights_paths):
             all_file_metric_dict = {}

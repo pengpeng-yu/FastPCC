@@ -52,4 +52,4 @@ test:
   dataset_path:
     'lib.datasets.PlyVoxel.Owlii_8iVFBv2'
   dataset:
-    kd_tree_partition_max_points_num: 1500000
+    kd_tree_partition_max_points_num: 0

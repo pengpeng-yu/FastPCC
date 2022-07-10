@@ -1,4 +1,5 @@
 import json
+import re
 import os
 import os.path as osp
 import shutil
@@ -7,22 +8,26 @@ from typing import Dict, List
 import matplotlib.pyplot as plt
 
 from scripts.log_extract_utils import all_file_metric_dict_type, concat_values_for_dict
-from lib.metrics.bjontegaard import bdrate
+from lib.metrics.bjontegaard import bdrate, bdsnr
+
+
+figure_title_re_pattern = re.compile('[a-z,_]+_')
 
 
 def sort_key_func(bpp_psnr): return bpp_psnr[0]
 
 
-def compute_bdrate(info_dicts_a: all_file_metric_dict_type,
-                   info_dicts_b: all_file_metric_dict_type,
-                   d1=True) -> Dict[str, float]:
+def compute_bd(info_dicts_a: all_file_metric_dict_type,
+               info_dicts_b: all_file_metric_dict_type,
+               rate=True, d1=True) -> Dict[str, float]:
     bd_rate_results = {}
     distortion_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
+    bd_fn = bdrate if rate else bdsnr
     for key in info_dicts_a:
         if key in info_dicts_b:
             bpp_psnr_a = list(zip(info_dicts_a[key]['bpp'], info_dicts_a[key][distortion_key]))
             bpp_psnr_b = list(zip(info_dicts_b[key]['bpp'], info_dicts_b[key][distortion_key]))
-            bd_rate_results[key] = bdrate(
+            bd_rate_results[key] = bd_fn(
                 sorted(bpp_psnr_a, key=sort_key_func),
                 sorted(bpp_psnr_b, key=sort_key_func)
             )
@@ -60,7 +65,12 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
             fig.plot(tmp_x_axis, tmp_y_axis, label=method_name)
             fig.set_xlabel('bpp')
             fig.set_ylabel(y_label)
-            fig.set_title(sample_name)
+            fig.set_title(
+                re.match(
+                    figure_title_re_pattern,
+                    osp.split(sample_name)[1]
+                ).group()[:-1].replace('_', ' ')
+            )
             fig.legend(loc='lower right')
         fig.figure.savefig(osp.join(
             output_dir, osp.splitext(osp.split(sample_name)[1])[0] + '.pdf'
@@ -73,24 +83,26 @@ def list_mean(ls: List):
 
 
 def compute_multiple_bdrate():
-    method_to_json_path: Dict[str, str] = {
-        'G-PCC octree': 'runs/tests/tmc3_geo/octree/metric_dict.json',
-        'G-PCC trisoup': 'runs/tests/tmc3_geo/trisoup/metric_dict.json',
-        'V-PCC': 'runs/tests/tmc2_geo/metric_dict.json',
-        'Baseline': 'runs/tests/convolutional_all_no_par/baseline/metric_dict.json',
-        'Baseline 4x': 'runs/tests/convolutional_all_no_par/baseline_4x/metric_dict.json',
-        'Scale Normal': 'runs/tests/convolutional_all_no_par/hyperprior_scale_normal/metric_dict.json',
-        'Learnable': 'runs/tests/convolutional_all_no_par/hyperprior_factorized/metric_dict.json',
-        'Ours': 'runs/tests/convolutional_all_no_par/lossl_based/metric_dict.json',
-        'Baseline*': 'runs/tests/convolutional_all_par/baseline/metric_dict.json',
-        'Baseline 4x*': 'runs/tests/convolutional_all_par/baseline_4x/metric_dict.json',
-        'Scale Normal*': 'runs/tests/convolutional_all_par/hyperprior_scale_normal/metric_dict.json',
-        'Learnable*': 'runs/tests/convolutional_all_par/hyperprior_factorized/metric_dict.json',
-        'Ours*': 'runs/tests/convolutional_all_par/lossl_based/metric_dict.json',
-    }
     anchor_name = 'V-PCC'
     anchor_secondly = False
     output_dir = 'runs/comparison'
+    method_to_json_path: Dict[str, str] = {
+        'G-PCC octree': 'tmc3_geo/octree',
+        'G-PCC trisoup': 'tmc3_geo/trisoup',
+        'V-PCC': 'tmc2_geo',
+        'Baseline': 'convolutional_all_no_par/baseline',
+        'Baseline 4x': 'convolutional_all_no_par/baseline_4x',
+        'Scale Normal': 'convolutional_all_no_par/hyperprior_scale_normal',
+        'Learnable': 'convolutional_all_no_par/hyperprior_factorized',
+        'Ours': 'convolutional_all_no_par/lossl_based',
+        'Baseline*': 'convolutional_all_par6e5/baseline',
+        'Baseline 4x*': 'convolutional_all_par6e5/baseline_4x',
+        'Scale Normal*': 'convolutional_all_par6e5/hyperprior_scale_normal',
+        'Learnable*': 'convolutional_all_par6e5/hyperprior_factorized',
+        'Ours*': 'convolutional_all_par6e5/lossl_based',
+    }
+    method_to_json_path = {k: osp.join('runs', 'tests', v, 'metric_dict.json')
+                           for k, v in method_to_json_path.items()}
 
     if osp.exists(output_dir):
         shutil.rmtree(output_dir)
@@ -106,6 +118,8 @@ def compute_multiple_bdrate():
     sample_wise_metric_type = Dict[str, List[float]]
     sample_wise_bdrate_d1: sample_wise_metric_type = {}
     sample_wise_bdrate_d2: sample_wise_metric_type = {}
+    sample_wise_bdpsnr_d1: sample_wise_metric_type = {}
+    sample_wise_bdpsnr_d2: sample_wise_metric_type = {}
     sample_wise_complexity: sample_wise_metric_type = {}
 
     for method_name, method_json in method_to_json.items():
@@ -127,11 +141,19 @@ def compute_multiple_bdrate():
             if anchor_secondly: comparison_tuple = comparison_tuple[::-1]
             sample_wise_bdrate_d1 = concat_values_for_dict(
                 sample_wise_bdrate_d1,
-                compute_bdrate(*comparison_tuple)
+                compute_bd(*comparison_tuple)
             )
             sample_wise_bdrate_d2 = concat_values_for_dict(
                 sample_wise_bdrate_d2,
-                compute_bdrate(*comparison_tuple, d1=False)
+                compute_bd(*comparison_tuple, d1=False)
+            )
+            sample_wise_bdpsnr_d1 = concat_values_for_dict(
+                sample_wise_bdpsnr_d1,
+                compute_bd(*comparison_tuple, rate=False)
+            )
+            sample_wise_bdpsnr_d2 = concat_values_for_dict(
+                sample_wise_bdpsnr_d2,
+                compute_bd(*comparison_tuple, rate=False, d1=False)
             )
 
     write_metric_to_csv(
@@ -139,13 +161,27 @@ def compute_multiple_bdrate():
              for key in method_to_json.keys()), ()),
         sample_wise_complexity, osp.join(output_dir, 'complexity.csv')
     )
+    bd_file_name = 'bd{} D{}'
+    if anchor_secondly:
+        bd_file_name += f' {anchor_name}'
+    else:
+        bd_file_name = f'{anchor_name} ' + bd_file_name
+    bd_file_name += '.csv'
     write_metric_to_csv(
         method_names_to_compare, sample_wise_bdrate_d1,
-        osp.join(output_dir, f'{anchor_name} bdrate D1.csv')
+        osp.join(output_dir, bd_file_name.format('rate', 1))
     )
     write_metric_to_csv(
         method_names_to_compare, sample_wise_bdrate_d2,
-        osp.join(output_dir, f'{anchor_name} bdrate D2.csv')
+        osp.join(output_dir, bd_file_name.format('rate', 2))
+    )
+    write_metric_to_csv(
+        method_names_to_compare, sample_wise_bdpsnr_d1,
+        osp.join(output_dir, bd_file_name.format('psnr', 1))
+    )
+    write_metric_to_csv(
+        method_names_to_compare, sample_wise_bdpsnr_d2,
+        osp.join(output_dir, bd_file_name.format('psnr', 2))
     )
 
     def remove_low_psnr_for_vis(tmp_x_axis, tmp_y_axis, method_name):

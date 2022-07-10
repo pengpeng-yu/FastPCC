@@ -1,3 +1,7 @@
+"""
+This script is based on commit 1fc928244bc778c73bed0d36f1c22d95ed6b0fe2 of mpeg-pcc-tmc2.
+"""
+
 import os
 import shutil
 import subprocess
