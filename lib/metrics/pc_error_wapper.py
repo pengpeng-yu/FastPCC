@@ -1,5 +1,5 @@
 import subprocess
-from typing import Dict
+from typing import Dict, Callable, Union, Tuple
 
 
 _DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A->B).',
@@ -10,7 +10,8 @@ _DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A
 
 def mpeg_pc_error(
         infile1: str, infile2: str, resolution: int, normal_file: str = '',
-        hausdorff: bool = False, color: bool = False, threads: int = 1, command='pc_error_d'
+        hausdorff: bool = False, color: bool = False, threads: int = 1, command='pc_error_d',
+        hooks: Tuple[Callable[[str], Tuple[str, Union[None, int, float, str]]]] = ()
 ) -> Dict[str, float]:
     cmd_args = f'{command}' \
                f' -a {infile1}' \
@@ -30,6 +31,10 @@ def mpeg_pc_error(
     metric_dict = {}
     flag_read = False
     for line in subp_stdout.splitlines():
+        for hook in hooks:
+            extracted = hook(line)
+            if extracted is not None:
+                metric_dict[extracted[0]] = extracted[1]
         if line.startswith(_DIVIDERS[0]):
             flag_read = True
         elif line.startswith(_DIVIDERS[-1]):
