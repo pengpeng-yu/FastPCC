@@ -8,6 +8,7 @@ from typing import Dict, List
 import matplotlib.pyplot as plt
 
 from scripts.log_extract_utils import all_file_metric_dict_type, concat_values_for_dict
+from scripts.shared_config import metric_dict_filename
 from lib.metrics.bjontegaard import bdrate, bdsnr
 
 
@@ -86,10 +87,12 @@ def compute_multiple_bdrate():
     anchor_name = 'V-PCC'
     anchor_secondly = False
     output_dir = 'runs/comparison'
+    json_path_pattern = osp.join('runs', 'tests', '{}', metric_dict_filename)
     method_to_json_path: Dict[str, str] = {
         'G-PCC octree': 'tmc3_geo/octree',
         'G-PCC trisoup': 'tmc3_geo/trisoup',
         'V-PCC': 'tmc2_geo',
+        'ADLPCC': 'ADLPCC',
         'Baseline': 'convolutional_all_no_par/baseline',
         'Baseline 4x': 'convolutional_all_no_par/baseline_4x',
         'Scale Normal': 'convolutional_all_no_par/hyperprior_scale_normal',
@@ -101,7 +104,7 @@ def compute_multiple_bdrate():
         'Learnable*': 'convolutional_all_par6e5/hyperprior_factorized',
         'Ours*': 'convolutional_all_par6e5/lossl_based',
     }
-    method_to_json_path = {k: osp.join('runs', 'tests', v, 'metric_dict.json')
+    method_to_json_path = {k: json_path_pattern.format(v)
                            for k, v in method_to_json_path.items()}
 
     if osp.exists(output_dir):
@@ -127,9 +130,11 @@ def compute_multiple_bdrate():
         for sample_name in sample_names:
             single_sample_json = method_json[sample_name]
             single_sample_complexity[sample_name] = [
-                list_mean(single_sample_json['encode time']),
-                list_mean(single_sample_json['decode time']),
-                list_mean(single_sample_json['encode memory']) / 1024 ** 2
+                list_mean(single_sample_json['encode time'])
+                if 'encode time' in single_sample_json else -1,
+                list_mean(single_sample_json['decode time'])
+                if 'decode time' in single_sample_json else -1,
+                list_mean(single_sample_json['encode memory']) / 1024 ** 2  # KB -> GB
                 if 'encode memory' in single_sample_json else -1,
                 list_mean(method_json[sample_name]['decode memory']) / 1024 ** 2
                 if 'decode memory' in single_sample_json else -1,

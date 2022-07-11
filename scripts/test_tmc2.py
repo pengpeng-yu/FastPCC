@@ -9,16 +9,17 @@ import json
 
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
+from scripts.shared_config import pc_error_path, metric_dict_filename
 
 
 tmc2_path = ('../mpeg-pcc-tmc2/bin/PccAppEncoder', '../mpeg-pcc-tmc2/bin/PccAppDecoder')
-pc_error_path = 'pc_error_d'
 
 file_lists = (
     'datasets/8iVFBv2/list.txt',
     'datasets/Owlii/list.txt',
 )
 resolutions = (1024, 2048)
+assert len(file_lists) == len(resolutions)
 
 config_dir = '../mpeg-pcc-tmc2/cfg'
 output_dir = 'runs/tests/tmc2_geo'
@@ -51,10 +52,6 @@ class TMC2LogExtractor(LogExtractor):
 
 def test_geo_single_frame():
     print('Test tmc3 geo coding')
-
-    def hook_for_org_points_num(line):
-        if line.startswith('Point cloud sizes for org version, dec version, and the scaling ratio'):
-            return 'org points num', int(line.rstrip().rsplit(' ', 3)[1][:-1])
 
     log_extractor = TMC2LogExtractor()
     if osp.exists(output_dir):
@@ -128,7 +125,7 @@ def test_geo_single_frame():
             all_file_metric_dict[file_path] = sub_metric_dict
 
     print('Done')
-    with open(osp.join(output_dir, f'metric_dict.json'), 'w') as f:
+    with open(osp.join(output_dir, metric_dict_filename), 'w') as f:
         f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
 
 

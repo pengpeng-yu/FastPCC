@@ -6,8 +6,10 @@ import subprocess
 import json
 
 from scripts.log_extract_utils import concat_values_for_dict
+from scripts.shared_config import conda_prefix, metric_dict_filename
 
 
+conda_env_name = 'py37torch110'
 glob_weights_paths = [
     'weights/lossl_based/*.pt',
     'weights/hyperprior_factorized/*.pt',
@@ -22,7 +24,6 @@ config_paths = [
     'configs/train/convolutional/baseline',
     'configs/train/convolutional/baseline_4x'
 ]
-base_run_dirname = 'tests'
 
 
 def rename_dict_key(d: Dict, mappings: Dict[str, Tuple[str, Union[None, Callable]]]):
@@ -38,18 +39,23 @@ def rename_dict_key(d: Dict, mappings: Dict[str, Tuple[str, Union[None, Callable
 
 key_mappings = {
     "encoder_elapsed_time": ('encode time', None),
-    "encoder_max_cuda_memory_allocated": ('encode memory', lambda v: v / 1024),
+    "encoder_max_cuda_memory_allocated": ('encode memory', lambda v: v / 1024),  # B -> KN
     "decoder_elapsed_time": ('decode time', None),
     "decoder_max_cuda_memory_allocated": ('decode memory', lambda v: v / 1024)
 }
 
 
 def test():
+    if conda_prefix and conda_env_name:
+        python_pre_command = f'. {osp.join(conda_prefix, "bin", "activate")} {conda_env_name};'
+    else:
+        python_pre_command = ';'
+
     for run_dirname, par_num in (
         ('convolutional_all_no_par', 0),
         ('convolutional_all_par6e5', 600000)
     ):
-        run_dir = osp.join('runs', base_run_dirname, run_dirname)
+        run_dir = osp.join('runs', 'tests', run_dirname)
         for config_path, glob_weights_path in zip(config_paths, glob_weights_paths):
             all_file_metric_dict = {}
             config_name = osp.split(config_path)[1]
@@ -63,14 +69,13 @@ def test():
                 if osp.exists(sub_sub_run_dir):
                     shutil.rmtree(sub_sub_run_dir)
                 subprocess.run(
-                    '/bin/bash -c '
-                    '"source /home/omnisky/anaconda3/bin/activate  py37torch110;'
+                    f'{python_pre_command}'
                     f'python test.py {config_path}'
                     f' test.weights_from_ckpt={weight_path}'
                     f' test.rundir_name={sub_sub_run_dir.replace("runs/", "", 1)}'
                     f' test.dataset.kd_tree_partition_max_points_num={par_num}'
-                    f' test.device=2"',
-                    shell=True, check=True
+                    f' test.device=2',
+                    shell=True, check=True, executable=shutil.which('bash')
                 )
                 sub_metric_dict_path = osp.join(sub_sub_run_dir, 'results', 'metric.txt')
                 with open(sub_metric_dict_path, 'rb') as f:
@@ -82,7 +87,7 @@ def test():
                     )
 
             print(f'config "{config_path}", par num {par_num} Done')
-            with open(osp.join(sub_run_dir, 'metric_dict.json'), 'w') as f:
+            with open(osp.join(sub_run_dir, metric_dict_filename), 'w') as f:
                 f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
     print('All Done')
 

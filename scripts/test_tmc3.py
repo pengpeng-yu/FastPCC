@@ -10,16 +10,17 @@ import json
 
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
+from scripts.shared_config import pc_error_path, metric_dict_filename
 
 
 tmc3_path = '../mpeg-pcc-tmc13/build/tmc3/tmc3'
-pc_error_path = 'pc_error_d'
 
 file_lists = (
     'datasets/8iVFBv2/list.txt',
     'datasets/Owlii/list.txt',
 )
 resolutions = (1024, 2048)
+assert len(file_lists) == len(resolutions)
 
 config_dirs = (
     '../mpeg-pcc-tmc13/cfg/octree-predlift/lossy-geom-lossy-attrs',
@@ -29,15 +30,18 @@ output_dirs = (
     'runs/tests/tmc3_geo/octree',
     'runs/tests/tmc3_geo/trisoup',
 )
+assert len(config_dirs) == len(output_dirs)
 
 
 class TMC3LogExtractor(LogExtractor):
     default_enc_log_mappings: log_mappings_type = {
         'Total bitstream size': ('bits', lambda l: float(l.split()[-2]) * 8),
-        'Processing time (user)': ('encode time', lambda l: float(l.split()[-2]))
+        'Processing time (user)': ('encode time', lambda l: float(l.split()[-2])),
+        'Peak memory': ('encode memory', lambda l: int(l.split()[-2]))
     }
     default_dec_log_mappings: log_mappings_type = {
         'Processing time (user)': ('decode time', lambda l: float(l.split()[-2])),
+        'Peak memory': ('decode memory', lambda l: int(l.split()[-2]))
     }
 
     def __init__(self):
@@ -54,10 +58,6 @@ class TMC3LogExtractor(LogExtractor):
 
 def test_geo_single_frame():
     print('Test tmc3 geo coding')
-
-    def hook_for_org_points_num(line):
-        if line.startswith('Point cloud sizes for org version, dec version, and the scaling ratio'):
-            return 'org points num', int(line.rstrip().rsplit(' ', 3)[1][:-1])
 
     log_extractor = TMC3LogExtractor()
     for config_dir, output_dir in zip(config_dirs, output_dirs):
@@ -124,7 +124,7 @@ def test_geo_single_frame():
                 all_file_metric_dict[file_path] = sub_metric_dict
 
         print(f'{config_dir} Done')
-        with open(osp.join(output_dir, 'metric_dict.json'), 'w') as f:
+        with open(osp.join(output_dir, metric_dict_filename), 'w') as f:
             f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
     print('All Done')
 
