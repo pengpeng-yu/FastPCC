@@ -3,6 +3,7 @@ import shutil
 import sys
 import importlib
 import time
+import datetime
 import pathlib
 from tqdm import tqdm
 from functools import partial
@@ -108,7 +109,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     device, cuda_ids = select_device(logger, local_rank, cfg.train.device, cfg.train.batch_size)
 
     if local_rank != -1:
-        dist.init_process_group(backend='nccl', init_method='env://')
+        dist.init_process_group(backend='nccl', init_method='env://', timeout=datetime.timedelta(hours=2))
         assert cfg.train.batch_size % world_size == 0, '--batch-size must be multiple of CUDA device count'
         process_batch_size = cfg.train.batch_size // world_size
 
@@ -425,8 +426,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
             torch.cuda.empty_cache()
 
-    if isinstance(model, DDP):
-        dist.barrier()
     logger.info('train end')
 
 

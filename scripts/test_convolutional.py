@@ -53,7 +53,8 @@ def test():
 
     for run_dirname, par_num in (
         ('convolutional_all_no_par', 0),
-        ('convolutional_all_par6e5', 600000)
+        ('convolutional_all_par6e5', 600000),
+        ('convolutional_all_par15e4', 150000),
     ):
         run_dir = osp.join('runs', 'tests', run_dirname)
         for config_path, glob_weights_path in zip(config_paths, glob_weights_paths):

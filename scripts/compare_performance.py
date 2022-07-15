@@ -46,16 +46,23 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
                   output_dir, d1=True, hook=None):
     distortion_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
     y_label = 'D1 PSNR' if d1 else 'D2 PSNR'
-    output_dir = osp.join(output_dir, 'sample-wise')
+    output_dir = osp.join(output_dir, f'sample-wise {y_label}')
     if osp.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)
 
-    figs = []
     sample_names = next(iter(method_to_json.values())).keys()
     for sample_name in sample_names:
-        fig = plt.figure().add_subplot(111)
-        figs.append(fig)
+        fig = plt.figure(figsize=(4, 2.5)).add_subplot(111)
+        fig.grid()
+        fig.set_xlabel('bpp')
+        fig.set_ylabel(y_label)
+        fig.set_title(
+            re.match(
+                figure_title_re_pattern,
+                osp.split(sample_name)[1]
+            ).group()[:-1].replace('_', ' ')
+        )
         for method_name, method_json in method_to_json.items():
             tmp_x_axis = method_json[sample_name]['bpp']
             tmp_y_axis = method_json[sample_name][distortion_key]
@@ -63,20 +70,12 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
             tmp_x_axis, tmp_y_axis = zip(*sorted(xy_tuple, key=sort_key_func))
             if hook is not None:
                 tmp_x_axis, tmp_y_axis = hook(tmp_x_axis, tmp_y_axis, method_name)
-            fig.plot(tmp_x_axis, tmp_y_axis, label=method_name)
-            fig.set_xlabel('bpp')
-            fig.set_ylabel(y_label)
-            fig.set_title(
-                re.match(
-                    figure_title_re_pattern,
-                    osp.split(sample_name)[1]
-                ).group()[:-1].replace('_', ' ')
-            )
-            fig.legend(loc='lower right')
+            fig.plot(tmp_x_axis, tmp_y_axis, '.-', label=method_name)
+        fig.legend(loc='lower right')
         fig.figure.savefig(osp.join(
-            output_dir, osp.splitext(osp.split(sample_name)[1])[0] + '.pdf'
+            output_dir, f'{y_label} {osp.splitext(osp.split(sample_name)[1])[0]}.pdf'
         ))
-    print('Done')
+    print(f'Plot "{y_label}" Done')
 
 
 def list_mean(ls: List):
@@ -93,16 +92,21 @@ def compute_multiple_bdrate():
         'G-PCC trisoup': 'tmc3_geo/trisoup',
         'V-PCC': 'tmc2_geo',
         'ADLPCC': 'ADLPCC',
-        'Baseline': 'convolutional_all_no_par/baseline',
-        'Baseline 4x': 'convolutional_all_no_par/baseline_4x',
+        'PCGCv2': 'convolutional_all_no_par/baseline',
+        'PCGCv2 4x': 'convolutional_all_no_par/baseline_4x',
         'Scale Normal': 'convolutional_all_no_par/hyperprior_scale_normal',
         'Learnable': 'convolutional_all_no_par/hyperprior_factorized',
         'Ours': 'convolutional_all_no_par/lossl_based',
-        'Baseline*': 'convolutional_all_par6e5/baseline',
-        'Baseline 4x*': 'convolutional_all_par6e5/baseline_4x',
+        'PCGCv2*': 'convolutional_all_par6e5/baseline',
+        'PCGCv2 4x*': 'convolutional_all_par6e5/baseline_4x',
         'Scale Normal*': 'convolutional_all_par6e5/hyperprior_scale_normal',
         'Learnable*': 'convolutional_all_par6e5/hyperprior_factorized',
         'Ours*': 'convolutional_all_par6e5/lossl_based',
+        'PCGCv2**': 'convolutional_all_par15e4/baseline',
+        'PCGCv2 4x**': 'convolutional_all_par15e4/baseline_4x',
+        'Scale Normal**': 'convolutional_all_par15e4/hyperprior_scale_normal',
+        'Learnable**': 'convolutional_all_par15e4/hyperprior_factorized',
+        'Ours**': 'convolutional_all_par15e4/lossl_based',
     }
     method_to_json_path = {k: json_path_pattern.format(v)
                            for k, v in method_to_json_path.items()}
@@ -197,6 +201,8 @@ def compute_multiple_bdrate():
         return tmp_x_axis, tmp_y_axis
 
     plot_bpp_psnr(method_to_json, output_dir, hook=remove_low_psnr_for_vis)
+    plot_bpp_psnr(method_to_json, output_dir, d1=False, hook=remove_low_psnr_for_vis)
+    print('All Done')
 
 
 if __name__ == '__main__':
