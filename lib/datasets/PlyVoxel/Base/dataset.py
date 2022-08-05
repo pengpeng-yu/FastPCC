@@ -107,6 +107,7 @@ class PlyVoxel(torch.utils.data.Dataset):
                 self.cfg.kd_tree_partition_max_points_num,
                 (color, normal)
             )
+            resolution = int(np.ceil((xyz.max(0) - xyz.min(0)).max()).item())
 
         return PCData(
             xyz=torch.from_numpy(xyz),
