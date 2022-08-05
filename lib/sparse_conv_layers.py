@@ -132,6 +132,7 @@ class GenerativeUpsampleMessage:
                  target_key: Optional[ME.CoordinateMapKey] = None,
                  points_num_list: Optional[List[List[int]]] = None,
                  cached_fea_list: Optional[List[Union[ME.SparseTensor]]] = None,
+                 bce_weights_type: str = '',
                  em_bytes_list: Optional[List[bytes]] = None):
         self.fea: ME.SparseTensor = fea
         self.target_key: Optional[ME.CoordinateMapKey] = target_key
@@ -139,8 +140,10 @@ class GenerativeUpsampleMessage:
             points_num_list.copy() if points_num_list is not None else None
         self.cached_fea_list: List[Union[ME.SparseTensor]] = cached_fea_list or []
         self.cached_pred_list: List[Union[ME.SparseTensor]] = []
-        self.cached_target_list: List[ME.SparseTensor] = []
+        self.cached_target_list: List[torch.Tensor] = []
         self.cached_metric_list: List[Dict[str, Union[int, float]]] = []
+        self.bce_weights_type: str = bce_weights_type
+        self.bce_weights = None
         self.post_fea_hook: Optional[Callable] = None
         self.indexed_em: Optional[ContinuousIndexedEntropyModel] = None
         self.em_loss_dict_list: List[Dict[str, torch.Tensor]] = []
@@ -171,7 +174,7 @@ class GenerativeUpsample(nn.Module):
         self.residual_block = residual_block
         self.mapping_target_kernel_size = mapping_target_kernel_size
         self.mapping_target_region_type = getattr(ME.RegionType, mapping_target_region_type)
-        self.loss_type = 'BCE' if loss_type == 'Focal' else loss_type
+        self.loss_type = loss_type
         self.square_dist_upper_bound = dist_upper_bound ** 2
         self.requires_metric_during_testing = requires_metric_during_testing
         self.use_residual = self.predict_block is not None and self.residual_block is not None
@@ -199,6 +202,14 @@ class GenerativeUpsample(nn.Module):
 
         if self.training:
             keep_target, loss_target = self.get_target(fea, pred, message.target_key, True)
+            if message.bce_weights_type == 'p2point':
+                message.bce_weights = sparse_tensor_p2point_weighted_bce_loss(
+                    pred, keep, keep_target, message.target_key
+                )
+            elif message.bce_weights_type == '':
+                pass
+            else:
+                raise NotImplementedError
             keep |= keep_target
             message.cached_target_list.append(loss_target)
             message.cached_pred_list.append(pred)
@@ -435,6 +446,87 @@ class GenerativeUpsample(nn.Module):
 
         else:
             return keep_target
+
+
+@torch.no_grad()
+def sparse_tensor_p2point_weighted_bce_loss(
+        batched_pred: ME.SparseTensor,
+        batched_pred_keep_mask: torch.Tensor,
+        batched_keep_target_mask: torch.Tensor,
+        batched_tgt_coord_key: ME.CoordinateMapKey
+):
+    mg = batched_pred.coordinate_manager
+    batched_tgt_coord = mg.get_coordinates(batched_tgt_coord_key)
+    batched_dists_diff = torch.zeros(batched_pred.shape[0], device=batched_pred.device, dtype=torch.float)
+    for pred_row_ids, tgt_coord_row_ids in zip(
+            batched_pred._batchwise_row_indices, mg.origin_map(batched_tgt_coord_key)[1]
+    ):
+        batched_dists_diff[pred_row_ids] = p2point_dists_diff(
+            batched_pred.C[pred_row_ids, 1:].to(torch.float),
+            batched_pred_keep_mask[pred_row_ids],
+            batched_keep_target_mask[pred_row_ids],
+            batched_tgt_coord[tgt_coord_row_ids, 1:].to(torch.float)
+        )
+    min_diff = batched_dists_diff.min()
+    batched_dists_diff -= min_diff
+    batched_dists_diff /= -min_diff
+    return batched_dists_diff
+
+
+@torch.no_grad()
+def p2point_dists_diff(
+        cand_coord: torch.Tensor,
+        pred_true_mask: torch.Tensor,
+        target_true_mask: torch.Tensor,
+        tgt_coord: torch.Tensor):
+    """
+    Args:
+        cand_coord: L x 3 float
+        pred_true_mask: L bool, sum(pred_true_mask) == M
+        target_true_mask: L bool, sum(target_true_mask) == N
+        tgt_coord: N x 3 float
+        Note that cand_coord[target_true_mask] != tgt_coord
+    Returns:
+        dists: L float
+    """
+    cand_to_tgt_dists = knn_points(cand_coord[None], tgt_coord[None], K=1).dists[0, :, 0]  # L
+    tgt_to_p_true_dists, tgt_to_p_true_idx = knn_points(
+        tgt_coord[None], cand_coord[pred_true_mask][None], K=2, return_sorted=True
+    )[:2]  # N x 2
+    tgt_to_p_true_dists, tgt_to_p_true_idx = tgt_to_p_true_dists[0], tgt_to_p_true_idx[0]  # remove batch dim
+    tgt_to_p_true_nearest_dists = tgt_to_p_true_dists[:, 0]  # N
+
+    # if cand_to_tgt_dists[pred_true_mask].mean() > tgt_to_p_true_nearest_dists.mean():
+    #     return cand_to_tgt_dists
+    # else:
+    final_dists_diff = torch.zeros_like(pred_true_mask, dtype=torch.float)  # L
+
+    # For points predicted as false.
+    search_num = 8
+    p_false_to_tgt_dists, p_false_to_tgt_idx = knn_points(
+        cand_coord[~pred_true_mask][None], tgt_coord[None], K=search_num, return_sorted=False
+    )[:2]  # (L - M) x search_num
+    p_false_to_tgt_dists = p_false_to_tgt_dists[0]  # remove batch dim
+    p_false_to_tgt_idx = p_false_to_tgt_idx[0]
+    p_false_to_p_true_dists_diff = tgt_to_p_true_nearest_dists[p_false_to_tgt_idx] - p_false_to_tgt_dists
+    final_dists_diff[~pred_true_mask] = p_false_to_p_true_dists_diff.clip_(0).sum(1)  # L - M
+
+    # For points predicted as true.
+    tgt_to_p_true_dists_diff = tgt_to_p_true_dists[:, 1] - tgt_to_p_true_nearest_dists  # N
+    tgt_to_p_true_idx = tgt_to_p_true_idx[:, 0]  # N
+    pred_true_mask_sum = final_dists_diff.shape[0] - p_false_to_p_true_dists_diff.shape[0]  # =M
+    final_dists_diff[pred_true_mask] = torch.zeros(
+        pred_true_mask_sum, device=final_dists_diff.device, dtype=torch.float
+    ).index_add_(0, tgt_to_p_true_idx, tgt_to_p_true_dists_diff)
+
+    target_false_mask = ~target_true_mask
+    final_dists_diff[target_false_mask] = final_dists_diff[target_false_mask].neg_()
+
+    if tgt_to_p_true_idx.shape[0] != pred_true_mask_sum:
+        cand_to_tgt_dists *= (tgt_to_p_true_idx.shape[0] / pred_true_mask_sum)
+
+    final_dists_diff += cand_to_tgt_dists
+    return final_dists_diff
 
 
 def generative_upsample_t():

@@ -9,7 +9,6 @@ import hashlib
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.ops import sigmoid_focal_loss
 import MinkowskiEngine as ME
 from MinkowskiEngine.MinkowskiSparseTensor import SparseTensorQuantizationMode
 try:
@@ -134,6 +133,7 @@ class PCC(nn.Module):
                     0,
                     cfg.decoder_channels,
                     None, None, None, False, False, 0.0,
+                    self.cfg.coord_recon_p2points_weighted_bce,
                     *self.basic_block_args,
                     loss_type=cfg.coord_recon_loss_type,
                     dist_upper_bound=cfg.dist_upper_bound
@@ -145,6 +145,7 @@ class PCC(nn.Module):
                         self.input_feature_channels,
                         cfg.decoder_channels,
                         None, None, None, False, False, 0.0,
+                        self.cfg.coord_recon_p2points_weighted_bce,
                         *self.basic_block_args,
                         loss_type=cfg.coord_recon_loss_type,
                         dist_upper_bound=cfg.dist_upper_bound
@@ -180,6 +181,7 @@ class PCC(nn.Module):
                         cfg.hybrid_hyper_decoder_fea,
                         cfg.decoder_aware_residuals,
                         cfg.upper_fea_grad_scaler,
+                        self.cfg.coord_recon_p2points_weighted_bce,
                         *self.basic_block_args,
                         loss_type=cfg.coord_recon_loss_type,
                         dist_upper_bound=cfg.dist_upper_bound
@@ -408,7 +410,6 @@ class PCC(nn.Module):
 
     def forward(self, pc_data: PCData):
         lossless_coder_num = self.get_lossless_coder_num(pc_data.resolution)
-        assert pc_data.xyz.min() >= 0
         if self.training:
             sparse_pc = self.get_sparse_pc(pc_data.xyz, pc_data.color)
             return self.train_forward(sparse_pc, pc_data.training_step, lossless_coder_num)
@@ -426,6 +427,7 @@ class PCC(nn.Module):
                       tensor_stride: int = 1,
                       only_return_coords: bool = False)\
             -> Union[ME.SparseTensor, Tuple[ME.CoordinateMapKey, ME.CoordinateManager]]:
+        assert xyz.min() >= 0
         ME.clear_global_coordinate_manager()
         global_coord_mg = ME.CoordinateManager(
             D=3,
@@ -504,7 +506,8 @@ class PCC(nn.Module):
                 concat_loss_dicts(loss_dict, decoder_message.em_loss_dict_list[0])
             loss_dict['coord_recon_loss'] = self.get_coord_recon_loss(
                 decoder_message.cached_pred_list,
-                decoder_message.cached_target_list
+                decoder_message.cached_target_list,
+                decoder_message
             )
 
         if self.cfg.input_feature_type == 'Color' and not self.cfg.lossless_color_enabled:
@@ -800,25 +803,47 @@ class PCC(nn.Module):
             lossless_coder_num = None
         return lossless_coder_num
 
-    def get_coord_recon_loss(self, cached_pred_list, cached_target_list):
+    def get_coord_recon_loss(
+            self, cached_pred_list: List[Union[ME.SparseTensor]],
+            cached_target_list: List[torch.Tensor], message: GenerativeUpsampleMessage
+    ):
         if self.cfg.coord_recon_loss_type == 'BCE':
-            loss_func = F.binary_cross_entropy_with_logits
-        elif self.cfg.coord_recon_loss_type == 'Focal':
-            loss_func = partial(
-                sigmoid_focal_loss,
-                alpha=0.25,
-                gamma=2.0,
-                reduction='mean'
-            )
+            preds_num = len(cached_pred_list)
+            recon_loss_list = []
+            mg = cached_pred_list[-1].coordinate_manager
+            device = cached_pred_list[-1].device
+            bce_weights = message.bce_weights
+            for idx in range(preds_num - 1, -1, -1):
+                pred = cached_pred_list[idx]
+                target = cached_target_list[idx]
+                if idx != preds_num - 1 and bce_weights is not None:
+                    kernel_map = mg.kernel_map(
+                        pred.coordinate_key, cached_pred_list[idx + 1].coordinate_key,
+                        2, kernel_size=2, is_transpose=True, is_pool=True
+                    )
+                    kernel_map = kernel_map[0][0, :]
+                    bce_weights = torch.zeros(
+                        pred.shape[0], device=device
+                    ).index_add_(0, kernel_map, bce_weights - 1)
+                    bce_weights.sigmoid_()
+                    bce_weights *= 2
+
+                recon_loss = F.binary_cross_entropy_with_logits(
+                    pred.F.squeeze(dim=1),
+                    target.type(pred.F.dtype),
+                    weight=bce_weights
+                )
+                recon_loss_list.append(recon_loss)
+
         elif self.cfg.coord_recon_loss_type == 'Dist':
-            loss_func = F.smooth_l1_loss
+            recon_loss_list = [F.smooth_l1_loss(
+                pred.F.squeeze(dim=1),
+                target.type(pred.F.dtype)
+            ) for pred, target in zip(cached_pred_list, cached_target_list)]
+
         else:
             raise NotImplementedError
 
-        recon_loss_list = [loss_func(
-                pred.F.squeeze(dim=1),
-                target.type(pred.F.dtype))
-             for pred, target in zip(cached_pred_list, cached_target_list)]
         recon_loss = sum(recon_loss_list) / len(recon_loss_list)
         factor = self.cfg.coord_recon_loss_factor
         if factor != 1:

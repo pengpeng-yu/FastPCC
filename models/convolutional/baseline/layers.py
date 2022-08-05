@@ -399,6 +399,7 @@ class Decoder(nn.Module):
                  hybrid_hyper_decoder_fea: bool,
                  decoder_aware_residuals: bool,
                  upper_fea_grad_scaler: float,
+                 coord_recon_p2points_weighted_bce: bool,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -422,6 +423,7 @@ class Decoder(nn.Module):
         self.hybrid_hyper_decoder_fea = hybrid_hyper_decoder_fea
         self.decoder_aware_residuals = decoder_aware_residuals
         self.upper_fea_grad_scaler = upper_fea_grad_scaler  # TODO: Simplify
+        self.coord_recon_p2points_weighted_bce = coord_recon_p2points_weighted_bce
         self.blocks = nn.Sequential(*[
             DecoderBlock(
                 in_ch, out_ch, intra_ch, res_in_ch, res_out_ch,
@@ -442,6 +444,7 @@ class Decoder(nn.Module):
             msg.em_decoder_aware_residuals = self.decoder_aware_residuals
             msg.em_upper_fea_grad_scaler = self.upper_fea_grad_scaler
             msg = self.blocks[:-1](msg)
+            msg.bce_weights_type = 'p2point' if self.coord_recon_p2points_weighted_bce else ''
             msg.post_fea_hook = self.inverse_transform_for_color
             msg: GenerativeUpsampleMessage = self.blocks[-1](msg)
             loss_dict = {}
@@ -451,12 +454,11 @@ class Decoder(nn.Module):
 
         else:
             msg.cached_fea_list = []
+            msg = self.blocks[:-1](msg)
+            msg.bce_weights_type = 'p2point' if self.coord_recon_p2points_weighted_bce else ''
             if self.color_pred_wo_res:
-                msg = self.blocks[:-1](msg)
                 msg.post_fea_hook = self.inverse_transform_for_color
-                msg = self.blocks[-1](msg)
-            else:
-                msg = self.blocks(msg)
+            msg = self.blocks[-1](msg)
         return msg
 
     def compress(self, msg: GenerativeUpsampleMessage):

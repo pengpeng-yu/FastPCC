@@ -60,7 +60,8 @@ class ModelConfig(SimpleConfig):
 
     # Loss items
     bpp_loss_factor: float = 0.2
-    coord_recon_loss_type: str = 'BCE'  # BCE or Dist or Focal
+    coord_recon_loss_type: str = 'BCE'  # BCE or Dist
+    coord_recon_p2points_weighted_bce: bool = False
     dist_upper_bound = 2.0
     adaptive_pruning: bool = True
     adaptive_pruning_num_scaler: float = 1.0
