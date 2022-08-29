@@ -167,16 +167,8 @@ std::vector<std::vector<int32_t>> IndexedRansCoderNoSymbol::decode_with_indexes(
             const auto &cum2sym = cum2sym_list[cdf_idx];
             int32_t value = cum2sym[RansDecGet(&rans, precision)];
 #else
-            int32_t value = -1;
             uint32_t cf = RansDecGet(&rans, precision);
-            for (size_t k = 1; k < cdf.size(); ++k)
-            {
-                if (cdf[k] > cf)
-                {
-                    value = k - 1;
-                    break;
-                }
-            }
+            int32_t value = std::upper_bound(cdf.begin() + 1, cdf.end(), cf) - cdf.begin() - 1;
 #endif
             RansDecAdvance(&rans, &ptr, cdf[value], cdf[value + 1] - cdf[value], precision);
 
