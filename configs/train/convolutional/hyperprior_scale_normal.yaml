@@ -1,4 +1,4 @@
-include "configs/train/convolutional/hyperprior_factorized.yaml"
+# include "configs/train/convolutional/hyperprior_factorized.yaml"
 
 model:
   hyperprior: ScaleNoisyNormal

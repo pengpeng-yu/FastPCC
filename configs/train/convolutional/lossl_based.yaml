@@ -1,4 +1,4 @@
-include "configs/train/convolutional/baseline.yaml"
+# include "configs/train/convolutional/baseline.yaml"
 
 model:
   compressed_channels: 32

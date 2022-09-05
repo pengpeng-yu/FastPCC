@@ -180,8 +180,8 @@ class SimpleConfig:
     def merge_with_yaml(self, yaml_path):
         """
         # A yaml string:
-        include "path/to/configs/base_config_1.yaml"
-        include "path/to/configs/base_config_2"
+        # include "path/to/configs/base_config_1.yaml"
+        # include "path/to/configs/base_config_2"
         a: 2
         b:
             a: "string",
@@ -199,11 +199,11 @@ class SimpleConfig:
                 raise e
         f_left = ''
         for line in f:
-            if line.startswith('include'):
-                sub_yaml_path = self.format_str(line.rstrip().split(' ', 1)[1])
+            if line.startswith('# include') or line.startswith('#include'):
+                sub_yaml_path = self.format_str(line.rstrip().split(' ', 2)[-1])
                 self.merge_with_yaml(sub_yaml_path)
-            elif line.strip() == '' or line.lstrip()[0] == '#':
-                pass
+            # elif line.strip() == '' or line.lstrip()[0] == '#':
+            #     pass
             else:
                 f_left = line + f.read()
                 break
