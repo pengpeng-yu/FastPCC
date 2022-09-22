@@ -30,6 +30,31 @@ def get_act_module(act: Union[str, nn.Module, None]) -> Optional[nn.Module]:
     return act_module
 
 
+class MEMLPBlock(nn.Module):
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 bn: bool = False,
+                 act: Union[str, nn.Module, None] = 'relu'):
+        super(MEMLPBlock, self).__init__()
+        self.mlp = ME.MinkowskiLinear(in_channels, out_channels, bias=not bn)
+        self.bn = ME.MinkowskiBatchNorm(out_channels) if bn else None
+        self.act = get_act_module(act)
+
+    def forward(self, x):
+        x = self.mlp(x)
+        if self.bn is not None:
+            x = self.bn(x)
+        if self.act is not None:
+            x = self.act(x)
+        return x
+
+    def __repr__(self):
+        return f'MEMLPBlock(in_ch={self.mlp.linear.in_features}, ' \
+               f'out_ch={self.mlp.linear.out_features}, ' \
+               f'bn={self.bn is not None}, act={self.act})'
+
+
 class BaseConvBlock(nn.Module):
     def __init__(self,
                  conv_class: Callable,
@@ -131,15 +156,15 @@ class GenerativeUpsampleMessage:
                  fea: ME.SparseTensor,
                  target_key: Optional[ME.CoordinateMapKey] = None,
                  points_num_list: Optional[List[List[int]]] = None,
-                 cached_fea_list: Optional[List[Union[ME.SparseTensor]]] = None,
+                 cached_fea_list: Optional[List[ME.SparseTensor]] = None,
                  bce_weights_type: str = '',
                  em_bytes_list: Optional[List[bytes]] = None):
         self.fea: ME.SparseTensor = fea
         self.target_key: Optional[ME.CoordinateMapKey] = target_key
         self.points_num_list: Optional[List[List[int]]] = \
             points_num_list.copy() if points_num_list is not None else None
-        self.cached_fea_list: List[Union[ME.SparseTensor]] = cached_fea_list or []
-        self.cached_pred_list: List[Union[ME.SparseTensor]] = []
+        self.cached_fea_list: List[ME.SparseTensor] = cached_fea_list or []
+        self.cached_pred_list: List[ME.SparseTensor] = []
         self.cached_target_list: List[torch.Tensor] = []
         self.cached_metric_list: List[Dict[str, Union[int, float]]] = []
         self.bce_weights_type: str = bce_weights_type
@@ -354,9 +379,9 @@ class GenerativeUpsample(nn.Module):
                 message.fea = fea_recon
 
         elif self.predict_block is not None:  # if not self.use_residual
-            fea_pred = self.predict_block(message.fea)
+            message.fea = self.predict_block(message.fea)
             if message.post_fea_hook is not None:
-                message.fea = message.post_fea_hook(fea_pred)
+                message.fea = message.post_fea_hook(message.fea)
 
         return message
 
@@ -452,7 +477,7 @@ class GenerativeUpsample(nn.Module):
 def sparse_tensor_p2point_weighted_bce_loss(
         batched_pred: ME.SparseTensor,
         batched_pred_keep_mask: torch.Tensor,
-        batched_keep_target_mask: torch.Tensor,
+        batched_keep_tgt_mask: torch.Tensor,
         batched_tgt_coord_key: ME.CoordinateMapKey
 ):
     mg = batched_pred.coordinate_manager
@@ -464,7 +489,7 @@ def sparse_tensor_p2point_weighted_bce_loss(
         batched_dists_diff[pred_row_ids] = p2point_dists_diff(
             batched_pred.C[pred_row_ids, 1:].to(torch.float),
             batched_pred_keep_mask[pred_row_ids],
-            batched_keep_target_mask[pred_row_ids],
+            batched_keep_tgt_mask[pred_row_ids],
             batched_tgt_coord[tgt_coord_row_ids, 1:].to(torch.float)
         )
     min_diff = batched_dists_diff.min()
@@ -477,15 +502,15 @@ def sparse_tensor_p2point_weighted_bce_loss(
 def p2point_dists_diff(
         cand_coord: torch.Tensor,
         pred_true_mask: torch.Tensor,
-        target_true_mask: torch.Tensor,
+        tgt_true_mask: torch.Tensor,
         tgt_coord: torch.Tensor):
     """
     Args:
         cand_coord: L x 3 float
         pred_true_mask: L bool, sum(pred_true_mask) == M
-        target_true_mask: L bool, sum(target_true_mask) == N
+        tgt_true_mask: L bool, sum(tgt_true_mask) == N
         tgt_coord: N x 3 float
-        Note that cand_coord[target_true_mask] != tgt_coord
+        Note that cand_coord[tgt_true_mask] != tgt_coord
     Returns:
         dists: L float
     """
@@ -519,8 +544,8 @@ def p2point_dists_diff(
         pred_true_mask_sum, device=final_dists_diff.device, dtype=torch.float
     ).index_add_(0, tgt_to_p_true_idx, tgt_to_p_true_dists_diff)
 
-    target_false_mask = ~target_true_mask
-    final_dists_diff[target_false_mask] = final_dists_diff[target_false_mask].neg_()
+    tgt_false_mask = ~tgt_true_mask
+    final_dists_diff[tgt_false_mask] = final_dists_diff[tgt_false_mask].neg_()
 
     if tgt_to_p_true_idx.shape[0] != pred_true_mask_sum:
         cand_to_tgt_dists *= (tgt_to_p_true_idx.shape[0] / pred_true_mask_sum)

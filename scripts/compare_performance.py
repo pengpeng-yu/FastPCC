@@ -12,7 +12,7 @@ from scripts.shared_config import metric_dict_filename
 from lib.metrics.bjontegaard import bdrate, bdsnr
 
 
-figure_title_re_pattern = re.compile('[a-z,_]+_')
+figure_title_re_pattern = re.compile('[a-z,_]+_')  # basketball_player_vox11_00000200 -> basketball_player
 
 
 def sort_key_func(bpp_psnr): return bpp_psnr[0]

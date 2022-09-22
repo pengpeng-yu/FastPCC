@@ -50,6 +50,6 @@ test:
   log_frequency: 1
   save_results: True
   dataset_path:
-    'lib.datasets.PlyVoxel.Owlii_8iVFBv2'
+    'lib.datasets.PlyVoxel.Owlii_8iVFBv2_MVUB'
   dataset:
     kd_tree_partition_max_points_num: 0

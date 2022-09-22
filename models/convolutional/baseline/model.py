@@ -804,7 +804,7 @@ class PCC(nn.Module):
         return lossless_coder_num
 
     def get_coord_recon_loss(
-            self, cached_pred_list: List[Union[ME.SparseTensor]],
+            self, cached_pred_list: List[ME.SparseTensor],
             cached_target_list: List[torch.Tensor], message: GenerativeUpsampleMessage
     ):
         if self.cfg.coord_recon_loss_type == 'BCE':

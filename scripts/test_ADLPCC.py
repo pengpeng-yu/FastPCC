@@ -18,8 +18,9 @@ conda_env_name = 'PCC_GEO_v2'
 file_lists = (
     'datasets/8iVFBv2/list.txt',
     'datasets/Owlii/list.txt',
+    'datasets/MVUB/list.txt',
 )
-resolutions = (1024, 2048)
+resolutions = (1024, 2048, 512)
 
 output_dir = 'runs/tests/ADLPCC'
 

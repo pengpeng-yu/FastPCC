@@ -39,7 +39,7 @@ def rename_dict_key(d: Dict, mappings: Dict[str, Tuple[str, Union[None, Callable
 
 key_mappings = {
     "encoder_elapsed_time": ('encode time', None),
-    "encoder_max_cuda_memory_allocated": ('encode memory', lambda v: v / 1024),  # B -> KN
+    "encoder_max_cuda_memory_allocated": ('encode memory', lambda v: v / 1024),  # B -> KB
     "decoder_elapsed_time": ('decode time', None),
     "decoder_max_cuda_memory_allocated": ('decode memory', lambda v: v / 1024)
 }
