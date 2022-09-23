@@ -142,9 +142,9 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         """
         if self.bottleneck_scaler != 1:
             x = x * self.bottleneck_scaler
-        indexes = self.bound_indexes(indexes)
-        prior = self.make_prior(indexes)
         if self.training:
+            indexes = self.bound_indexes(indexes)
+            prior = self.make_prior(indexes)
             if is_first_forward:
                 self.update_prior()
             processed_x = self.process(x)

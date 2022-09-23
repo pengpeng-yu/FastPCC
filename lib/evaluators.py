@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import torch
 
-from lib.data_utils import PCData, write_ply_file
+from lib.data_utils import PCData, write_ply_file, if_ply_has_vertex_normal
 from lib.metrics.misc import batch_image_psnr
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 
@@ -96,9 +96,15 @@ class PCGCEvaluator(Evaluator):
                 write_ply_file(pred, reconstructed_path, rgb=preds_color[idx] if have_color else None)
 
                 if self.mpeg_pcc_error_command != '':
-                    if not file_path.endswith('.ply') or pc_data.ori_resolution is None:
+                    if_target_has_normal = if_ply_has_vertex_normal(file_path)
+                    if not file_path.endswith('.ply') or \
+                        pc_data.ori_resolution is None or \
+                            not if_target_has_normal:
                         file_path = out_file_path + '.ply'
-                        write_ply_file(target, file_path, rgb=targets_color[idx] if have_color else None)
+                        write_ply_file(
+                            target, file_path, rgb=targets_color[idx] if have_color else None,
+                            estimate_normals=not if_target_has_normal
+                        )
                     mpeg_pc_error_dict = mpeg_pc_error(
                         os.path.abspath(file_path),
                         os.path.abspath(reconstructed_path),
@@ -114,7 +120,8 @@ class PCGCEvaluator(Evaluator):
                     file_info_dict["mse1+mse2 (p2point)"] = \
                         mpeg_pc_error_dict["mse1      (p2point)"] + \
                         mpeg_pc_error_dict["mse2      (p2point)"]
-            assert file_path not in self.file_path_to_info
+            if file_path in self.file_path_to_info:
+                print(f'Warning: Duplicated test sample {file_path}')
             self.file_path_to_info[file_path] = file_info_dict
 
         return True
