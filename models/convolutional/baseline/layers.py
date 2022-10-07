@@ -8,7 +8,7 @@ import MinkowskiEngine as ME
 
 from lib.torch_utils import concat_loss_dicts
 from lib.sparse_conv_layers import \
-    ConvBlock, ConvTransBlock, GenConvTransBlock, \
+    ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, \
     GenerativeUpsample, GenerativeUpsampleMessage
 from lib.torch_utils import minkowski_tensor_wrapped_fn
 from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel
@@ -433,6 +433,30 @@ class Decoder(nn.Module):
             zip(in_channels, out_channels, intra_channels, residual_in_channels, residual_out_channels)]
         )
 
+    # def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+    #                           missing_keys, unexpected_keys, error_msgs):
+    #     blocks_prefix = prefix + 'blocks.'
+    #     blocks_prefix_len = len(blocks_prefix)
+    #     ckpt_blocks_len = 0
+    #     for k, v in state_dict.items():
+    #         if k.startswith(blocks_prefix):
+    #             cur_idx = int(k[blocks_prefix_len])
+    #             if cur_idx > ckpt_blocks_len:
+    #                 ckpt_blocks_len = cur_idx
+    #     blocks_len = len(self.blocks)
+    #     diff = ckpt_blocks_len - blocks_len + 1
+    #     if diff > 0:
+    #         for k, v in state_dict.items():
+    #             if k.startswith(blocks_prefix):
+    #                 cur_idx = int(k[blocks_prefix_len])
+    #                 if cur_idx >= diff:
+    #                     state_dict[k.replace(f'{cur_idx}', f'{cur_idx - diff}', 1)] = v
+    #                 else:
+    #                     unexpected_keys.append(k)
+    #     super(Decoder, self)._load_from_state_dict(
+    #         state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    #     )
+
     @minkowski_tensor_wrapped_fn({1: 0})
     def inverse_transform_for_color(self, x):
         return (x + 0.5).clip_(0, 1)
@@ -579,45 +603,57 @@ class EncoderRecurrent(nn.Module):
         super(EncoderRecurrent, self).__init__()
         hidden_channels = in_channels
         gate_channels = 1 * hidden_channels
-        self.conv_h = ConvBlock(
-            out_channels,
-            gate_channels,
-            2, 2,
-            region_type='HYPER_CUBE',
-            bn=use_batch_norm, act=act
+        self.block_gate = MEMLPBlock(
+            out_channels, gate_channels, bn=use_batch_norm, act=None
         )
-        self.conv_c = make_downsample_blocks(
+        self.block_out = MEMLPBlock(
+            hidden_channels, out_channels, bn=use_batch_norm, act=None
+        )
+        with torch.no_grad():
+            torch.zero_(self.block_gate.mlp.linear.bias)
+            self.block_gate.mlp.linear.weight[...] = 1
+            torch.zero_(self.block_out.mlp.linear.bias)
+            torch.zero_(self.block_out.mlp.linear.weight)
+            self.block_out.mlp.linear.weight[:, :out_channels] = torch.eye(out_channels)
+        self.block_down = make_downsample_blocks(
             hidden_channels, hidden_channels, (hidden_channels,),
             basic_block_type, region_type, basic_block_num,
-            use_batch_norm, act,
-            use_batch_norm, None
+            use_batch_norm, act, use_batch_norm, act
         )[0]
-        self.conv_out = ConvBlock(
-            hidden_channels,
-            out_channels,
-            3, 1,
-            region_type=region_type,
-            bn=use_batch_norm, act=None
-        )
+        self.out_channels = out_channels
         self.hidden_channels = hidden_channels
 
     def forward(self, x: ME.SparseTensor, coder_num: int):
         strided_fea_list = []
         cm = x.coordinate_manager
         cx = x
-        hx = self.conv_out(cx)
+        hx = ME.SparseTensor(
+            features=torch.full(
+                (cx.shape[0], self.out_channels), fill_value=10,
+                dtype=cx.dtype, device=cx.device),
+            coordinate_map_key=cx.coordinate_map_key,
+            coordinate_manager=cm
+        )
+        gate = self.block_gate(hx)
+        forget_gate = torch.sigmoid(gate.F)
+        cx = ME.SparseTensor(
+            features=(forget_gate * cx.F),
+            coordinate_map_key=cx.coordinate_map_key,
+            coordinate_manager=cm
+        )
+        hx = self.block_out(cx)
         strided_fea_list.append(hx)
 
         for idx in range(coder_num):
-            cx = self.conv_c(cx)
-            gates = self.conv_h(hx)
-            forget_gate = torch.sigmoid(gates.F)
+            gate = self.block_gate(hx)
+            forget_gate = torch.sigmoid(gate.F)
             cx = ME.SparseTensor(
                 features=(forget_gate * cx.F),
                 coordinate_map_key=cx.coordinate_map_key,
                 coordinate_manager=cm
             )
-            hx = self.conv_out(cx)
+            cx = self.block_down(cx)
+            hx = self.block_out(cx)
             strided_fea_list.append(hx)
 
         return strided_fea_list

@@ -609,14 +609,16 @@ class PCC(nn.Module):
             )
             if self.cfg.recurrent_part_enabled:
                 assert bottom_fea_recon.C.shape[0] == 1
-                sparse_tensor_coords = None
+                sparse_tensor_coords = sparse_tensor_coords_stride = None
             else:
                 sparse_tensor_coords = bottom_fea_recon.C
+                sparse_tensor_coords_stride = bottom_fea_recon.tensor_stride[0]
         else:
             em_bytes_list, coding_batch_shape, fea_recon = self.em.compress(feature)
             assert coding_batch_shape == torch.Size([1])
             em_bytes = em_bytes_list[0]
             sparse_tensor_coords = feature.C
+            sparse_tensor_coords_stride = feature.tensor_stride[0]
 
         if not self.cfg.lossless_coord_enabled and self.cfg.input_feature_type == 'Color' \
                 and self.cfg.coord_lossy_residuals:
@@ -635,7 +637,7 @@ class PCC(nn.Module):
             h = hashlib.md5()
             h.update(str(time.time()).encode())
             tmp_file_path = 'tmp-' + h.hexdigest()
-            write_ply_file(sparse_tensor_coords[:, 1:], f'{tmp_file_path}.ply')
+            write_ply_file(sparse_tensor_coords[:, 1:] // sparse_tensor_coords_stride, f'{tmp_file_path}.ply')
             gpcc_octree_lossless_geom_encode(
                 f'{tmp_file_path}.ply', f'{tmp_file_path}.bin',
                 command=self.cfg.mpeg_gpcc_command

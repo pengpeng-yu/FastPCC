@@ -178,6 +178,9 @@ class GeoLosslessEntropyModel(nn.Module):
 
             bottom_fea_tilde, fea_loss_dict = self.bottom_fea_entropy_model(bottom_fea)
             strided_fea_tilde_list.append(bottom_fea_tilde)
+            fea_loss_dict['bits_loss'] = fea_loss_dict['bits_loss'] * (
+                    bottom_fea_tilde.shape[0] / strided_fea_list[0].shape[0])
+
             concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: 'fea_bottom_' + k)
             lower_fea_tilde = bottom_fea_tilde
 

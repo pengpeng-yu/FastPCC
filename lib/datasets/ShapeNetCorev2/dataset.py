@@ -28,6 +28,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             self.use_binvox = False
         else:
             raise RuntimeError
+        self.is_training = is_training
         data_format = [cfg.data_format] if isinstance(cfg.data_format, str) else cfg.data_format
 
         # define files list path and cache path
@@ -182,7 +183,8 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             xyz=torch.from_numpy(xyz),
             file_path=file_path,
             ori_resolution=None,
-            resolution=self.cfg.resolution
+            resolution=self.cfg.resolution if not self.is_training
+            else int(np.ceil((xyz.max(0) - xyz.min(0)).max()).item()) + 1
         )
 
     def collate_fn(self, batch):
