@@ -192,11 +192,11 @@ class PCC(nn.Module):
                 enc_lossl = None
                 hyper_dec_coord = None
                 hyper_dec_fea = None
+                assert len(cfg.skip_encoding_fea) == 0
             else:
                 enc_lossl = self.init_enc_rec()
                 hyper_dec_coord = self.init_hyper_dec_gen_up()
                 hyper_dec_fea = self.init_hyper_dec_up()
-                assert len(cfg.skip_encoding_fea) == 0
 
         else:  # cfg.lossless_coord_enabled
             self.encoder = self.decoder = None

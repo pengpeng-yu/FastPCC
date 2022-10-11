@@ -178,8 +178,6 @@ class GeoLosslessEntropyModel(nn.Module):
 
             bottom_fea_tilde, fea_loss_dict = self.bottom_fea_entropy_model(bottom_fea)
             strided_fea_tilde_list.append(bottom_fea_tilde)
-            fea_loss_dict['bits_loss'] = fea_loss_dict['bits_loss'] * (
-                    bottom_fea_tilde.shape[0] / strided_fea_list[0].shape[0])
 
             concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: 'fea_bottom_' + k)
             lower_fea_tilde = bottom_fea_tilde
@@ -202,11 +200,14 @@ class GeoLosslessEntropyModel(nn.Module):
                 if idx in self.skip_encoding_fea:
                     fea_loss_dict = {}
                     skipped_fea_num += 1
-                    if idx == 0:
-                        assert sub_hyper_decoder_fea is None
+                    if idx == 0 and sub_hyper_decoder_fea is None:
                         lower_fea_tilde = None
                     else:
-                        lower_fea_tilde = sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key)
+                        lower_fea_tilde = ME.SparseTensor(
+                            features=sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key).F[:, :fea.F.shape[1]],
+                            coordinate_map_key=coord_target_key,
+                            coordinate_manager=cm
+                        )
                 elif self.hybrid_hyper_decoder_fea is True:  # no_skip
                     fea_info_pred = sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key).F
                     assert fea.F.shape[1] * (
@@ -299,11 +300,14 @@ class GeoLosslessEntropyModel(nn.Module):
 
             if idx in self.skip_encoding_fea:
                 fea_bytes = None
-                if idx == 0:
-                    assert sub_hyper_decoder_fea is None
+                if idx == 0 and sub_hyper_decoder_fea is None:
                     lower_fea_recon = None
                 else:
-                    lower_fea_recon = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
+                    lower_fea_recon = ME.SparseTensor(
+                        features=sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key).F[:, :fea.F.shape[1]],
+                        coordinate_map_key=coord_recon_key,
+                        coordinate_manager=cm
+                    )
             else:  # no_skip
                 # Permute features from encoders to fit in with order of features from decoders.
                 permutation_kernel_map = cm.kernel_map(
@@ -401,8 +405,7 @@ class GeoLosslessEntropyModel(nn.Module):
             )[0]
 
             if idx in self.skip_encoding_fea:
-                if idx == 0:
-                    assert sub_hyper_decoder_fea is None
+                if idx == 0 and sub_hyper_decoder_fea is None:
                     lower_fea_recon = ME.SparseTensor(
                         features=torch.ones(
                             (coord_recon.shape[0], 1),
@@ -412,7 +415,15 @@ class GeoLosslessEntropyModel(nn.Module):
                         coordinate_manager=cm
                     )
                 else:
-                    lower_fea_recon = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
+                    fea_info_pred = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key).F
+                    fea_recon_channels = fea_info_pred.shape[1] // (
+                            len(self.indexed_entropy_model_fea.index_ranges) + 1
+                    )
+                    lower_fea_recon = ME.SparseTensor(
+                        features=fea_info_pred[:, :fea_recon_channels],
+                        coordinate_map_key=coord_recon_key,
+                        coordinate_manager=cm
+                    )
             elif self.hybrid_hyper_decoder_fea is True:  # no_skip
                 fea_info_pred = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key).F
                 fea_recon_channels = fea_info_pred.shape[1] // (
