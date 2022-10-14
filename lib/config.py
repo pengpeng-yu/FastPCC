@@ -110,7 +110,7 @@ class TestConfig(SimpleConfig):
 
 @dataclass
 class Config(SimpleConfig):
-    model_path: str = 'models.convolutional.baseline'  # model_path.Config and model_path.Model are required
+    model_path: str = 'models.convolutional.lossy_coord'  # model_path.Config and model_path.Model are required
     model: SimpleConfig = None
     train: TrainConfig = TrainConfig()
     test: TestConfig = TestConfig()

@@ -32,14 +32,14 @@ from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
 from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
     GeoLosslessNoisyDeepFactorizedEntropyModel
 
-from models.convolutional.baseline.layers import \
+from .layers import \
     Encoder, Decoder, \
     HyperEncoder, HyperDecoder, \
     HyperDecoderGenUpsample, HyperDecoderUpsample, \
     EncoderRecurrent, EncoderPartiallyRecurrent, \
     HyperDecoderGenUpsamplePartiallyRecurrent, \
     HyperDecoderUpsamplePartiallyRecurrent
-from models.convolutional.baseline.model_config import ModelConfig
+from .model_config import ModelConfig
 
 
 class PCC(nn.Module):
@@ -903,41 +903,3 @@ class PCC(nn.Module):
         if mode is True:
             self.evaluator.reset()
         return super(PCC, self).train(mode=mode)
-
-
-def model_debug():
-    cfg = ModelConfig()
-    cfg.prior_indexes_range = (8, 8, 8, 8)
-    cfg.input_feature_type = 'Occupation'
-    cfg.lossless_coord_enabled = False
-    cfg.recurrent_part_enabled = False
-    cfg.lossless_color_enabled = False
-    model = PCC(cfg).cuda()
-    xyz_c = [ME.utils.sparse_quantize(torch.randint(0, 64, (1000, 3), dtype=torch.float32)) for _ in range(2)]
-    xyz = ME.utils.batched_coordinates(xyz_c).cuda()
-    color = torch.randint(
-        0, 256, (xyz.shape[0], 3), device=xyz.device, dtype=torch.float32
-    ) if cfg.input_feature_type == 'Color' else None
-    pc_data = PCData(
-        xyz=xyz,
-        color=color,
-        resolution=[64] * 2
-    )
-    pc_data.training_step = 0
-    out = model(pc_data)
-    out['loss'].backward()
-    model.eval()
-    with torch.no_grad():
-        sample_0 = xyz[:, 0] == 0
-        test_out = model(
-            PCData(
-                xyz=xyz[sample_0, :],
-                color=color[sample_0] if color else None,
-                file_path=[''], ori_resolution=[0], resolution=[64],
-                batch_size=1
-            ))
-    print('Done')
-
-
-if __name__ == '__main__':
-    model_debug()

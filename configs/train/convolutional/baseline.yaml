@@ -1,6 +1,5 @@
-model_path: models.convolutional.baseline
+model_path: models.convolutional.lossy_coord
 model:
-  input_feature_type: 'Occupation'
   basic_block_type: 'InceptionResBlock'
   basic_block_num: 3
   use_batch_norm: False
