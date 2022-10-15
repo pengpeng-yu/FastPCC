@@ -468,7 +468,7 @@ class HyperCoder(nn.Module):
                         in_channels,
                         intra_channels[0],
                         2, 2,
-                        region_type=region_type,
+                        region_type='HYPER_CUBE',
                         bn=use_batch_norm, act=act
                     )
                 )
@@ -478,7 +478,7 @@ class HyperCoder(nn.Module):
                         in_channels,
                         intra_channels[0],
                         2, 2,
-                        region_type=region_type,
+                        region_type='HYPER_CUBE',
                         bn=use_batch_norm, act=act
                     )
                 )

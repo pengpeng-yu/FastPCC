@@ -13,6 +13,7 @@ from lib.sparse_conv_layers import \
 
 BLOCKS_LIST = [ResBlock, InceptionResBlock]
 BLOCKS_DICT = {_.__name__: _ for _ in BLOCKS_LIST}
+residuals_num_per_scale = 4
 
 
 def make_downsample_blocks(
@@ -269,26 +270,26 @@ class HyperDecoderUpsample(nn.Module):
         basic_block = partial(BLOCKS_DICT[basic_block_type],
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
-        self.block_ana = NNSequentialWithConvBlockArgs(
-            ConvBlock(in_channels, intra_channels, 3, 1,
-                      region_type=region_type, bn=use_batch_norm, act=act),
-            *(basic_block(intra_channels) for _ in range(basic_block_num)),
-            ConvBlock(intra_channels, out_channels, 3, 1,
-                      region_type=region_type, bn=use_batch_norm, act=None)
-        )
-        self.block_up = NNSequentialWithConvTransBlockArgs(
-            ConvTransBlock(in_channels, intra_channels, 2, 2,
-                           region_type=region_type, bn=use_batch_norm, act=act),
-            *(basic_block(intra_channels) for _ in range(basic_block_num)),
-            ConvBlock(intra_channels, out_channels, 3, 1,
-                      region_type=region_type, bn=use_batch_norm, act=None)
-        )
+        self.blocks = nn.ModuleList([
+            NNSequentialWithConvBlockArgs(
+                ConvBlock(in_channels, intra_channels, 3, 1,
+                          region_type=region_type, bn=use_batch_norm, act=act),
+                *(basic_block(intra_channels) for _ in range(basic_block_num)),
+                ConvBlock(intra_channels, out_channels, 3, 1,
+                          region_type=region_type, bn=use_batch_norm, act=None)
+            ) for _ in range(residuals_num_per_scale - 1)
+        ])
+        self.blocks.append(
+            NNSequentialWithConvTransBlockArgs(
+                ConvTransBlock(in_channels, intra_channels, 2, 2,
+                               region_type=region_type, bn=use_batch_norm, act=act),
+                *(basic_block(intra_channels) for _ in range(basic_block_num)),
+                ConvBlock(intra_channels, out_channels, 3, 1,
+                          region_type=region_type, bn=use_batch_norm, act=None)
+            ))
 
     def __getitem__(self, idx):
-        if idx % 2 == 0:
-            return self.block_ana
-        else:
-            return self.block_up
+        return self.blocks[idx % residuals_num_per_scale]
 
 
 class HyperDecoderGenUpsample(nn.Module):
@@ -313,10 +314,10 @@ class HyperDecoderGenUpsample(nn.Module):
         )
 
     def __getitem__(self, idx):
-        if idx % 2 == 0:
-            return None
-        else:
+        if idx % residuals_num_per_scale == residuals_num_per_scale - 1:
             return self.block
+        else:
+            return None
 
 
 class EncoderRecurrent(nn.Module):
@@ -334,30 +335,43 @@ class EncoderRecurrent(nn.Module):
         basic_block = partial(BLOCKS_DICT[basic_block_type],
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
-        self.block_gate = MEMLPBlock(
-            out_channels, gate_channels, bn=use_batch_norm, act=None
-        )
-        self.block_out = MEMLPBlock(
+        self.blocks_gate = nn.ModuleList([
+            MEMLPBlock(
+                out_channels, gate_channels, bn=use_batch_norm, act=None
+            ) for _ in range(residuals_num_per_scale)
+        ])
+        self.first_block_out, *self.blocks_out = [MEMLPBlock(
             hidden_channels, out_channels, bn=use_batch_norm, act=None
-        )
+        ) for _ in range(residuals_num_per_scale + 1)]
+        self.blocks_out = nn.ModuleList(self.blocks_out)
         with torch.no_grad():
-            torch.zero_(self.block_gate.mlp.linear.bias)
-            self.block_gate.mlp.linear.weight[...] = 1
-            torch.zero_(self.block_out.mlp.linear.bias)
-            torch.zero_(self.block_out.mlp.linear.weight)
-            self.block_out.mlp.linear.weight[:, :out_channels] = torch.eye(out_channels)
-        self.block_ana = nn.Sequential(
-            ConvBlock(hidden_channels, hidden_channels, 3, 1,
-                      region_type=region_type, bn=use_batch_norm, act=act),
-            *(basic_block(hidden_channels) for _ in range(basic_block_num)),
-            ConvBlock(hidden_channels, hidden_channels, 3, 1,
-                      region_type=region_type, bn=use_batch_norm, act=act),
-        )
-        self.block_down = make_downsample_blocks(
-            hidden_channels, hidden_channels, (hidden_channels,),
-            basic_block_type, region_type, basic_block_num,
-            use_batch_norm, act, use_batch_norm, act
-        )[0]
+            for block_gate, block_out in zip(self.blocks_gate, self.blocks_out):
+                torch.zero_(block_gate.mlp.linear.bias)
+                block_gate.mlp.linear.weight[...] = 1
+                torch.zero_(block_out.mlp.linear.bias)
+                torch.zero_(block_out.mlp.linear.weight)
+                block_out.mlp.linear.weight[:, :out_channels] = torch.eye(out_channels)
+
+        self.blocks = nn.ModuleList([
+            nn.Sequential(
+                ConvBlock(hidden_channels, hidden_channels, 3, 1,
+                          region_type=region_type, bn=use_batch_norm, act=act),
+                *(basic_block(hidden_channels) for _ in range(basic_block_num)),
+                ConvBlock(hidden_channels, hidden_channels, 3, 1,
+                          region_type=region_type, bn=use_batch_norm, act=act),
+            ) for _ in range(residuals_num_per_scale - 1)
+        ])
+        self.blocks.append(nn.Sequential(
+            ConvBlock(
+                hidden_channels, hidden_channels, 2, 2,
+                region_type='HYPER_CUBE', bn=use_batch_norm, act=act
+            ),
+            *[basic_block(hidden_channels) for _ in range(basic_block_num)],
+            ConvBlock(
+                hidden_channels, hidden_channels, 3, 1,
+                region_type=region_type, bn=use_batch_norm, act=act
+            )
+        ))
         self.out_channels = out_channels
         self.hidden_channels = hidden_channels
 
@@ -366,31 +380,21 @@ class EncoderRecurrent(nn.Module):
         strided_fea_list = []
         cm = x.coordinate_manager
         cx = x
-        hx = self.block_out(cx)
+        hx = self.first_block_out(cx)
         strided_fea_list.append(hx)
 
         while True:
-            gate = self.block_gate(hx)
-            forget_gate = torch.sigmoid(gate.F)
-            cx = ME.SparseTensor(
-                features=(forget_gate * cx.F),
-                coordinate_map_key=cx.coordinate_map_key,
-                coordinate_manager=cm
-            )
-            cx = self.block_ana(cx)
-            hx = self.block_out(cx)
-            strided_fea_list.append(hx)
-
-            gate = self.block_gate(hx)
-            forget_gate = torch.sigmoid(gate.F)
-            cx = ME.SparseTensor(
-                features=(forget_gate * cx.F),
-                coordinate_map_key=cx.coordinate_map_key,
-                coordinate_manager=cm
-            )
-            cx = self.block_down(cx)
-            hx = self.block_out(cx)
-            strided_fea_list.append(hx)
+            for block, block_gate, block_out in zip(self.blocks, self.blocks_gate, self.blocks_out):
+                gate = block_gate(hx)
+                forget_gate = torch.sigmoid(gate.F)
+                cx = ME.SparseTensor(
+                    features=(forget_gate * cx.F),
+                    coordinate_map_key=cx.coordinate_map_key,
+                    coordinate_manager=cm
+                )
+                cx = block(cx)
+                hx = block_out(cx)
+                strided_fea_list.append(hx)
             if hx.C.shape[0] == batch_size:
                 break
 

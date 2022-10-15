@@ -29,6 +29,7 @@ class ModelConfig(SimpleConfig):
     decoder_channels: Tuple[int, ...] = (64, 32, 16)
     mpeg_gpcc_command: str = 'tmc3'
 
+    # Recurrent part (lossless) of network
     recurrent_part_channels: int = 64
     lossless_fea_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1)
 

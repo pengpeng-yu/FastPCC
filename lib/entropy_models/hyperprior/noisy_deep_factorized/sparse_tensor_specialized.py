@@ -361,16 +361,16 @@ class GeoLosslessEntropyModel(nn.Module):
         concat_bytes = BytesListUtils.concat_bytes_list(
             [*coord_bytes_list, bottom_fea_bytes, *fea_bytes_list]
         ) + len(coord_bytes_list).to_bytes(1, 'little', signed=False) + \
-            len(fea_bytes_list).to_bytes(2, 'little', signed=False)
+            len(fea_bytes_list).to_bytes(1, 'little', signed=False)
         return concat_bytes, bottom_fea_recon, lower_fea_recon
 
     def decompress(self, concat_bytes: bytes,
                    sparse_tensor_coords_tuple: Tuple[ME.CoordinateMapKey, ME.CoordinateManager]) \
             -> ME.SparseTensor:
         target_device = next(self.parameters()).device
-        coord_bytes_list_len = int.from_bytes(concat_bytes[-3:-2], 'little', signed=False)
-        fea_bytes_list_len = int.from_bytes(concat_bytes[-2:], 'little', signed=False)
-        concat_bytes = concat_bytes[:-3]
+        coord_bytes_list_len = int.from_bytes(concat_bytes[-2:-1], 'little', signed=False)
+        fea_bytes_list_len = int.from_bytes(concat_bytes[-1:], 'little', signed=False)
+        concat_bytes = concat_bytes[:-2]
         split_bytes = BytesListUtils.split_bytes_list(
             concat_bytes, coord_bytes_list_len + fea_bytes_list_len + 1
         )
