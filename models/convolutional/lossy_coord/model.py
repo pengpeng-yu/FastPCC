@@ -253,24 +253,22 @@ class PCC(nn.Module):
         return hyper_dec_up
 
     def forward(self, pc_data: PCData):
-        geo_lossl_2x_coder_num = self.get_geo_lossl_2x_coder_num(pc_data.resolution)
         if self.training:
             sparse_pc = self.get_sparse_pc(pc_data.xyz)
-            return self.train_forward(sparse_pc, pc_data.training_step, geo_lossl_2x_coder_num)
+            return self.train_forward(sparse_pc, pc_data.training_step, pc_data.batch_size)
         else:
             assert pc_data.batch_size == 1, 'Only supports batch size == 1 during testing.'
             if isinstance(pc_data.xyz, torch.Tensor):
                 sparse_pc = self.get_sparse_pc(pc_data.xyz)
-                return self.test_forward(sparse_pc, pc_data, geo_lossl_2x_coder_num)
+                return self.test_forward(sparse_pc, pc_data)
             else:
                 sparse_pc_partitions = self.get_sparse_pc_partitions(pc_data.xyz)
-                return self.test_partitions_forward(sparse_pc_partitions, pc_data, geo_lossl_2x_coder_num)
+                return self.test_partitions_forward(sparse_pc_partitions, pc_data)
 
     def get_sparse_pc(self, xyz: torch.Tensor,
                       tensor_stride: int = 1,
                       only_return_coords: bool = False)\
             -> Union[ME.SparseTensor, Tuple[ME.CoordinateMapKey, ME.CoordinateManager]]:
-        assert xyz.min() >= 0
         ME.clear_global_coordinate_manager()
         global_coord_mg = ME.CoordinateManager(
             D=3,
@@ -303,15 +301,14 @@ class PCC(nn.Module):
         for idx in range(1, len(xyz)):
             yield self.get_sparse_pc(xyz[idx])
 
-    def train_forward(self, sparse_pc: ME.SparseTensor, training_step: int,
-                      geo_lossl_2x_coder_num: Optional[int]):
+    def train_forward(self, sparse_pc: ME.SparseTensor, training_step: int, batch_size: int):
         warmup_forward = training_step < self.cfg.warmup_steps
 
         strided_fea_list, points_num_list = self.encoder(sparse_pc)
         feature = strided_fea_list[-1]
 
         if self.cfg.recurrent_part_enabled:
-            bottleneck_feature, loss_dict = self.em_lossless_based(feature, geo_lossl_2x_coder_num)
+            bottleneck_feature, loss_dict = self.em_lossless_based(feature, batch_size)
         else:
             bottleneck_feature, loss_dict = self.em(feature)
 
@@ -319,8 +316,7 @@ class PCC(nn.Module):
             GenerativeUpsampleMessage(
                 fea=bottleneck_feature,
                 target_key=sparse_pc.coordinate_map_key,
-                points_num_list=points_num_list,
-                cached_fea_list=strided_fea_list[:-1]
+                points_num_list=points_num_list
             )
         )
         loss_dict['coord_recon_loss'] = self.get_coord_recon_loss(
@@ -350,10 +346,9 @@ class PCC(nn.Module):
                 loss_dict[key] = loss_dict[key].item()
         return loss_dict
 
-    def test_forward(self, sparse_pc: ME.SparseTensor, pc_data: PCData,
-                     geo_lossl_2x_coder_num: Optional[int]):
+    def test_forward(self, sparse_pc: ME.SparseTensor, pc_data: PCData):
         with Timer() as encoder_t, TorchCudaMaxMemoryAllocated() as encoder_m:
-            compressed_bytes, sparse_tensor_coords = self.compress(sparse_pc, geo_lossl_2x_coder_num)
+            compressed_bytes, sparse_tensor_coords = self.compress(sparse_pc)
         del sparse_pc
         ME.clear_global_coordinate_manager()
         torch.cuda.empty_cache()
@@ -373,12 +368,9 @@ class PCC(nn.Module):
         )
         return ret
 
-    def test_partitions_forward(self, sparse_pc_partitions: Generator, pc_data: PCData,
-                                geo_lossl_2x_coder_num: Optional[int]):
+    def test_partitions_forward(self, sparse_pc_partitions: Generator, pc_data: PCData):
         with Timer() as encoder_t, TorchCudaMaxMemoryAllocated() as encoder_m:
-            compressed_bytes, sparse_tensor_coords_list = self.compress_partitions(
-                sparse_pc_partitions, geo_lossl_2x_coder_num
-            )
+            compressed_bytes, sparse_tensor_coords_list = self.compress_partitions(sparse_pc_partitions)
         del sparse_pc_partitions
         ME.clear_global_coordinate_manager()
         torch.cuda.empty_cache()
@@ -398,15 +390,12 @@ class PCC(nn.Module):
         )
         return ret
 
-    def compress(self, sparse_pc: ME.SparseTensor,
-                 geo_lossl_2x_coder_num: Optional[int]) -> Tuple[bytes, Optional[torch.Tensor]]:
+    def compress(self, sparse_pc: ME.SparseTensor) -> Tuple[bytes, Optional[torch.Tensor]]:
         strided_fea_list, points_num_list = self.encoder(sparse_pc)
         feature = strided_fea_list[-1]
 
         if self.cfg.recurrent_part_enabled:
-            em_bytes, bottom_fea_recon, fea_recon = self.em_lossless_based.compress(
-                feature, geo_lossl_2x_coder_num
-            )
+            em_bytes, bottom_fea_recon, fea_recon = self.em_lossless_based.compress(feature, 1)
             assert bottom_fea_recon.C.shape[0] == 1
             sparse_tensor_coords = sparse_tensor_coords_stride = None
         else:
@@ -438,18 +427,18 @@ class PCC(nn.Module):
                     (_[0].to_bytes(3, 'little', signed=False) for _ in points_num_list)
                 ))
             if self.cfg.recurrent_part_enabled:
-                bs.write(geo_lossl_2x_coder_num.to_bytes(1, 'little', signed=False))
+                bs.write(int(math.log2(bottom_fea_recon.tensor_stride[0])).to_bytes(
+                         1, 'little', signed=False))
             bs.write(em_bytes)
             compressed_bytes = bs.getvalue()
         return compressed_bytes, sparse_tensor_coords
 
-    def compress_partitions(self, sparse_pc_partitions: Generator,
-                            geo_lossl_2x_coder_num: Optional[int]) \
+    def compress_partitions(self, sparse_pc_partitions: Generator) \
             -> Tuple[bytes, List[torch.Tensor]]:
         compressed_bytes_list = []
         sparse_tensor_coords_list = []
         for sparse_pc in sparse_pc_partitions:
-            compressed_bytes, sparse_tensor_coords = self.compress(sparse_pc, geo_lossl_2x_coder_num)
+            compressed_bytes, sparse_tensor_coords = self.compress(sparse_pc)
             ME.clear_global_coordinate_manager()
             compressed_bytes_list.append(compressed_bytes)
             sparse_tensor_coords_list.append(sparse_tensor_coords)
@@ -470,16 +459,14 @@ class PCC(nn.Module):
             else:
                 points_num_list = None
             if self.cfg.recurrent_part_enabled:
-                geo_lossl_2x_coder_num = int.from_bytes(bs.read(1), 'little', signed=False)
+                tensor_stride = 2 ** int.from_bytes(bs.read(1), 'little', signed=False)
                 sparse_tensor_coords_bytes = None
             else:
-                geo_lossl_2x_coder_num = None
                 sparse_tensor_coords_bytes_len = int.from_bytes(bs.read(3), 'little', signed=False)
                 sparse_tensor_coords_bytes = bs.read(sparse_tensor_coords_bytes_len)
             em_bytes = bs.read()
 
         if self.cfg.recurrent_part_enabled:
-            tensor_stride = 2 ** (geo_lossl_2x_coder_num + self.normal_part_coder_num)
             fea_recon = self.em_lossless_based.decompress(
                 em_bytes,
                 self.get_sparse_pc(
@@ -522,16 +509,6 @@ class PCC(nn.Module):
 
         coord_recon_concat = torch.cat(coord_recon_list, 0)
         return coord_recon_concat
-
-    def get_geo_lossl_2x_coder_num(self, resolution: Union[int, List[int]]) -> Optional[int]:
-        if self.cfg.recurrent_part_enabled:
-            if not isinstance(resolution, int):
-                resolution = min(resolution)
-            ret = math.ceil(math.log2(resolution))
-            ret -= self.normal_part_coder_num
-        else:
-            ret = None
-        return ret
 
     def get_coord_recon_loss(
             self, cached_pred_list: List[ME.SparseTensor],

@@ -8,7 +8,8 @@ import MinkowskiEngine as ME
 
 from lib.torch_utils import concat_loss_dicts
 from lib.sparse_conv_layers import \
-    ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, \
+    ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, ResBlock, InceptionResBlock, \
+    NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs, \
     GenerativeUpsample, GenerativeUpsampleMessage
 from lib.torch_utils import minkowski_tensor_wrapped_fn
 from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel
@@ -23,57 +24,6 @@ class SparseLinear(nn.Linear):
             coordinate_map_key=x.coordinate_map_key,
             coordinate_manager=x.coordinate_manager
         )
-
-
-class ResBlock(nn.Module):
-    def __init__(self, channels, region_type: str, bn: bool, act: Optional[str]):
-        super(ResBlock, self).__init__()
-        self.channels = channels
-        self.bn = bn
-        self.act = act
-        self.region_type = region_type
-
-        self.conv0 = ConvBlock(channels, channels, 3, 1, region_type=region_type, bn=bn, act=act)
-        self.conv1 = ConvBlock(channels, channels, 3, 1, region_type=region_type, bn=bn, act=None)
-
-    def forward(self, x):
-        out = self.conv1(self.conv0(x))
-        out += x
-        return out
-
-    def __repr__(self):
-        return f'MEResBlock(channels={self.channels}, ' \
-               f'region_type={self.region_type}, ' \
-               f'bn={self.bn}, act={self.act})'
-
-
-class InceptionResBlock(nn.Module):
-    def __init__(self, channels, region_type: str, bn: bool, act: Optional[str]):
-        super(InceptionResBlock, self).__init__()
-        self.channels = channels
-        self.bn = bn
-        self.act = act
-        self.region_type = region_type
-        self.path_0 = nn.Sequential(
-            ConvBlock(channels, channels // 4, 3, 1, region_type=region_type, bn=bn, act=act),
-            ConvBlock(channels // 4, channels // 2, 3, 1, region_type=region_type, bn=bn, act=None)
-        )
-        self.path_1 = nn.Sequential(
-            ConvBlock(channels, channels // 4, 1, 1, region_type=region_type, bn=bn, act=act),
-            ConvBlock(channels // 4, channels // 4, 3, 1, region_type=region_type, bn=bn, act=act),
-            ConvBlock(channels // 4, channels // 2, 1, 1, region_type=region_type, bn=bn, act=None)
-        )
-
-    def forward(self, x):
-        out0 = self.path_0(x)
-        out1 = self.path_1(x)
-        out = ME.cat(out0, out1) + x
-        return out
-
-    def __repr__(self):
-        return f'MEInceptionResBlock(channels={self.channels}, ' \
-               f'region_type={self.region_type}, ' \
-               f'bn={self.bn}, act={self.act})'
 
 
 BLOCKS_LIST = [ResBlock, InceptionResBlock]
@@ -117,30 +67,6 @@ def make_downsample_blocks(
             ),
         ))
     return blocks
-
-
-class NNSequentialWithArgs(nn.Sequential):
-    target_block_class = None
-
-    def forward(self, x, *args, **kwargs):
-        used_flag = False
-        for m in self:
-            if used_flag is False and isinstance(m, self.target_block_class):
-                x = m(x, *args, **kwargs)
-                used_flag = True
-            else:
-                x = m(x)
-        if args or kwargs:
-            assert used_flag
-        return x
-
-
-class NNSequentialWithConvTransBlockArgs(NNSequentialWithArgs):
-    target_block_class = ConvTransBlock
-
-
-class NNSequentialWithConvBlockArgs(NNSequentialWithArgs):
-    target_block_class = ConvBlock
 
 
 def make_upsample_block(
