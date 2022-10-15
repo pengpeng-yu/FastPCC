@@ -21,7 +21,6 @@ class ModelConfig(SimpleConfig):
     bottleneck_scaler: int = 1
     prior_indexes_scaler: float = 1.0
     prior_indexes_range: Tuple[int, ...] = (64, )
-    fea_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 1)
     parameter_fns_mlp_num: int = 2
     quantize_indexes: bool = False  # during training
 
@@ -30,30 +29,15 @@ class ModelConfig(SimpleConfig):
     decoder_channels: Tuple[int, ...] = (64, 32, 16)
     mpeg_gpcc_command: str = 'tmc3'
 
-    hyperprior: str = 'None'
-    hyper_compressed_channels: int = 8
-    hyper_encoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
-    hyper_decoder_channels: Tuple[int, ...] = (16, 16, 16, 16)
-
-    # Recurrent part (lossless) of network
-    recurrent_part_enabled: bool = False
     recurrent_part_channels: int = 64
-
-    # Lossless compression settings
-    lossless_coord_indexes_range: Tuple[int, ...] = (8, 8, 8, 8)
     lossless_fea_num_filters: Tuple[int, ...] = (1, 3, 3, 3, 3, 1)
 
     # For geo lossless based EM and residual-aided GenerativeUpsample
     hybrid_hyper_decoder_fea: bool = False
-    upper_fea_grad_scaler: float = 1.0
-
-    # Geo lossless based EM settings
-    skip_encoding_fea: Tuple[int, ...] = ()
 
     # Loss items
     bpp_loss_factor: float = 0.2
     coord_recon_loss_type: str = 'BCE'  # BCE or Dist
-    coord_recon_p2points_weighted_bce: bool = False
     dist_upper_bound = 2.0
     adaptive_pruning: bool = True
     adaptive_pruning_num_scaler: float = 1.0
