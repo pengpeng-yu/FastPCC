@@ -13,7 +13,7 @@ from lib.sparse_conv_layers import \
 
 BLOCKS_LIST = [ResBlock, InceptionResBlock]
 BLOCKS_DICT = {_.__name__: _ for _ in BLOCKS_LIST}
-residuals_num_per_scale = 4
+residuals_num_per_scale = 2
 
 
 def make_downsample_blocks(
@@ -229,7 +229,7 @@ class HyperCoder(nn.Module):
                 main_modules.append(
                     ConvTransBlock(
                         in_channels, intra_channels[0], 2, 2,
-                        region_type=region_type, bn=use_batch_norm, act=act
+                        region_type='HYPER_CUBE', bn=use_batch_norm, act=act
                     ))
             else:
                 main_modules.append(
@@ -277,7 +277,7 @@ class HyperDecoderUpsample(nn.Module):
                 *(basic_block(intra_channels) for _ in range(basic_block_num)),
                 ConvBlock(intra_channels, out_channels, 3, 1,
                           region_type=region_type, bn=use_batch_norm, act=None)
-            ) for _ in range(residuals_num_per_scale - 1)
+            ) for __ in range(residuals_num_per_scale - 1)
         ])
         self.blocks.append(
             NNSequentialWithConvTransBlockArgs(
@@ -305,17 +305,20 @@ class HyperDecoderGenUpsample(nn.Module):
         basic_block = partial(BLOCKS_DICT[basic_block_type],
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
-        self.block = nn.Sequential(
-            GenConvTransBlock(in_channels, intra_channels, 2, 2,
-                              region_type=region_type, bn=use_batch_norm, act=act),
-            *(basic_block(intra_channels) for _ in range(basic_block_num)),
-            ConvBlock(intra_channels, out_channels, 3, 1,
-                      region_type=region_type, bn=use_batch_norm, act=None)
-        )
+        self.blocks = nn.ModuleList([
+            nn.Sequential(
+                GenConvTransBlock(in_channels, intra_channels, 2, 2,
+                                  region_type=region_type, bn=use_batch_norm, act=act),
+                *(basic_block(intra_channels) for _ in range(basic_block_num)),
+                ConvBlock(intra_channels, out_channels, 3, 1,
+                          region_type=region_type, bn=use_batch_norm, act=None)
+            )
+        ])
 
     def __getitem__(self, idx):
-        if idx % residuals_num_per_scale == residuals_num_per_scale - 1:
-            return self.block
+        tgt_idx = (idx % residuals_num_per_scale) - (residuals_num_per_scale - 1)
+        if 0 <= tgt_idx < len(self.blocks):
+            return self.blocks[tgt_idx]
         else:
             return None
 
@@ -340,17 +343,16 @@ class EncoderRecurrent(nn.Module):
                 out_channels, gate_channels, bn=use_batch_norm, act=None
             ) for _ in range(residuals_num_per_scale)
         ])
-        self.first_block_out, *self.blocks_out = [MEMLPBlock(
+        self.block_out = MEMLPBlock(
             hidden_channels, out_channels, bn=use_batch_norm, act=None
-        ) for _ in range(residuals_num_per_scale + 1)]
-        self.blocks_out = nn.ModuleList(self.blocks_out)
+        )
         with torch.no_grad():
-            for block_gate, block_out in zip(self.blocks_gate, self.blocks_out):
+            for block_gate in self.blocks_gate:
                 torch.zero_(block_gate.mlp.linear.bias)
                 block_gate.mlp.linear.weight[...] = 1
-                torch.zero_(block_out.mlp.linear.bias)
-                torch.zero_(block_out.mlp.linear.weight)
-                block_out.mlp.linear.weight[:, :out_channels] = torch.eye(out_channels)
+            torch.zero_(self.block_out.mlp.linear.bias)
+            torch.zero_(self.block_out.mlp.linear.weight)
+            self.block_out.mlp.linear.weight[:, :out_channels] = torch.eye(out_channels)
 
         self.blocks = nn.ModuleList([
             nn.Sequential(
@@ -359,7 +361,7 @@ class EncoderRecurrent(nn.Module):
                 *(basic_block(hidden_channels) for _ in range(basic_block_num)),
                 ConvBlock(hidden_channels, hidden_channels, 3, 1,
                           region_type=region_type, bn=use_batch_norm, act=act),
-            ) for _ in range(residuals_num_per_scale - 1)
+            ) for __ in range(residuals_num_per_scale - 1)
         ])
         self.blocks.append(nn.Sequential(
             ConvBlock(
@@ -380,11 +382,11 @@ class EncoderRecurrent(nn.Module):
         strided_fea_list = []
         cm = x.coordinate_manager
         cx = x
-        hx = self.first_block_out(cx)
+        hx = self.block_out(cx)
         strided_fea_list.append(hx)
 
         while True:
-            for block, block_gate, block_out in zip(self.blocks, self.blocks_gate, self.blocks_out):
+            for block, block_gate in zip(self.blocks, self.blocks_gate):
                 gate = block_gate(hx)
                 forget_gate = torch.sigmoid(gate.F)
                 cx = ME.SparseTensor(
@@ -393,7 +395,7 @@ class EncoderRecurrent(nn.Module):
                     coordinate_manager=cm
                 )
                 cx = block(cx)
-                hx = block_out(cx)
+                hx = self.block_out(cx)
                 strided_fea_list.append(hx)
             if hx.C.shape[0] == batch_size:
                 break
