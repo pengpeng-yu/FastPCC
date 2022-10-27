@@ -397,7 +397,8 @@ class PCC(nn.Module):
         if self.cfg.recurrent_part_enabled:
             em_bytes, bottom_fea_recon, fea_recon = self.em_lossless_based.compress(feature, 1)
             assert bottom_fea_recon.C.shape[0] == 1
-            sparse_tensor_coords = sparse_tensor_coords_stride = None
+            sparse_tensor_coords_stride = bottom_fea_recon.tensor_stride[0]
+            sparse_tensor_coords = bottom_fea_recon.C
         else:
             em_bytes_list, coding_batch_shape, fea_recon = self.em.compress(feature)
             assert coding_batch_shape == torch.Size([1])
@@ -405,7 +406,7 @@ class PCC(nn.Module):
             sparse_tensor_coords = feature.C
             sparse_tensor_coords_stride = feature.tensor_stride[0]
 
-        if sparse_tensor_coords is not None:
+        if sparse_tensor_coords.shape[0] != 1:
             h = hashlib.md5()
             h.update(str(time.time()).encode())
             tmp_file_path = 'tmp-' + h.hexdigest()
@@ -420,6 +421,11 @@ class PCC(nn.Module):
             os.remove(f'{tmp_file_path}.bin')
             em_bytes = len(sparse_tensor_coords_bytes).to_bytes(3, 'little', signed=False) + \
                 sparse_tensor_coords_bytes + em_bytes
+        else:
+            em_bytes = b''.join(
+                [_.to_bytes(1, 'little', signed=False)
+                 for _ in (sparse_tensor_coords[0, 1:] // sparse_tensor_coords_stride).tolist()]
+            ) + em_bytes
         
         with io.BytesIO() as bs:
             if self.cfg.adaptive_pruning:
@@ -427,7 +433,7 @@ class PCC(nn.Module):
                     (_[0].to_bytes(3, 'little', signed=False) for _ in points_num_list)
                 ))
             if self.cfg.recurrent_part_enabled:
-                bs.write(int(math.log2(bottom_fea_recon.tensor_stride[0])).to_bytes(
+                bs.write(int(math.log2(sparse_tensor_coords_stride)).to_bytes(
                          1, 'little', signed=False))
             bs.write(em_bytes)
             compressed_bytes = bs.getvalue()
@@ -460,7 +466,7 @@ class PCC(nn.Module):
                 points_num_list = None
             if self.cfg.recurrent_part_enabled:
                 tensor_stride = 2 ** int.from_bytes(bs.read(1), 'little', signed=False)
-                sparse_tensor_coords_bytes = None
+                sparse_tensor_coords_bytes = bs.read(3)
             else:
                 sparse_tensor_coords_bytes_len = int.from_bytes(bs.read(3), 'little', signed=False)
                 sparse_tensor_coords_bytes = bs.read(sparse_tensor_coords_bytes_len)
@@ -470,10 +476,10 @@ class PCC(nn.Module):
             fea_recon = self.em_lossless_based.decompress(
                 em_bytes,
                 self.get_sparse_pc(
-                    torch.tensor([[0, 0, 0, 0]], dtype=torch.int32, device=device),
+                    sparse_tensor_coords,
                     tensor_stride=tensor_stride,
-                    only_return_coords=True)
-            )
+                    only_return_coords=True
+                ))
         else:
             fea_recon = self.em.decompress(
                 [em_bytes], torch.Size([1]), device,
@@ -481,8 +487,7 @@ class PCC(nn.Module):
                     sparse_tensor_coords,
                     tensor_stride=2 ** self.normal_part_coder_num,
                     only_return_coords=True
-                )
-            )
+                ))
 
         decoder_message = self.decoder(
             GenerativeUpsampleMessage(
