@@ -13,7 +13,8 @@ from lib.sparse_conv_layers import \
 
 BLOCKS_LIST = [ResBlock, InceptionResBlock]
 BLOCKS_DICT = {_.__name__: _ for _ in BLOCKS_LIST}
-residuals_num_per_scale = 2
+residuals_num_per_scale = 1
+non_shared_scales_num = 3
 
 
 def make_downsample_blocks(
@@ -270,26 +271,34 @@ class HyperDecoderUpsample(nn.Module):
         basic_block = partial(BLOCKS_DICT[basic_block_type],
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
-        self.blocks = nn.ModuleList([
-            NNSequentialWithConvBlockArgs(
-                ConvBlock(in_channels, intra_channels, 3, 1,
-                          region_type=region_type, bn=use_batch_norm, act=act),
+
+        def make_block(up):
+            args = (2, 2) if up else (3, 1)
+            seq_cls = NNSequentialWithConvTransBlockArgs if up else NNSequentialWithConvBlockArgs
+            conv_cls = ConvTransBlock if up else ConvBlock
+            return seq_cls(
+                conv_cls(in_channels, intra_channels, *args,
+                         region_type=region_type, bn=use_batch_norm, act=act),
                 *(basic_block(intra_channels) for _ in range(basic_block_num)),
                 ConvBlock(intra_channels, out_channels, 3, 1,
-                          region_type=region_type, bn=use_batch_norm, act=None)
-            ) for __ in range(residuals_num_per_scale - 1)
-        ])
-        self.blocks.append(
-            NNSequentialWithConvTransBlockArgs(
-                ConvTransBlock(in_channels, intra_channels, 2, 2,
-                               region_type=region_type, bn=use_batch_norm, act=act),
-                *(basic_block(intra_channels) for _ in range(basic_block_num)),
-                ConvBlock(intra_channels, out_channels, 3, 1,
-                          region_type=region_type, bn=use_batch_norm, act=None)
-            ))
+                          region_type=region_type, bn=use_batch_norm, act=None))
+
+        self.non_shared_blocks = nn.ModuleList()
+        for _ in range(non_shared_scales_num):
+            for __ in range(residuals_num_per_scale - 1):
+                self.non_shared_blocks.append(make_block(False))
+            self.non_shared_blocks.append(make_block(True))
+
+        self.shared_blocks = nn.ModuleList()
+        for _ in range(residuals_num_per_scale - 1):
+            self.shared_blocks.append(make_block(False))
+        self.shared_blocks.append(make_block(True))
 
     def __getitem__(self, idx):
-        return self.blocks[idx % residuals_num_per_scale]
+        if idx < len(self.non_shared_blocks):
+            return self.non_shared_blocks[idx]
+        else:
+            return self.shared_blocks[(idx - len(self.non_shared_blocks)) % residuals_num_per_scale]
 
 
 class HyperDecoderGenUpsample(nn.Module):
@@ -305,20 +314,28 @@ class HyperDecoderGenUpsample(nn.Module):
         basic_block = partial(BLOCKS_DICT[basic_block_type],
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
-        self.blocks = nn.ModuleList([
-            nn.Sequential(
+
+        def make_block():
+            return nn.Sequential(
                 GenConvTransBlock(in_channels, intra_channels, 2, 2,
                                   region_type=region_type, bn=use_batch_norm, act=act),
                 *(basic_block(intra_channels) for _ in range(basic_block_num)),
                 ConvBlock(intra_channels, out_channels, 3, 1,
-                          region_type=region_type, bn=use_batch_norm, act=None)
-            )
-        ])
+                          region_type=region_type, bn=use_batch_norm, act=None))
+
+        self.non_shared_blocks = nn.ModuleList()
+        for _ in range(non_shared_scales_num):
+            self.non_shared_blocks.append(make_block())
+
+        self.shared_blocks = make_block()
 
     def __getitem__(self, idx):
         tgt_idx = (idx % residuals_num_per_scale) - (residuals_num_per_scale - 1)
-        if 0 <= tgt_idx < len(self.blocks):
-            return self.blocks[tgt_idx]
+        if 0 == tgt_idx:
+            if idx // residuals_num_per_scale < len(self.non_shared_blocks):
+                return self.non_shared_blocks[idx // residuals_num_per_scale]
+            else:
+                return self.shared_blocks
         else:
             return None
 
@@ -338,42 +355,51 @@ class EncoderRecurrent(nn.Module):
         basic_block = partial(BLOCKS_DICT[basic_block_type],
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
-        self.blocks_gate = nn.ModuleList([
-            MEMLPBlock(
-                out_channels, gate_channels, bn=use_batch_norm, act=None
-            ) for _ in range(residuals_num_per_scale)
-        ])
-        self.block_out = MEMLPBlock(
-            hidden_channels, out_channels, bn=use_batch_norm, act=None
-        )
-        with torch.no_grad():
-            for block_gate in self.blocks_gate:
-                torch.zero_(block_gate.mlp.linear.bias)
-                block_gate.mlp.linear.weight[...] = 1
-            torch.zero_(self.block_out.mlp.linear.bias)
-            torch.zero_(self.block_out.mlp.linear.weight)
-            self.block_out.mlp.linear.weight[:, :out_channels] = torch.eye(out_channels)
 
-        self.blocks = nn.ModuleList([
-            nn.Sequential(
-                ConvBlock(hidden_channels, hidden_channels, 3, 1,
+        def make_block(down):
+            args = (2, 2) if down else (3, 1)
+            return nn.Sequential(
+                ConvBlock(hidden_channels, hidden_channels, *args,
                           region_type=region_type, bn=use_batch_norm, act=act),
                 *(basic_block(hidden_channels) for _ in range(basic_block_num)),
                 ConvBlock(hidden_channels, hidden_channels, 3, 1,
-                          region_type=region_type, bn=use_batch_norm, act=act),
-            ) for __ in range(residuals_num_per_scale - 1)
-        ])
-        self.blocks.append(nn.Sequential(
-            ConvBlock(
-                hidden_channels, hidden_channels, 2, 2,
-                region_type='HYPER_CUBE', bn=use_batch_norm, act=act
-            ),
-            *[basic_block(hidden_channels) for _ in range(basic_block_num)],
-            ConvBlock(
-                hidden_channels, hidden_channels, 3, 1,
-                region_type=region_type, bn=use_batch_norm, act=act
+                          region_type=region_type, bn=use_batch_norm, act=act)
+            ), MEMLPBlock(
+                out_channels, gate_channels, bn=use_batch_norm, act=None
+            ), MEMLPBlock(
+                hidden_channels, out_channels, bn=use_batch_norm, act=None
             )
-        ))
+
+        self.shared_blocks = nn.ModuleList()
+        self.shared_blocks_gate = nn.ModuleList()
+        self.shared_blocks_out = nn.ModuleList()
+        for _ in range(residuals_num_per_scale):
+            block, block_gate, block_out = make_block(False if _ != residuals_num_per_scale - 1 else True)
+            self.shared_blocks.append(block)
+            self.shared_blocks_gate.append(block_gate)
+            self.shared_blocks_out.append(block_out)
+
+        self.non_shared_blocks = nn.ModuleList()
+        self.non_shared_blocks_gate = nn.ModuleList()
+        self.non_shared_blocks_out = nn.ModuleList()
+        self.non_shared_blocks_out_first = MEMLPBlock(
+            hidden_channels, out_channels, bn=use_batch_norm, act=None
+        )
+        for _ in range(non_shared_scales_num):
+            for __ in range(residuals_num_per_scale):
+                block, block_gate, block_out = make_block(False if __ != residuals_num_per_scale - 1 else True)
+                self.non_shared_blocks.append(block)
+                self.non_shared_blocks_gate.append(block_gate)
+                self.non_shared_blocks_out.append(block_out)
+
+        with torch.no_grad():
+            for block_gate in (*self.shared_blocks_gate, *self.non_shared_blocks_gate):
+                torch.zero_(block_gate.mlp.linear.bias)
+                block_gate.mlp.linear.weight[...] = 1
+            for block_out in (*self.shared_blocks_out, *self.non_shared_blocks_out):
+                torch.zero_(block_out.mlp.linear.bias)
+                torch.zero_(block_out.mlp.linear.weight)
+                block_out.mlp.linear.weight[:, :out_channels] = torch.eye(out_channels)
         self.out_channels = out_channels
         self.hidden_channels = hidden_channels
 
@@ -382,21 +408,29 @@ class EncoderRecurrent(nn.Module):
         strided_fea_list = []
         cm = x.coordinate_manager
         cx = x
-        hx = self.block_out(cx)
+        hx = self.non_shared_blocks_out_first(cx)
         strided_fea_list.append(hx)
 
+        idx = 0
         while True:
-            for block, block_gate in zip(self.blocks, self.blocks_gate):
-                gate = block_gate(hx)
-                forget_gate = torch.sigmoid(gate.F)
-                cx = ME.SparseTensor(
-                    features=(forget_gate * cx.F),
-                    coordinate_map_key=cx.coordinate_map_key,
-                    coordinate_manager=cm
-                )
-                cx = block(cx)
-                hx = self.block_out(cx)
-                strided_fea_list.append(hx)
+            if idx < len(self.non_shared_blocks):
+                block, block_gate, block_out = \
+                    self.non_shared_blocks[idx], self.non_shared_blocks_gate[idx], self.non_shared_blocks_out[idx]
+            else:
+                tmp_idx = (idx - len(self.non_shared_blocks)) % len(self.shared_blocks)
+                block, block_gate, block_out = \
+                    self.shared_blocks[tmp_idx], self.shared_blocks_gate[tmp_idx], self.shared_blocks_out[tmp_idx]
+            idx += 1
+            gate = block_gate(hx)
+            forget_gate = torch.sigmoid(gate.F) * 2
+            cx = ME.SparseTensor(
+                features=(forget_gate * cx.F),
+                coordinate_map_key=cx.coordinate_map_key,
+                coordinate_manager=cm
+            )
+            cx = block(cx)
+            hx = block_out(cx)
+            strided_fea_list.append(hx)
             if hx.C.shape[0] == batch_size:
                 break
 

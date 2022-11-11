@@ -28,15 +28,15 @@ class PCC(nn.Module):
 
     @staticmethod
     def params_divider(s: str) -> int:
-        if s.endswith("aux_param"): return 2
+        if s.endswith("aux_param"): return 3
         else:
-            if 'em_lossless_based' in s:
-                if 'encoder' in s or 'decoder' in s:
+            if '.em_lossless_based' in s:
+                if 'non_shared_blocks_out_first' in s:
                     return 0
-                else:
+                elif '.non_shared' in s:
                     return 1
-            elif 'em' in s:
-                return 1
+                else:
+                    return 2
             else:
                 return 0
 

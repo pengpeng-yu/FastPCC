@@ -5,6 +5,8 @@ import os
 import time
 import hashlib
 
+import numpy as np
+import open3d as o3d
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -34,19 +36,22 @@ from .model_config import ModelConfig
 
 class PCC(nn.Module):
 
-    @staticmethod
-    def params_divider(s: str) -> int:
-        if s.endswith("aux_param"): return 2
-        else:
-            if 'em_lossless_based' in s:
-                if 'encoder' in s or 'decoder' in s:
-                    return 0
-                else:
-                    return 1
-            elif 'em' in s:
-                return 1
+    def params_divider(self, s: str) -> int:
+        if self.cfg.recurrent_part_enabled:
+            if s.endswith("aux_param"): return 3
             else:
-                return 0
+                if '.em_lossless_based' in s:
+                    if 'non_shared_blocks_out_first' in s:
+                        return 0
+                    elif '.non_shared' in s:
+                        return 1
+                    else:
+                        return 2
+                else:
+                    return 0
+        else:
+            if s.endswith("aux_param"): return 1
+            else: return 0
 
     def __init__(self, cfg: ModelConfig):
         super(PCC, self).__init__()
@@ -432,9 +437,8 @@ class PCC(nn.Module):
                 bs.write(b''.join(
                     (_[0].to_bytes(3, 'little', signed=False) for _ in points_num_list)
                 ))
-            if self.cfg.recurrent_part_enabled:
-                bs.write(int(math.log2(sparse_tensor_coords_stride)).to_bytes(
-                         1, 'little', signed=False))
+            bs.write(int(math.log2(sparse_tensor_coords_stride)).to_bytes(
+                     1, 'little', signed=False))
             bs.write(em_bytes)
             compressed_bytes = bs.getvalue()
         return compressed_bytes, sparse_tensor_coords
@@ -464,12 +468,23 @@ class PCC(nn.Module):
                     points_num_list.append([int.from_bytes(bs.read(3), 'little', signed=False)])
             else:
                 points_num_list = None
+            tensor_stride = 2 ** int.from_bytes(bs.read(1), 'little', signed=False)
             if self.cfg.recurrent_part_enabled:
-                tensor_stride = 2 ** int.from_bytes(bs.read(1), 'little', signed=False)
                 sparse_tensor_coords_bytes = bs.read(3)
             else:
                 sparse_tensor_coords_bytes_len = int.from_bytes(bs.read(3), 'little', signed=False)
                 sparse_tensor_coords_bytes = bs.read(sparse_tensor_coords_bytes_len)
+                h = hashlib.md5()
+                h.update(str(time.time()).encode())
+                tmp_file_path = 'tmp-' + h.hexdigest()
+                with open(f'{tmp_file_path}.bin', 'wb') as f:
+                    f.write(sparse_tensor_coords_bytes)
+                gpcc_decode(f'{tmp_file_path}.bin', f'{tmp_file_path}.ply')
+                sparse_tensor_coords_ = torch.from_numpy(np.asarray(
+                    o3d.io.read_point_cloud(f'{tmp_file_path}.ply').points
+                ) * tensor_stride).cuda()
+                os.remove(f'{tmp_file_path}.ply')
+                os.remove(f'{tmp_file_path}.bin')
             em_bytes = bs.read()
 
         if self.cfg.recurrent_part_enabled:
