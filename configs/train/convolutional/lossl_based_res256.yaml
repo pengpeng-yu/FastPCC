@@ -1,0 +1,11 @@
+# include "configs/train/convolutional/lossl_based.yaml"
+
+train:
+  num_workers: 4
+  dataset:
+    train_filelist_path: 'train_list_obj.txt'
+    data_format: '.obj'
+    mesh_sample_points_num: 10000000
+    mesh_sample_point_resolution: 512
+    random_rotation: True
+    resolution: 256

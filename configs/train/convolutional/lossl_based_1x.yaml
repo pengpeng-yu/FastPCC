@@ -1,6 +1,0 @@
-# include "configs/train/convolutional/lossl_based.yaml"
-
-model:
-  compressed_channels: 2
-  encoder_channels: [4, 16]
-  decoder_channels: [4]
