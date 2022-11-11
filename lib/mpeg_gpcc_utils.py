@@ -29,7 +29,7 @@ def gpcc_decode(in_path, out_path, command='tmc3'):
     args = ' --mode=1' \
         f' --compressedStreamPath={in_path}' \
         f' --reconstructedDataPath={out_path}' \
-        ' --outputBinaryPly=0'
+        ' --outputBinaryPly=1'
     cmd_args = command + args
     subp_stdout = subprocess.run(
         cmd_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

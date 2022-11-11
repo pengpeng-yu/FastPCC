@@ -53,3 +53,11 @@ def concat_values_for_dict(
             else:
                 a[key] = [value]
     return a
+
+
+def concat_values_for_dict_2(
+        a: all_file_metric_dict_type,
+        b: all_file_metric_dict_type
+):
+    for key, value in b.items():
+        concat_values_for_dict(a[key], b[key])

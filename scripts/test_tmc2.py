@@ -51,7 +51,7 @@ class TMC2LogExtractor(LogExtractor):
 
 
 def test_geo_single_frame():
-    print('Test tmc3 geo coding')
+    print('Test tmc2 geo coding')
 
     log_extractor = TMC2LogExtractor()
     if osp.exists(output_dir):
