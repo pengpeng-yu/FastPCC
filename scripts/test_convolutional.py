@@ -1,4 +1,5 @@
 import shutil
+import os
 import os.path as osp
 from typing import Tuple, Dict, Callable, Union
 from glob import glob
@@ -6,21 +7,24 @@ import subprocess
 import json
 
 from scripts.log_extract_utils import concat_values_for_dict
-from scripts.shared_config import conda_prefix, metric_dict_filename
+from scripts.shared_config import conda_prefix, metric_dict_filename, environ_CXX, cuda_device
 
 
+os.environ['CXX'] = environ_CXX
 conda_env_name = 'py37torch110'
 glob_weights_paths = [
-    'weights/lossl_based/*.pt',
-    'weights/hyperprior_factorized/*.pt',
-    'weights/hyperprior_scale_normal/*.pt',
-    'weights/baseline/*.pt',
-    'weights/baseline_4x/*.pt'
+    'weights/convolutional/lossl_based_2x/*.pt',
+    'weights/convolutional/lossl_based/*.pt',
+    'weights/convolutional/gpcc_lossl_based_2x/*.pt',
+    'weights/convolutional/gpcc_lossl_based/*.pt',
+    'weights/convolutional/baseline/*.pt',
+    'weights/convolutional/baseline_4x/*.pt'
 ]
 config_paths = [
+    'configs/train/convolutional/lossl_based_2x',
     'configs/train/convolutional/lossl_based',
-    'configs/train/convolutional/hyperprior_factorized',
-    'configs/train/convolutional/hyperprior_scale_normal',
+    'configs/train/convolutional/gpcc_lossl_based_2x',
+    'configs/train/convolutional/gpcc_lossl_based',
     'configs/train/convolutional/baseline',
     'configs/train/convolutional/baseline_4x'
 ]
@@ -75,7 +79,7 @@ def test():
                     f' test.weights_from_ckpt={weight_path}'
                     f' test.rundir_name={sub_sub_run_dir.replace("runs/", "", 1)}'
                     f' test.dataset.kd_tree_partition_max_points_num={par_num}'
-                    f' test.device=2',
+                    f' test.device={cuda_device}',
                     shell=True, check=True, executable=shutil.which('bash')
                 )
                 sub_metric_dict_path = osp.join(sub_sub_run_dir, 'results', 'metric.txt')

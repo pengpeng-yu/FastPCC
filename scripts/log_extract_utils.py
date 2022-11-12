@@ -39,8 +39,12 @@ def read_file_list_with_rel_path(file_list):
 
 def concat_values_for_dict(
         a: one_file_metric_dict_type,
-        b: Union[Dict[str, Union[int, float, str]], one_file_metric_dict_type]
+        b: Union[Dict[str, Union[int, float, str]], one_file_metric_dict_type],
+        default_value='none'
 ):
+    for key in a:
+        if key not in b:
+            b[key] = default_value
     for key, value in b.items():
         if key in a:
             if isinstance(value, List):
@@ -52,6 +56,7 @@ def concat_values_for_dict(
                 a[key] = value
             else:
                 a[key] = [value]
+
     return a
 
 

@@ -3,11 +3,12 @@ import re
 import os
 import os.path as osp
 import shutil
-from typing import Dict, List
+from typing import Dict, List, Union, Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
-from scripts.log_extract_utils import all_file_metric_dict_type, concat_values_for_dict
+from scripts.log_extract_utils import all_file_metric_dict_type, concat_values_for_dict, concat_values_for_dict_2
 from scripts.shared_config import metric_dict_filename
 from lib.metrics.bjontegaard import bdrate, bdsnr
 
@@ -35,11 +36,27 @@ def compute_bd(info_dicts_a: all_file_metric_dict_type,
     return bd_rate_results
 
 
-def write_metric_to_csv(method_names, sample_wise_metric, output_file):
+def write_metric_to_csv(titles: Tuple[Union[List[str], Tuple[str, ...]], ...],
+                        sample_wise_metric, output_file):
+    titles_lens = (len(_) for _ in titles[1:])
+    prefix_products = [1]
+    for titles_len in titles_lens:
+        prefix_products.append(prefix_products[-1] * titles_len)
+    prefix_products.reverse()
+    total_cols = len(titles[0]) * prefix_products[0]
+
     with open(output_file, 'w') as f:
-        f.write(f' , {",".join(method_names)}\n')
+        for sub_titles, sub_titles_len in zip(titles, prefix_products):
+            for i in range(total_cols // (len(sub_titles) * sub_titles_len)):
+                for t in sub_titles:
+                    f.write(f',{t}')
+                    for _ in range(1, sub_titles_len):
+                        f.write(',')
+            if sub_titles_len == 1:
+                f.write(',')
+            f.write('\n')
         for key, value in sample_wise_metric.items():
-            f.write(f'{key}, {",".join(map(str, value))}\n')
+            f.write(f'{key}, {",".join(map(str, value))},\n')
 
 
 def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
@@ -51,6 +68,7 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)
 
+    plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
     sample_names = next(iter(method_to_json.values())).keys()
     for sample_name in sample_names:
         fig = plt.figure(figsize=(4, 2.5)).add_subplot(111)
@@ -64,13 +82,15 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
             ).group()[:-1].replace('_', ' ')
         )
         for method_name, method_json in method_to_json.items():
+            if sample_name not in method_json: continue
             tmp_x_axis = method_json[sample_name]['bpp']
             tmp_y_axis = method_json[sample_name][distortion_key]
             xy_tuple = zip(tmp_x_axis, tmp_y_axis)
             tmp_x_axis, tmp_y_axis = zip(*sorted(xy_tuple, key=sort_key_func))
             if hook is not None:
                 tmp_x_axis, tmp_y_axis = hook(tmp_x_axis, tmp_y_axis, method_name)
-            fig.plot(tmp_x_axis, tmp_y_axis, '.-', label=method_name)
+            if len(tmp_x_axis) and len(tmp_y_axis):
+                fig.plot(tmp_x_axis, tmp_y_axis, '.-', label=method_name)
         fig.legend(loc='lower right')
         fig.figure.savefig(osp.join(
             output_dir, f'{y_label} {osp.splitext(osp.split(sample_name)[1])[0]}.pdf'
@@ -83,32 +103,39 @@ def list_mean(ls: List):
 
 
 def compute_multiple_bdrate():
-    anchor_name = 'V-PCC'
+    anchor_name = 'PCGCv2'
     anchor_secondly = False
+    draw_anchor = True
     output_dir = 'runs/comparison'
     json_path_pattern = osp.join('runs', 'tests', '{}', metric_dict_filename)
-    method_to_json_path: Dict[str, str] = {
-        'G-PCC octree': 'tmc3_geo/octree',
-        'G-PCC trisoup': 'tmc3_geo/trisoup',
-        'V-PCC': 'tmc2_geo',
-        'ADLPCC': 'ADLPCC',
+    method_to_json_path: Dict[str, Union[str, List[str]]] = {
+        'Ours': ['convolutional_all_no_par/lossl_based',
+                 'convolutional_all_no_par/lossl_based_2x'],
+        # 'Ours*': ['convolutional_all_par6e5/lossl_based',
+        #           'convolutional_all_par6e5/lossl_based_2x'],
+        # 'Ours**': ['convolutional_all_par15e4/lossl_based',
+        #            'convolutional_all_par15e4/lossl_based_2x'],
+        'Ours w/o lossl geom':
+            ['convolutional_all_no_par/gpcc_lossl_based',
+             'convolutional_all_no_par/gpcc_lossl_based_2x'],
+        # 'Ours w/o lossl geom*':
+        #     ['convolutional_all_par6e5/gpcc_lossl_based',
+        #      'convolutional_all_par6e5/gpcc_lossl_based_2x'],
+        # 'Ours w/o lossl geom**':
+        #     ['convolutional_all_par15e4/gpcc_lossl_based',
+        #      'convolutional_all_par15e4/gpcc_lossl_based_2x'],
         'PCGCv2': 'convolutional_all_no_par/baseline',
-        'PCGCv2 4x': 'convolutional_all_no_par/baseline_4x',
-        'Scale Normal': 'convolutional_all_no_par/hyperprior_scale_normal',
-        'Learnable': 'convolutional_all_no_par/hyperprior_factorized',
-        'Ours': 'convolutional_all_no_par/lossl_based',
-        'PCGCv2*': 'convolutional_all_par6e5/baseline',
-        'PCGCv2 4x*': 'convolutional_all_par6e5/baseline_4x',
-        'Scale Normal*': 'convolutional_all_par6e5/hyperprior_scale_normal',
-        'Learnable*': 'convolutional_all_par6e5/hyperprior_factorized',
-        'Ours*': 'convolutional_all_par6e5/lossl_based',
-        'PCGCv2**': 'convolutional_all_par15e4/baseline',
-        'PCGCv2 4x**': 'convolutional_all_par15e4/baseline_4x',
-        'Scale Normal**': 'convolutional_all_par15e4/hyperprior_scale_normal',
-        'Learnable**': 'convolutional_all_par15e4/hyperprior_factorized',
-        'Ours**': 'convolutional_all_par15e4/lossl_based',
+        # 'PCGCv2*': 'convolutional_all_par6e5/baseline',
+        # 'PCGCv2**': 'convolutional_all_par15e4/baseline',
+        'Deep backbone w/o res': 'convolutional_all_no_par/baseline_4x',
+        # 'Deep backbone w/o res*': 'convolutional_all_par6e5/baseline_4x',
+        # 'Deep backbone w/o res**': 'convolutional_all_par15e4/baseline_4x',
+        # 'V-PCC': 'tmc2_geo',
+        # 'ADLPCC': 'ADLPCC',
+        # 'G-PCC octree': 'tmc3_geo/octree',
+        # 'G-PCC trisoup': 'tmc3_geo/trisoup',
     }
-    method_to_json_path = {k: json_path_pattern.format(v)
+    method_to_json_path = {k: [json_path_pattern.format(v_) for v_ in (v if isinstance(v, list) else [v])]
                            for k, v in method_to_json_path.items()}
 
     if osp.exists(output_dir):
@@ -117,8 +144,13 @@ def compute_multiple_bdrate():
 
     method_to_json: Dict[str, all_file_metric_dict_type] = {}
     for method_name, json_path in method_to_json_path.items():
-        with open(json_path, 'rb') as f:
+        if not isinstance(json_path, list):
+            json_path = [json_path]
+        with open(json_path[0], 'rb') as f:
             method_to_json[method_name] = json.load(f)
+        for jp in json_path[1:]:
+            with open(jp, 'rb') as f:
+                concat_values_for_dict_2(method_to_json[method_name], json.load(f))
 
     method_names_to_compare = [key for key in method_to_json if key != anchor_name]
     sample_names = list(method_to_json[anchor_name].keys())
@@ -132,7 +164,7 @@ def compute_multiple_bdrate():
     for method_name, method_json in method_to_json.items():
         single_sample_complexity = {}
         for sample_name in sample_names:
-            single_sample_json = method_json[sample_name]
+            single_sample_json = method_json[sample_name] if sample_name in method_json else {}
             single_sample_complexity[sample_name] = [
                 list_mean(single_sample_json['encode time'])
                 if 'encode time' in single_sample_json else -1,
@@ -166,38 +198,41 @@ def compute_multiple_bdrate():
             )
 
     write_metric_to_csv(
-        sum((tuple(f'{key} {_}' for _ in ('enc t', 'dec t', 'enc m', 'dec m'))
-             for key in method_to_json.keys()), ()),
-        sample_wise_complexity, osp.join(output_dir, 'complexity.csv')
+        (list(method_to_json.keys()), ('Time', 'Mem'), ('Enc', 'Dec')),
+        sample_wise_complexity, osp.join(output_dir, 'Complexity.csv')
     )
-    bd_file_name = 'bd{} D{}'
+    sample_wise_bd_metric = {}
+    for sample_name in sample_wise_bdrate_d1:
+        sample_wise_bd_metric[sample_name] = []
+        for bdrate_d1, bdrate_d2, bdpsnr_d1, bdpsnr_d2 in zip(
+            sample_wise_bdrate_d1[sample_name],
+            sample_wise_bdrate_d2[sample_name],
+            sample_wise_bdpsnr_d1[sample_name],
+            sample_wise_bdpsnr_d2[sample_name]
+        ):
+            sample_wise_bd_metric[sample_name].extend(
+                [bdrate_d1, bdrate_d2, bdpsnr_d1, bdpsnr_d2]
+            )
+    bd_filename = f'{anchor_name.replace("*", "^")}'
     if anchor_secondly:
-        bd_file_name += f' {anchor_name}'
+        bd_filename = 'bd gains ' + bd_filename
     else:
-        bd_file_name = f'{anchor_name} ' + bd_file_name
-    bd_file_name += '.csv'
+        bd_filename += ' bd gains'
+    bd_filename += '.csv'
     write_metric_to_csv(
-        method_names_to_compare, sample_wise_bdrate_d1,
-        osp.join(output_dir, bd_file_name.format('rate', 1))
-    )
-    write_metric_to_csv(
-        method_names_to_compare, sample_wise_bdrate_d2,
-        osp.join(output_dir, bd_file_name.format('rate', 2))
-    )
-    write_metric_to_csv(
-        method_names_to_compare, sample_wise_bdpsnr_d1,
-        osp.join(output_dir, bd_file_name.format('psnr', 1))
-    )
-    write_metric_to_csv(
-        method_names_to_compare, sample_wise_bdpsnr_d2,
-        osp.join(output_dir, bd_file_name.format('psnr', 2))
+        (method_names_to_compare, ('BD-Rate', 'BD-PSNR'), ('D1', 'D2')),
+        sample_wise_bd_metric, osp.join(output_dir, bd_filename)
     )
 
     def remove_low_psnr_for_vis(tmp_x_axis, tmp_y_axis, method_name):
         if method_name == 'G-PCC octree':
-            tmp_x_axis, tmp_y_axis = tmp_x_axis[2:], tmp_y_axis[2:]
+            tmp_x_axis, tmp_y_axis = tmp_x_axis[1:-1], tmp_y_axis[1:-1]
         elif method_name == 'G-PCC trisoup':
             tmp_x_axis, tmp_y_axis = tmp_x_axis[1:], tmp_y_axis[1:]
+        elif method_name == 'ADLPCC':
+            tmp_x_axis, tmp_y_axis = tmp_x_axis[:-2], tmp_y_axis[:-2]
+        elif not draw_anchor and method_name == anchor_name:
+            tmp_x_axis, tmp_y_axis = (), ()
         return tmp_x_axis, tmp_y_axis
 
     plot_bpp_psnr(method_to_json, output_dir, hook=remove_low_psnr_for_vis)

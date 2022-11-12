@@ -9,7 +9,7 @@ import json
 
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
-from scripts.shared_config import pc_error_path, conda_prefix, metric_dict_filename
+from scripts.shared_config import pc_error_path, conda_prefix, metric_dict_filename, cuda_device
 
 
 adl_pcc_dir = '../ADLPCC'
@@ -60,7 +60,7 @@ def test():
         python_pre_command = f'. {osp.join(conda_prefix, "bin", "activate")} {conda_env_name};'
     else:
         python_pre_command = ';'
-    python_pre_command += 'export TF_FORCE_GPU_ALLOW_GROWTH=true;'
+    python_pre_command += f'export TF_FORCE_GPU_ALLOW_GROWTH=true;export CUDA_VISIBLE_DEVICES={cuda_device};'
     all_file_metric_dict: all_file_metric_dict_type = {}
 
     for resolution, file_list in zip(resolutions, file_lists):
