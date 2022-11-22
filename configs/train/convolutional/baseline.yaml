@@ -50,7 +50,7 @@ train:
 
 test:
   batch_size: 1
-  num_workers: 2
+  num_workers: 0
   log_frequency: 1
   save_results: True
   dataset_path:

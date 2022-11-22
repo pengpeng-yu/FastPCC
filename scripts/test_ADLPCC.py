@@ -16,11 +16,14 @@ adl_pcc_dir = '../ADLPCC'
 conda_env_name = 'PCC_GEO_v2'
 
 file_lists = (
-    'datasets/8iVFBv2/list.txt',
-    'datasets/Owlii/list.txt',
-    'datasets/MVUB/list.txt',
+    "datasets/MVUB/list.txt",
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
 )
-resolutions = (1024, 2048, 512)
+
+resolutions = (512, 1024, 2048, 4096)
+assert len(file_lists) == len(resolutions)
 
 output_dir = 'runs/tests/ADLPCC'
 
@@ -84,7 +87,7 @@ def test():
                 print(subp_enc.stdout)
                 sub_metric_dict = concat_values_for_dict(
                     sub_metric_dict,
-                    log_extractor.extract_enc_log(subp_enc.stdout)
+                    log_extractor.extract_enc_log(subp_enc.stdout), False
                 )
                 encoded_path = osp.join(
                     adl_pcc_dir, 'results', rate_flag, file_basename,
@@ -103,7 +106,7 @@ def test():
                 print(subp_dec.stdout)
                 sub_metric_dict = concat_values_for_dict(
                     sub_metric_dict,
-                    log_extractor.extract_dec_log(subp_dec.stdout)
+                    log_extractor.extract_dec_log(subp_dec.stdout), False
                 )
                 recon_path = osp.join(
                     adl_pcc_dir, 'results', rate_flag, file_basename,
@@ -112,10 +115,11 @@ def test():
                 sub_metric_dict = concat_values_for_dict(
                     sub_metric_dict,
                     mpeg_pc_error(
-                        file_path, osp.abspath(recon_path),
-                        resolution, threads=16, command=pc_error_path,
+                        file_path, osp.abspath(recon_path), resolution,
+                        normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
+                        threads=16, command=pc_error_path,
                         hooks=(hook_for_org_points_num,)
-                    )
+                    ), False
                 )
                 sub_metric_dict['bpp'].append(
                     osp.getsize(encoded_path) * 8 / sub_metric_dict['org points num'][0]

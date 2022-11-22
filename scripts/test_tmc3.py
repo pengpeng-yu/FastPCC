@@ -16,11 +16,12 @@ from scripts.shared_config import pc_error_path, metric_dict_filename
 tmc3_path = '../mpeg-pcc-tmc13/build/tmc3/tmc3'
 
 file_lists = (
-    'datasets/8iVFBv2/list.txt',
-    'datasets/Owlii/list.txt',
-    'datasets/MVUB/list.txt',
+    "datasets/MVUB/list.txt",
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
 )
-resolutions = (1024, 2048, 512)
+resolutions = (512, 1024, 2048, 4096)
 assert len(file_lists) == len(resolutions)
 
 config_dirs = (
@@ -93,14 +94,14 @@ def test_geo_single_frame():
             for file_path in file_paths:
                 sub_metric_dict: one_file_metric_dict_type = {}
                 file_basename = osp.splitext(osp.split(file_path)[1])[0]
-                config_paths = glob(osp.join(config_dir, file_basename, '*', 'encoder.cfg'))
+                config_paths = glob(osp.join(config_dir, file_basename.lower(), '*', 'encoder.cfg'))
                 config_paths.sort()
                 if len(config_paths) == 0:
                     if 'MVUB' in file_list:
                         flag_mvub = True
                         config_paths = default_config_paths
                     else:
-                        raise NotImplementedError
+                        raise NotImplementedError(f'len(config_paths) == 0 for : {file_basename}')
                 else:
                     flag_mvub = False
                 sub_output_dir = osp.join(output_dir, file_basename)
@@ -133,7 +134,7 @@ def test_geo_single_frame():
                         f.write(subp_enc.stdout)
                     sub_metric_dict = concat_values_for_dict(
                         sub_metric_dict,
-                        log_extractor.extract_enc_log(subp_enc.stdout)
+                        log_extractor.extract_enc_log(subp_enc.stdout), False
                     )
                     command_dec = \
                         f'{tmc3_path}' \
@@ -148,16 +149,17 @@ def test_geo_single_frame():
                         f.write(subp_dec.stdout)
                     sub_metric_dict = concat_values_for_dict(
                         sub_metric_dict,
-                        log_extractor.extract_dec_log(subp_dec.stdout)
+                        log_extractor.extract_dec_log(subp_dec.stdout), False
                     )
                     sub_metric_dict = concat_values_for_dict(
                         sub_metric_dict,
                         mpeg_pc_error(
                             file_path,
-                            osp.join(sub_output_dir, f'{rate_flag}_recon.ply'),
-                            resolution, threads=16, command=pc_error_path,
+                            osp.join(sub_output_dir, f'{rate_flag}_recon.ply'), resolution,
+                            normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
+                            threads=16, command=pc_error_path,
                             hooks=(hook_for_org_points_num,)
-                        )
+                        ), False
                     )
                 sub_metric_dict['bpp'] = [bits / org_points_num for bits, org_points_num in zip(
                     sub_metric_dict['bits'], sub_metric_dict['org points num'])]

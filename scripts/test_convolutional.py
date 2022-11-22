@@ -56,9 +56,9 @@ def test():
         python_pre_command = ';'
 
     for run_dirname, par_num in (
-        ('convolutional_all_no_par', 0),
-        ('convolutional_all_par6e5', 600000),
-        ('convolutional_all_par15e4', 150000),
+        ('convolutional/no_par', 0),
+        ('convolutional/par6e5', 600000),
+        ('convolutional/par15e4', 150000),
     ):
         run_dir = osp.join('runs', 'tests', run_dirname)
         for config_path, glob_weights_path in zip(config_paths, glob_weights_paths):
@@ -78,6 +78,7 @@ def test():
                     f'python test.py {config_path}'
                     f' test.weights_from_ckpt={weight_path}'
                     f' test.rundir_name={sub_sub_run_dir.replace("runs/", "", 1)}'
+                    f' test.dataset_path=lib.datasets.PlyVoxel.MVUB_MPEG_GPCC_CTC_Solid'
                     f' test.dataset.kd_tree_partition_max_points_num={par_num}'
                     f' test.device={cuda_device}',
                     shell=True, check=True, executable=shutil.which('bash')

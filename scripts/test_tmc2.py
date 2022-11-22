@@ -15,10 +15,12 @@ from scripts.shared_config import pc_error_path, metric_dict_filename
 tmc2_path = ('../mpeg-pcc-tmc2/bin/PccAppEncoder', '../mpeg-pcc-tmc2/bin/PccAppDecoder')
 
 file_lists = (
-    'datasets/8iVFBv2/list.txt',
-    'datasets/Owlii/list.txt',
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
 )
-resolutions = (1024, 2048)
+
+resolutions = (1024, 2048, 4096)
 assert len(file_lists) == len(resolutions)
 
 config_dir = '../mpeg-pcc-tmc2/cfg'
@@ -65,6 +67,9 @@ def test_geo_single_frame():
             sub_metric_dict: one_file_metric_dict_type = {}
             file_basename = osp.splitext(osp.split(file_path)[1])[0]
             cfg_name = file_basename.rsplit('_', 1)[0]
+            seq_cfg_path = f'{config_dir}/sequence/{cfg_name}.cfg'
+            if not osp.isfile(seq_cfg_path):
+                continue
             sub_output_dir = osp.join(output_dir, file_basename)
             os.makedirs(sub_output_dir, exist_ok=True)
             for rate in range(1, 6):
@@ -74,7 +79,7 @@ def test_geo_single_frame():
                     f' --configurationFolder={config_dir}/' \
                     f' --config={config_dir}/common/ctc-common.cfg' \
                     f' --config={config_dir}/condition/ctc-all-intra.cfg' \
-                    f' --config={config_dir}/sequence/{cfg_name}.cfg' \
+                    f' --config={seq_cfg_path}' \
                     f' --config={config_dir}/rate/ctc-r{rate}.cfg' \
                     f' --uncompressedDataPath={file_path}' \
                     f' --frameCount=1' \
@@ -90,7 +95,7 @@ def test_geo_single_frame():
                     f.write(subp_enc.stdout)
                 sub_metric_dict = concat_values_for_dict(
                     sub_metric_dict,
-                    log_extractor.extract_enc_log(subp_enc.stdout)
+                    log_extractor.extract_enc_log(subp_enc.stdout), False
                 )
                 command_dec = \
                     f'{tmc2_path[1]}' \
@@ -107,16 +112,17 @@ def test_geo_single_frame():
                     f.write(subp_enc.stdout)
                 sub_metric_dict = concat_values_for_dict(
                     sub_metric_dict,
-                    log_extractor.extract_dec_log(subp_dec.stdout)
+                    log_extractor.extract_dec_log(subp_dec.stdout), False
                 )
                 sub_metric_dict = concat_values_for_dict(
                     sub_metric_dict,
                     mpeg_pc_error(
                         file_path,
-                        osp.join(sub_output_dir, f'r{rate}_dec_recon.ply'),
-                        resolution, threads=16, command=pc_error_path,
+                        osp.join(sub_output_dir, f'r{rate}_dec_recon.ply'), resolution,
+                        normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
+                        threads=16, command=pc_error_path,
                         hooks=(hook_for_org_points_num,)
-                    )
+                    ), False
                 )
             sub_metric_dict['bpp'] = [(meta_bits + geo_bits) / org_points_num for
                                       meta_bits, geo_bits, org_points_num in zip(

@@ -92,8 +92,8 @@ class TestConfig(SimpleConfig):
     rundir_name: str = 'test_<autoindex>'
     device: Union[int, str] = '0'  # 0 or 1 or cpu (only single gpu supported)
     batch_size: int = 8
-    num_workers: int = 4
-    pin_memory: bool = True
+    num_workers: int = 0
+    pin_memory: bool = False
     weights_from_ckpt: str = ''
     log_frequency: int = 50  # (steps) used for logging
     save_results: bool = False  # save outputs of model in runs/rundir_name/results

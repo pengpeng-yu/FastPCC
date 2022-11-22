@@ -1,5 +1,6 @@
 import subprocess
 from typing import Dict, Callable, Union, Tuple
+import os.path as osp
 
 
 _DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A->B).',
@@ -20,7 +21,7 @@ def mpeg_pc_error(
                f' --hausdorff={int(hausdorff)}' \
                f' --color={int(color)}' \
                f' --nbThreads={threads}'
-    if normal_file != '':
+    if normal_file != '' and osp.exists(normal_file):
         cmd_args += ' -n ' + normal_file
 
     subp_stdout = subprocess.run(

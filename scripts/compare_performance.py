@@ -75,12 +75,12 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
         fig.grid()
         fig.set_xlabel('bpp')
         fig.set_ylabel(y_label)
-        fig.set_title(
-            re.match(
-                figure_title_re_pattern,
-                osp.split(sample_name)[1]
-            ).group()[:-1].replace('_', ' ')
-        )
+        fig.set_title(osp.splitext(osp.split(sample_name)[1])[0])
+        #     re.match(
+        #         figure_title_re_pattern,
+        #         osp.split(sample_name)[1]
+        #     ).group()[:-1].replace('_', ' ')
+        # )
         for method_name, method_json in method_to_json.items():
             if sample_name not in method_json: continue
             tmp_x_axis = method_json[sample_name]['bpp']
@@ -109,31 +109,31 @@ def compute_multiple_bdrate():
     output_dir = 'runs/comparison'
     json_path_pattern = osp.join('runs', 'tests', '{}', metric_dict_filename)
     method_to_json_path: Dict[str, Union[str, List[str]]] = {
-        'Ours': ['convolutional_all_no_par/lossl_based',
-                 'convolutional_all_no_par/lossl_based_2x'],
-        # 'Ours*': ['convolutional_all_par6e5/lossl_based',
-        #           'convolutional_all_par6e5/lossl_based_2x'],
-        # 'Ours**': ['convolutional_all_par15e4/lossl_based',
-        #            'convolutional_all_par15e4/lossl_based_2x'],
-        'Ours w/o lossl geom':
-            ['convolutional_all_no_par/gpcc_lossl_based',
-             'convolutional_all_no_par/gpcc_lossl_based_2x'],
+        'Ours': ['convolutional/no_par/lossl_based',
+                 'convolutional/no_par/lossl_based_2x'],
+        # 'Ours*': ['convolutional/par6e5/lossl_based',
+        #           'convolutional/par6e5/lossl_based_2x'],
+        # 'Ours**': ['convolutional/par15e4/lossl_based',
+        #            'convolutional/par15e4/lossl_based_2x'],
+        # 'Ours w/o lossl geom':
+        #     ['convolutional/no_par/gpcc_lossl_based',
+        #      'convolutional/no_par/gpcc_lossl_based_2x'],
         # 'Ours w/o lossl geom*':
-        #     ['convolutional_all_par6e5/gpcc_lossl_based',
-        #      'convolutional_all_par6e5/gpcc_lossl_based_2x'],
+        #     ['convolutional/par6e5/gpcc_lossl_based',
+        #      'convolutional/par6e5/gpcc_lossl_based_2x'],
         # 'Ours w/o lossl geom**':
-        #     ['convolutional_all_par15e4/gpcc_lossl_based',
-        #      'convolutional_all_par15e4/gpcc_lossl_based_2x'],
-        'PCGCv2': 'convolutional_all_no_par/baseline',
-        # 'PCGCv2*': 'convolutional_all_par6e5/baseline',
-        # 'PCGCv2**': 'convolutional_all_par15e4/baseline',
-        'Deep backbone w/o res': 'convolutional_all_no_par/baseline_4x',
-        # 'Deep backbone w/o res*': 'convolutional_all_par6e5/baseline_4x',
-        # 'Deep backbone w/o res**': 'convolutional_all_par15e4/baseline_4x',
-        # 'V-PCC': 'tmc2_geo',
-        # 'ADLPCC': 'ADLPCC',
-        # 'G-PCC octree': 'tmc3_geo/octree',
-        # 'G-PCC trisoup': 'tmc3_geo/trisoup',
+        #     ['convolutional/par15e4/gpcc_lossl_based',
+        #      'convolutional/par15e4/gpcc_lossl_based_2x'],
+        'PCGCv2': 'convolutional/no_par/baseline',
+        # 'PCGCv2*': 'convolutional/par6e5/baseline',
+        # 'PCGCv2**': 'convolutional/par15e4/baseline',
+        # 'Deep backbone w/o res': 'convolutional/no_par/baseline_4x',
+        # 'Deep backbone w/o res*': 'convolutional/par6e5/baseline_4x',
+        # 'Deep backbone w/o res**': 'convolutional/par15e4/baseline_4x',
+        'V-PCC': 'tmc2_geo',
+        'ADLPCC': 'ADLPCC',
+        'G-PCC octree': 'tmc3_geo/octree',
+        'G-PCC trisoup': 'tmc3_geo/trisoup',
     }
     method_to_json_path = {k: [json_path_pattern.format(v_) for v_ in (v if isinstance(v, list) else [v])]
                            for k, v in method_to_json_path.items()}
@@ -159,23 +159,26 @@ def compute_multiple_bdrate():
     sample_wise_bdrate_d2: sample_wise_metric_type = {}
     sample_wise_bdpsnr_d1: sample_wise_metric_type = {}
     sample_wise_bdpsnr_d2: sample_wise_metric_type = {}
-    sample_wise_complexity: sample_wise_metric_type = {}
+    sample_wise_time_complexity: sample_wise_metric_type = {}
+    sample_wise_mem_complexity: sample_wise_metric_type = {}
 
     for method_name, method_json in method_to_json.items():
-        single_sample_complexity = {}
+        single_sample_time_complexity = {}
+        single_sample_mem_complexity = {}
         for sample_name in sample_names:
             single_sample_json = method_json[sample_name] if sample_name in method_json else {}
-            single_sample_complexity[sample_name] = [
+            single_sample_time_complexity[sample_name] = [
                 list_mean(single_sample_json['encode time'])
                 if 'encode time' in single_sample_json else -1,
                 list_mean(single_sample_json['decode time'])
-                if 'decode time' in single_sample_json else -1,
+                if 'decode time' in single_sample_json else -1]
+            single_sample_mem_complexity[sample_name] = [
                 list_mean(single_sample_json['encode memory']) / 1024 ** 2  # KB -> GB
                 if 'encode memory' in single_sample_json else -1,
                 list_mean(method_json[sample_name]['decode memory']) / 1024 ** 2
-                if 'decode memory' in single_sample_json else -1,
-            ]
-        concat_values_for_dict(sample_wise_complexity, single_sample_complexity)
+                if 'decode memory' in single_sample_json else -1]
+        concat_values_for_dict(sample_wise_time_complexity, single_sample_time_complexity)
+        concat_values_for_dict(sample_wise_mem_complexity, single_sample_mem_complexity)
 
         if method_name != anchor_name:
             comparison_tuple = (method_to_json[anchor_name], method_json)
@@ -198,8 +201,12 @@ def compute_multiple_bdrate():
             )
 
     write_metric_to_csv(
-        (list(method_to_json.keys()), ('Time', 'Mem'), ('Enc', 'Dec')),
-        sample_wise_complexity, osp.join(output_dir, 'Complexity.csv')
+        (list(method_to_json.keys()), ('Enc', 'Dec')),
+        sample_wise_time_complexity, osp.join(output_dir, 'Time_Complexity.csv')
+    )
+    write_metric_to_csv(
+        (list(method_to_json.keys()), ('Enc', 'Dec')),
+        sample_wise_mem_complexity, osp.join(output_dir, 'Mem_Complexity.csv')
     )
     sample_wise_bd_metric = {}
     for sample_name in sample_wise_bdrate_d1:
