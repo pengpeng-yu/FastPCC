@@ -164,7 +164,7 @@ class PCC(nn.Module):
         self.cfg = cfg
         self.evaluator = PCGCEvaluator(
             cfg.mpeg_pcc_error_command,
-            cfg.mpeg_pcc_error_threads
+            cfg.mpeg_pcc_error_processes
         )
         neighbor_fea_generator = RandLANeighborFea(cfg.neighbor_num)
         blocks_num = len(cfg.channels) - 1

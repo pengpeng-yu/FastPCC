@@ -64,4 +64,4 @@ class ModelConfig(SimpleConfig):
 
     # Only for test phase:
     mpeg_pcc_error_command: str = 'pc_error_d'
-    mpeg_pcc_error_threads: int = 8
+    mpeg_pcc_error_processes: int = 16

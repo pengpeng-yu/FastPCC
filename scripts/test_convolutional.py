@@ -76,6 +76,7 @@ def test():
                 subprocess.run(
                     f'{python_pre_command}'
                     f'python test.py {config_path}'
+                    f' model.mpeg_pcc_error_processes=32'
                     f' test.weights_from_ckpt={weight_path}'
                     f' test.rundir_name={sub_sub_run_dir.replace("runs/", "", 1)}'
                     f' test.dataset_path=lib.datasets.PlyVoxel.MVUB_MPEG_GPCC_CTC_Solid'

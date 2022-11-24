@@ -60,7 +60,7 @@ class PCC(nn.Module):
         self.minkowski_algorithm = getattr(ME.MinkowskiAlgorithm, cfg.minkowski_algorithm)
         self.evaluator = PCGCEvaluator(
             cfg.mpeg_pcc_error_command,
-            cfg.mpeg_pcc_error_threads
+            cfg.mpeg_pcc_error_processes
         )
         self.basic_block_args = (
             cfg.basic_block_type,

@@ -4,9 +4,9 @@ This script is based on commit c3c9798a0f63970bd17ce191900ded478a8aa0f6 of mpeg-
 import math
 from glob import glob
 import os
-import shutil
 import subprocess
 import json
+import multiprocessing as mp
 
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
@@ -76,95 +76,32 @@ def get_tmc3_trisoup_trisoupNodeSizeLog2(rate_flag):
     return d[int(rate_flag)]
 
 
-def test_geo_single_frame():
+def test_geo_intra(processes_num, immediate_dump):
     print('Test tmc3 geo coding')
+    pool = mp.Pool(processes_num)
 
-    log_extractor = TMC3LogExtractor()
     for config_dir, output_dir in zip(config_dirs, output_dirs):
         default_config_paths = glob(osp.join(config_dir, 'basketball_player_vox11_00000200', '*', 'encoder.cfg'))
         default_config_paths.sort()
         print(f'Test config: "{config_dir}"')
         print(f'Output to "{output_dir}"')
-        if osp.exists(output_dir):
-            shutil.rmtree(output_dir)
         all_file_metric_dict: all_file_metric_dict_type = {}
+        all_file_run_res = {}
 
         for resolution, file_list in zip(resolutions, file_lists):
             file_paths = read_file_list_with_rel_path(file_list)
             for file_path in file_paths:
-                sub_metric_dict: one_file_metric_dict_type = {}
-                file_basename = osp.splitext(osp.split(file_path)[1])[0]
-                config_paths = glob(osp.join(config_dir, file_basename.lower(), '*', 'encoder.cfg'))
-                config_paths.sort()
-                if len(config_paths) == 0:
-                    if 'MVUB' in file_list:
-                        flag_mvub = True
-                        config_paths = default_config_paths
-                    else:
-                        raise NotImplementedError(f'len(config_paths) == 0 for : {file_basename}')
-                else:
-                    flag_mvub = False
-                sub_output_dir = osp.join(output_dir, file_basename)
-                os.makedirs(sub_output_dir, exist_ok=True)
-                for config_path in config_paths:
-                    rate_flag = osp.split(osp.split(config_path)[0])[1]
-                    print(f'    Test file {file_path}, res {resolution}, {rate_flag}')
-                    command_enc = \
-                        f'{tmc3_path}' \
-                        f' --config={config_path}' \
-                        f' --disableAttributeCoding=1' \
-                        f' --uncompressedDataPath={file_path}' \
-                        f' --compressedStreamPath={osp.join(sub_output_dir, f"{rate_flag}.bin")}'
-                    if flag_mvub:
-                        if 'octree' in config_dir:
-                            command_enc += \
-                                f' --positionQuantizationScale='\
-                                f'{get_tmc3_octree_positionQuantizationScale(round(math.log2(resolution)), rate_flag[1:])}'
-                        elif 'trisoup' in config_dir:
-                            command_enc += \
-                                f' --trisoupNodeSizeLog2=' \
-                                f'{get_tmc3_trisoup_trisoupNodeSizeLog2(rate_flag[1:])}'
-                        else:
-                            raise NotImplementedError
-                    subp_enc = subprocess.run(
-                        command_enc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        shell=True, check=True, text=True
-                    )
-                    with open(osp.join(sub_output_dir, f'log_{rate_flag}_enc.txt'), 'w') as f:
-                        f.write(subp_enc.stdout)
-                    sub_metric_dict = concat_values_for_dict(
-                        sub_metric_dict,
-                        log_extractor.extract_enc_log(subp_enc.stdout), False
-                    )
-                    command_dec = \
-                        f'{tmc3_path}' \
-                        f' --mode=1' \
-                        f' --compressedStreamPath={osp.join(sub_output_dir, f"{rate_flag}.bin")}' \
-                        f' --reconstructedDataPath={osp.join(sub_output_dir, f"{rate_flag}_recon.ply")}'
-                    subp_dec = subprocess.run(
-                        command_dec, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        shell=True, check=True, text=True
-                    )
-                    with open(osp.join(sub_output_dir, f'log_{rate_flag}_dec.txt'), 'w') as f:
-                        f.write(subp_dec.stdout)
-                    sub_metric_dict = concat_values_for_dict(
-                        sub_metric_dict,
-                        log_extractor.extract_dec_log(subp_dec.stdout), False
-                    )
-                    sub_metric_dict = concat_values_for_dict(
-                        sub_metric_dict,
-                        mpeg_pc_error(
-                            file_path,
-                            osp.join(sub_output_dir, f'{rate_flag}_recon.ply'), resolution,
-                            normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
-                            threads=16, command=pc_error_path,
-                            hooks=(hook_for_org_points_num,)
-                        ), False
-                    )
-                sub_metric_dict['bpp'] = [bits / org_points_num for bits, org_points_num in zip(
-                    sub_metric_dict['bits'], sub_metric_dict['org points num'])]
-                del sub_metric_dict['bits'], sub_metric_dict['org points num']
-                all_file_metric_dict[file_path] = sub_metric_dict
+                all_file_run_res[file_path] = pool.apply_async(
+                    run_single_file,
+                    (file_path, resolution, file_list, default_config_paths, config_dir, output_dir)
+                )
+        for file_path, run_res in all_file_run_res.items():
+            ret = run_res.get()
+            if ret is not None:
+                all_file_metric_dict[file_path] = ret
+                if immediate_dump:
+                    with open(osp.join(output_dir, metric_dict_filename), 'w') as f:
+                        f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
 
         print(f'{config_dir} Done')
         with open(osp.join(output_dir, metric_dict_filename), 'w') as f:
@@ -172,5 +109,83 @@ def test_geo_single_frame():
     print('All Done')
 
 
+def run_single_file(file_path, resolution, file_list, default_config_paths, config_dir, output_dir):
+    log_extractor = TMC3LogExtractor()
+    sub_metric_dict: one_file_metric_dict_type = {}
+    file_basename = osp.splitext(osp.split(file_path)[1])[0]
+    config_paths = glob(osp.join(config_dir, file_basename.lower(), '*', 'encoder.cfg'))
+    config_paths.sort()
+    if len(config_paths) == 0:
+        if 'MVUB' in file_list:
+            flag_mvub = True
+            config_paths = default_config_paths
+        else:
+            print(f'\nlen(config_paths) == 0 for : {file_basename}\n')
+            return None
+    else:
+        flag_mvub = False
+    sub_output_dir = osp.join(output_dir, file_basename)
+    os.makedirs(sub_output_dir, exist_ok=True)
+    for config_path in config_paths:
+        rate_flag = osp.split(osp.split(config_path)[0])[1]
+        print(f'    Test file {file_path}, res {resolution}, {rate_flag}')
+        command_enc = \
+            f'{tmc3_path}' \
+            f' --config={config_path}' \
+            f' --disableAttributeCoding=1' \
+            f' --uncompressedDataPath={file_path}' \
+            f' --compressedStreamPath={osp.join(sub_output_dir, f"{rate_flag}.bin")}'
+        if flag_mvub:
+            if 'octree' in config_dir:
+                command_enc += \
+                    f' --positionQuantizationScale=' \
+                    f'{get_tmc3_octree_positionQuantizationScale(round(math.log2(resolution)), rate_flag[1:])}'
+            elif 'trisoup' in config_dir:
+                command_enc += \
+                    f' --trisoupNodeSizeLog2=' \
+                    f'{get_tmc3_trisoup_trisoupNodeSizeLog2(rate_flag[1:])}'
+            else:
+                raise NotImplementedError
+        subp_enc = subprocess.run(
+            command_enc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            shell=True, check=True, text=True
+        )
+        with open(osp.join(sub_output_dir, f'log_{rate_flag}_enc.txt'), 'w') as f:
+            f.write(subp_enc.stdout)
+        sub_metric_dict = concat_values_for_dict(
+            sub_metric_dict,
+            log_extractor.extract_enc_log(subp_enc.stdout), False
+        )
+        command_dec = \
+            f'{tmc3_path}' \
+            f' --mode=1' \
+            f' --compressedStreamPath={osp.join(sub_output_dir, f"{rate_flag}.bin")}' \
+            f' --reconstructedDataPath={osp.join(sub_output_dir, f"{rate_flag}_recon.ply")}'
+        subp_dec = subprocess.run(
+            command_dec, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            shell=True, check=True, text=True
+        )
+        with open(osp.join(sub_output_dir, f'log_{rate_flag}_dec.txt'), 'w') as f:
+            f.write(subp_dec.stdout)
+        sub_metric_dict = concat_values_for_dict(
+            sub_metric_dict,
+            log_extractor.extract_dec_log(subp_dec.stdout), False
+        )
+        sub_metric_dict = concat_values_for_dict(
+            sub_metric_dict,
+            mpeg_pc_error(
+                file_path,
+                osp.join(sub_output_dir, f'{rate_flag}_recon.ply'), resolution,
+                normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
+                command=pc_error_path,
+                hooks=(hook_for_org_points_num,)
+            ), False
+        )
+    sub_metric_dict['bpp'] = [bits / org_points_num for bits, org_points_num in zip(
+        sub_metric_dict['bits'], sub_metric_dict['org points num'])]
+    del sub_metric_dict['bits'], sub_metric_dict['org points num']
+    return sub_metric_dict
+
+
 if __name__ == '__main__':
-    test_geo_single_frame()
+    test_geo_intra(32, True)

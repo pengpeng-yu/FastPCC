@@ -2,6 +2,7 @@ import json
 from collections import defaultdict
 from typing import Tuple, List, Union, Dict
 import os
+import multiprocessing as mp
 
 import cv2
 import numpy as np
@@ -29,13 +30,14 @@ class Evaluator:
 class PCGCEvaluator(Evaluator):
     def __init__(self,
                  mpeg_pcc_error_command: str,
-                 mpeg_pcc_error_threads: int):
+                 mpeg_pcc_error_processes: int):
         super(PCGCEvaluator, self).__init__()
         self.mpeg_pcc_error_command = mpeg_pcc_error_command
-        self.mpeg_pcc_error_threads = mpeg_pcc_error_threads
+        self.mpeg_pcc_error_pool = mp.Pool(mpeg_pcc_error_processes)
 
     def reset(self):
         self.file_path_to_info: Dict[str, Dict[str, Union[int, float]]] = {}
+        self.file_path_to_info_run_res: Dict[str, mp.pool.AsyncResult] = {}
 
     @torch.no_grad()
     def log_batch(self,
@@ -117,22 +119,13 @@ class PCGCEvaluator(Evaluator):
                         )
                         print(f'Wrote Ply file to {file_path} with normals estimation')
                         normal_file_path = file_path
-                    mpeg_pc_error_dict = mpeg_pc_error(
-                        os.path.abspath(file_path),
-                        os.path.abspath(reconstructed_path),
-                        normal_file=normal_file_path,
-                        resolution=resolution, color=have_color,
-                        threads=self.mpeg_pcc_error_threads,
-                        command=self.mpeg_pcc_error_command
+                    self.file_path_to_info_run_res[file_path] = self.mpeg_pcc_error_pool.apply_async(
+                        mpeg_pc_error,
+                        (os.path.abspath(file_path),
+                         os.path.abspath(reconstructed_path),
+                         resolution, normal_file_path, False, have_color,
+                         1, self.mpeg_pcc_error_command)
                     )
-                    assert mpeg_pc_error_dict != {}, \
-                        f'Error when calling mpeg pc error software with ' \
-                        f'infile1={os.path.abspath(file_path)} ' \
-                        f'infile2={os.path.abspath(reconstructed_path)}'
-                    file_info_dict.update(mpeg_pc_error_dict)
-                    file_info_dict["mse1+mse2 (p2point)"] = \
-                        mpeg_pc_error_dict["mse1      (p2point)"] + \
-                        mpeg_pc_error_dict["mse2      (p2point)"]
             if file_path in self.file_path_to_info:
                 print(f'Warning: Duplicated test sample {file_path}')
             self.file_path_to_info[file_path] = file_info_dict
@@ -140,6 +133,16 @@ class PCGCEvaluator(Evaluator):
         return True
 
     def show(self, results_dir: str) -> Dict[str, Union[int, float]]:
+        for file_path, run_res in self.file_path_to_info_run_res.items():
+            mpeg_pc_error_dict = run_res.get()
+            assert mpeg_pc_error_dict != {}, \
+                f'Error when calling mpeg pc error software with ' \
+                f'infile1={os.path.abspath(file_path)} '
+            self.file_path_to_info[file_path].update(mpeg_pc_error_dict)
+            self.file_path_to_info[file_path]["mse1+mse2 (p2point)"] = \
+                mpeg_pc_error_dict["mse1      (p2point)"] + \
+                mpeg_pc_error_dict["mse2      (p2point)"]
+
         if results_dir is not None:
             with open(os.path.join(results_dir, 'metric.txt'), 'w') as f:
                 f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
