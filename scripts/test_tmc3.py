@@ -41,7 +41,7 @@ if geo_only:
     )
     output_dirs = (
         f'runs/{results_dir}/tmc3_geo/octree',
-        f'runs/{results_dir}/tmc3_gep/trisoup',
+        f'runs/{results_dir}/tmc3_geo/trisoup',
     )
 else:
     config_dirs = (
@@ -134,17 +134,24 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
     log_extractor = TMC3LogExtractor()
     sub_metric_dict: one_file_metric_dict_type = {}
     file_basename = osp.splitext(osp.split(file_path)[1])[0]
+    if 'queen/frame' in file_path:
+        # queen/frame_xxx -> queen_0200
+        file_basename = f'queen_{file_path.rsplit("_", 1)[1]}'
     config_paths = glob(osp.join(config_dir, file_basename.lower(), '*', 'encoder.cfg'))
-    config_paths.sort()
+    flag_mvub = False
     if len(config_paths) == 0:
         if 'MVUB' in file_list:
             flag_mvub = True
             config_paths = default_config_paths
         else:
-            print(f'\nlen(config_paths) == 0 for : {file_basename}\n')
-            return None
-    else:
-        flag_mvub = False
+            assert single_frame_only is False
+            # e.g. basketball_player_vox11_xxx -> basketball_player_vox11_00000200
+            config_paths = glob(osp.join(
+                config_dir, file_basename.lower().rsplit('_', 1)[0] + '*', '*', 'encoder.cfg'))
+            if len(config_paths) == 0:
+                print(f'\nlen(config_paths) == 0 for : {file_basename}\n')
+                return None
+    config_paths.sort()
     sub_output_dir = osp.join(output_dir, file_basename)
     os.makedirs(sub_output_dir, exist_ok=True)
     for config_path in config_paths:

@@ -13,20 +13,30 @@ from scripts.log_extract_utils import *
 from scripts.shared_config import pc_error_path, metric_dict_filename
 
 geo_only = True
+single_frame_only = True
 
 tmc2_path = ('../mpeg-pcc-tmc2/bin/PccAppEncoder', '../mpeg-pcc-tmc2/bin/PccAppDecoder')
 
-file_lists = (
-    "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
-    "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
-    "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
-)
+if single_frame_only:
+    file_lists = (
+        "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
+        "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
+        "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
+    )
+    resolutions = (1024, 2048, 4096)
+    results_dir = "tests"
+else:  # all intra
+    file_lists = (
+        'datasets/Owlii/list_basketball_player_dancer_all.txt',
+        'datasets/8iVFBv2/list_all.txt'
+    )
+    resolutions = (2048, 1024)
+    results_dir = "tests_seq"
 
-resolutions = (1024, 2048, 4096)
 assert len(file_lists) == len(resolutions)
 
 config_dir = '../mpeg-pcc-tmc2/cfg'
-output_dir = 'runs/tests/tmc2_geo' if geo_only else 'runs/tests/tmc2'
+output_dir = f'runs/{results_dir}/tmc2_geo' if geo_only else f'runs/{results_dir}/tmc2'
 
 
 class TMC2LogExtractor(LogExtractor):
@@ -88,13 +98,10 @@ def run_single_file(file_path, resolution):
     cfg_name = file_basename.rsplit('_', 1)[0]
     seq_cfg_path = f'{config_dir}/sequence/{cfg_name}.cfg'
     if not osp.isfile(seq_cfg_path):
-        print(f'    Skip {file_basename} because {seq_cfg_path} is not found.')
-        prefix, file_basename = osp.split(file_path)  # For **/queen/frame_xxxx.ply
-        prefix = osp.split(prefix)[1]
-        file_basename = '_'.join((prefix, file_basename))
-        cfg_name = prefix
-        seq_cfg_path = f'{config_dir}/sequence/{cfg_name}.cfg'
-        if not osp.isfile(seq_cfg_path):
+        if 'queen/frame' in file_path:
+            file_basename = f'queen_{file_path.rsplit("_", 1)[1]}'
+            seq_cfg_path = f'{config_dir}/sequence/queen.cfg'
+        else:
             print(f'    Skip {file_basename} because {seq_cfg_path} is not found.')
             return None
     sub_output_dir = osp.join(output_dir, file_basename)
