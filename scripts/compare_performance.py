@@ -71,7 +71,7 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
     plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
     sample_names = next(iter(method_to_json.values())).keys()
     for sample_name in sample_names:
-        fig = plt.figure(figsize=(4, 2.5)).add_subplot(111)
+        fig = plt.figure(figsize=(4.5, 2.5)).add_subplot(111)
         fig.grid()
         fig.set_xlabel('bpp')
         fig.set_ylabel(y_label)
@@ -115,21 +115,21 @@ def compute_multiple_bdrate():
         #           'convolutional/par6e5/lossl_based_2x'],
         # 'Ours**': ['convolutional/par15e4/lossl_based',
         #            'convolutional/par15e4/lossl_based_2x'],
-        # 'Ours w/o lossl geom':
-        #     ['convolutional/no_par/gpcc_lossl_based',
-        #      'convolutional/no_par/gpcc_lossl_based_2x'],
-        # 'Ours w/o lossl geom*':
+        'Ours w/o integrated lossless\n geometry compression':
+            ['convolutional/no_par/gpcc_lossl_based',
+             'convolutional/no_par/gpcc_lossl_based_2x'],
+        # 'Ours w/o integrated lossless\n geometry compression*':
         #     ['convolutional/par6e5/gpcc_lossl_based',
         #      'convolutional/par6e5/gpcc_lossl_based_2x'],
-        # 'Ours w/o lossl geom**':
+        # 'Ours w/o integrated lossless\n geometry compression**':
         #     ['convolutional/par15e4/gpcc_lossl_based',
         #      'convolutional/par15e4/gpcc_lossl_based_2x'],
         'PCGCv2': 'convolutional/no_par/baseline',
         # 'PCGCv2*': 'convolutional/par6e5/baseline',
         # 'PCGCv2**': 'convolutional/par15e4/baseline',
-        # 'Deep backbone w/o res': 'convolutional/no_par/baseline_4x',
-        # 'Deep backbone w/o res*': 'convolutional/par6e5/baseline_4x',
-        # 'Deep backbone w/o res**': 'convolutional/par15e4/baseline_4x',
+        # 'Deep backbone w/o residual': 'convolutional/no_par/baseline_4x',
+        # 'Deep backbone w/o residual*': 'convolutional/par6e5/baseline_4x',
+        # 'Deep backbone w/o residual**': 'convolutional/par15e4/baseline_4x',
         'V-PCC': 'tmc2_geo',
         'ADLPCC': 'ADLPCC',
         'G-PCC octree': 'tmc3_geo/octree',

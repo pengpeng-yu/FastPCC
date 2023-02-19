@@ -12,6 +12,7 @@ from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
 from scripts.shared_config import pc_error_path, metric_dict_filename
 
+geo_only = True
 
 tmc2_path = ('../mpeg-pcc-tmc2/bin/PccAppEncoder', '../mpeg-pcc-tmc2/bin/PccAppDecoder')
 
@@ -25,13 +26,14 @@ resolutions = (1024, 2048, 4096)
 assert len(file_lists) == len(resolutions)
 
 config_dir = '../mpeg-pcc-tmc2/cfg'
-output_dir = 'runs/tests/tmc2_geo'
+output_dir = 'runs/tests/tmc2_geo' if geo_only else 'runs/tests/tmc2'
 
 
 class TMC2LogExtractor(LogExtractor):
     default_enc_log_mappings: log_mappings_type = {
         '  TotalMetadata': ('meta bits', lambda l: int(l.split()[-2])),
         '  TotalGeometry': ('geo bits', lambda l: int(l.strip().split()[-2])),
+        '  Total:': ('total bits', lambda l: int(l.strip().split()[-2])),
         'Processing time (user.self)': ('encode time', lambda l: float(l.split()[-2])),
         'Peak memory': ('encode memory', lambda l: int(l.split()[-2]))
     }
@@ -54,7 +56,7 @@ class TMC2LogExtractor(LogExtractor):
 
 
 def test_geo_intra(processes_num, immediate_dump):
-    print('Test tmc2 geo coding')
+    print(f'Test tmc2 {"geo " if geo_only else ""}coding')
 
     all_file_metric_dict: all_file_metric_dict_type = {}
     all_file_run_res = {}
@@ -110,7 +112,7 @@ def run_single_file(file_path, resolution):
             f' --frameCount=1' \
             f' --compressedStreamPath={sub_output_dir}/r{rate}.bin' \
             f' --reconstructedDataPath={sub_output_dir}/r{rate}_enc_recon.ply' \
-            f' --noAttributes=1' \
+            f' --noAttributes={1 if geo_only else 0}' \
             f' --computeMetrics=0'
         subp_enc = subprocess.run(
             command_enc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -144,16 +146,17 @@ def run_single_file(file_path, resolution):
             mpeg_pc_error(
                 file_path,
                 osp.join(sub_output_dir, f'r{rate}_dec_recon.ply'), resolution,
+                color=False if geo_only else True,
                 normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
                 command=pc_error_path,
                 hooks=(hook_for_org_points_num,)
             ), False
         )
         print(f'    Test file {file_path}, res {resolution}, r{rate}.  Done')
-    sub_metric_dict['bpp'] = [(meta_bits + geo_bits) / org_points_num for
-                              meta_bits, geo_bits, org_points_num in zip(
-            sub_metric_dict['meta bits'], sub_metric_dict['geo bits'], sub_metric_dict['org points num'])]
-    del sub_metric_dict['meta bits'], sub_metric_dict['geo bits'], sub_metric_dict['org points num']
+    sub_metric_dict['bpp'] = [total_bits / org_points_num for total_bits, org_points_num in zip(
+                                  sub_metric_dict['total bits'],
+                                  sub_metric_dict['org points num'])]
+    del sub_metric_dict['meta bits'], sub_metric_dict['geo bits'], sub_metric_dict['total bits'], sub_metric_dict['org points num']
     return sub_metric_dict
 
 

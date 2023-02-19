@@ -94,14 +94,22 @@ class BaseConvBlock(nn.Module):
         return x
 
     def __repr__(self):
+        kernel_size = self.conv.kernel_generator.kernel_size
+        if len(set(kernel_size)) == 1:
+            kernel_size = kernel_size[0]
+        stride = self.conv.kernel_generator.kernel_stride
+        if len(set(stride)) == 1:
+            stride = stride[0]
+        dilation = self.conv.kernel_generator.kernel_dilation
+        if len(set(dilation)) == 1:
+            dilation = dilation[0]
         return \
             f'{self.conv.__class__.__name__.replace("Minkowski", "ME", 1).replace("Convolution", "Conv", 1)}(' \
             f'in={self.conv.in_channels}, out={self.conv.out_channels}, ' \
-            f'region_type={self.conv.kernel_generator.region_type}, ' \
             f'kernel_volume={self.conv.kernel_generator.kernel_volume}, ' \
-            f'kernel_size={self.conv.kernel_generator.kernel_size}, ' \
-            f'stride={self.conv.kernel_generator.kernel_stride}, ' \
-            f'dilation={self.conv.kernel_generator.kernel_dilation}, ' \
+            f'kernel_size={kernel_size}, ' \
+            f'stride={stride}, ' \
+            f'dilation={dilation}, ' \
             f'bn={self.bn is not None}, ' \
             f'act={self.act_module.__class__.__name__.replace("Minkowski", "ME", 1)})'
 
@@ -152,41 +160,55 @@ class GenConvTransBlock(BaseConvBlock):
 
 
 class ResBlock(nn.Module):
-    def __init__(self, channels, region_type: str, bn: bool, act: Optional[str]):
+    def __init__(self, channels, region_type: str, bn: bool, act: Optional[str],
+                 kernel_size: int = 3, last_act: bool = False):
         super(ResBlock, self).__init__()
         self.channels = channels
         self.bn = bn
         self.act = act
         self.region_type = region_type
-
-        self.conv0 = ConvBlock(channels, channels, 3, 1, region_type=region_type, bn=bn, act=act)
-        self.conv1 = ConvBlock(channels, channels, 3, 1, region_type=region_type, bn=bn, act=None)
+        self.kernel_size = kernel_size
+        self.last_act = get_act_module(act) if last_act is True else None
+        self.conv0 = ConvBlock(channels, channels, kernel_size, 1, region_type=region_type, bn=bn, act=act)
+        self.conv1 = ConvBlock(channels, channels, kernel_size, 1, region_type=region_type, bn=bn, act=None)
 
     def forward(self, x):
         out = self.conv1(self.conv0(x))
         out += x
+        if self.last_act is not None:
+            out = ME.SparseTensor(
+                out.F.relu(),
+                coordinate_manager=out.coordinate_manager,
+                coordinate_map_key=out.coordinate_map_key
+            )
         return out
 
     def __repr__(self):
-        return f'MEResBlock(channels={self.channels}, ' \
-               f'region_type={self.region_type}, ' \
-               f'bn={self.bn}, act={self.act})'
+        info = f'MEResBlock(channels={self.channels}, ' \
+               f'bn={self.bn}, act={self.act}'
+        if self.kernel_size != 3:
+            info += f', kernel_size={self.kernel_size}'
+        if self.region_type != 'HYPER_CUBE':
+            info += f', region_type={self.region_type}'
+        info += ')'
+        return info
 
 
 class InceptionResBlock(nn.Module):
-    def __init__(self, channels, region_type: str, bn: bool, act: Optional[str]):
+    def __init__(self, channels, region_type: str, bn: bool, act: Optional[str], kernel_size: int = 3):
         super(InceptionResBlock, self).__init__()
         self.channels = channels
         self.bn = bn
         self.act = act
         self.region_type = region_type
+        self.kernel_size = kernel_size
         self.path_0 = nn.Sequential(
-            ConvBlock(channels, channels // 4, 3, 1, region_type=region_type, bn=bn, act=act),
-            ConvBlock(channels // 4, channels // 2, 3, 1, region_type=region_type, bn=bn, act=None)
+            ConvBlock(channels, channels // 4, kernel_size, 1, region_type=region_type, bn=bn, act=act),
+            ConvBlock(channels // 4, channels // 2, kernel_size, 1, region_type=region_type, bn=bn, act=None)
         )
         self.path_1 = nn.Sequential(
             ConvBlock(channels, channels // 4, 1, 1, region_type=region_type, bn=bn, act=act),
-            ConvBlock(channels // 4, channels // 4, 3, 1, region_type=region_type, bn=bn, act=act),
+            ConvBlock(channels // 4, channels // 4, kernel_size, 1, region_type=region_type, bn=bn, act=act),
             ConvBlock(channels // 4, channels // 2, 1, 1, region_type=region_type, bn=bn, act=None)
         )
 
@@ -197,9 +219,14 @@ class InceptionResBlock(nn.Module):
         return out
 
     def __repr__(self):
-        return f'MEInceptionResBlock(channels={self.channels}, ' \
-               f'region_type={self.region_type}, ' \
-               f'bn={self.bn}, act={self.act})'
+        info = f'MEInceptionResBlock(channels={self.channels}, ' \
+               f'bn={self.bn}, act={self.act}'
+        if self.kernel_size != 3:
+            info += f', kernel_size={self.kernel_size}'
+        if self.region_type != 'HYPER_CUBE':
+            info += f', region_type={self.region_type}'
+        info += ')'
+        return info
 
 
 class NNSequentialWithArgs(nn.Sequential):

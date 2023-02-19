@@ -12,26 +12,47 @@ from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
 from scripts.shared_config import pc_error_path, metric_dict_filename
 
+geo_only = True
+single_frame_only = True
 
 tmc3_path = '../mpeg-pcc-tmc13/build/tmc3/tmc3'
 
-file_lists = (
-    "datasets/MVUB/list.txt",
-    "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
-    "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
-    "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
-)
-resolutions = (512, 1024, 2048, 4096)
-assert len(file_lists) == len(resolutions)
+if single_frame_only:
+    file_lists = (
+        "datasets/MVUB/list.txt",
+        "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
+        "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
+        "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
+    )
+    resolutions = (512, 1024, 2048, 4096)
+    results_dir = "tests"
+else:
+    file_lists = (
+        'datasets/Owlii/list_basketball_player_dancer_all.txt',
+        'datasets/8iVFBv2/list_all.txt'
+    )
+    resolutions = (2048, 1024)
+    results_dir = "tests_seq"
 
-config_dirs = (
-    '../mpeg-pcc-tmc13/cfg/octree-predlift/lossy-geom-lossy-attrs',
-    '../mpeg-pcc-tmc13/cfg/trisoup-predlift/lossy-geom-lossy-attrs',
-)
-output_dirs = (
-    'runs/tests/tmc3_geo/octree',
-    'runs/tests/tmc3_geo/trisoup',
-)
+if geo_only:
+    config_dirs = (
+        '../mpeg-pcc-tmc13/cfg/octree-predlift/lossy-geom-lossy-attrs',
+        '../mpeg-pcc-tmc13/cfg/trisoup-predlift/lossy-geom-lossy-attrs'
+    )
+    output_dirs = (
+        f'runs/{results_dir}/tmc3_geo/octree',
+        f'runs/{results_dir}/tmc3_gep/trisoup',
+    )
+else:
+    config_dirs = (
+        '../mpeg-pcc-tmc13/cfg/octree-predlift/lossy-geom-lossy-attrs',
+        '../mpeg-pcc-tmc13/cfg/octree-raht/lossy-geom-lossy-attrs'
+    )
+    output_dirs = (
+        f'runs/{results_dir}/tmc3/octree-predlift',
+        f'runs/{results_dir}/tmc3/octree-raht',
+    )
+assert len(file_lists) == len(resolutions)
 assert len(config_dirs) == len(output_dirs)
 
 
@@ -77,7 +98,7 @@ def get_tmc3_trisoup_trisoupNodeSizeLog2(rate_flag):
 
 
 def test_geo_intra(processes_num, immediate_dump):
-    print('Test tmc3 geo coding')
+    print(f'Test tmc3 {"geo " if geo_only else ""}coding')
     pool = mp.Pool(processes_num)
 
     for config_dir, output_dir in zip(config_dirs, output_dirs):
@@ -132,7 +153,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
         command_enc = \
             f'{tmc3_path}' \
             f' --config={config_path}' \
-            f' --disableAttributeCoding=1' \
+            f' --disableAttributeCoding={1 if geo_only else 0}' \
             f' --uncompressedDataPath={file_path}' \
             f' --compressedStreamPath={osp.join(sub_output_dir, f"{rate_flag}.bin")}'
         if flag_mvub:
@@ -176,6 +197,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             mpeg_pc_error(
                 file_path,
                 osp.join(sub_output_dir, f'{rate_flag}_recon.ply'), resolution,
+                color=False if geo_only else True,
                 normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
                 command=pc_error_path,
                 hooks=(hook_for_org_points_num,)

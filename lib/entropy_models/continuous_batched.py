@@ -152,7 +152,8 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
     @minkowski_tensor_wrapped_fn({'<del>sparse_tensor_coords_tuple': 0})
     def decompress(self, bytes_list: List[bytes],
                    batch_shape: torch.Size,
-                   target_device: torch.device):
+                   target_device: torch.device,
+                   broadcast_shape: Tuple[int] = None):
         if sum(self.broadcast_shape_bytes) != 0:
             broadcast_shape = []
             broadcast_shape_total_bytes = sum(self.broadcast_shape_bytes)
@@ -162,7 +163,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                     broadcast_shape.append(int.from_bytes(bs.read(bytes_num), 'little', signed=False))
             broadcast_shape = torch.Size(broadcast_shape)
         else:
-            broadcast_shape = torch.Size([1] * len(self.broadcast_shape_bytes))
+            broadcast_shape = broadcast_shape or torch.Size([1] * len(self.broadcast_shape_bytes))
             broadcast_shape_total_bytes = 0
             broadcast_shape_bytes = b''
 
@@ -226,6 +227,13 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
             overflow_coding=overflow_coding,
             broadcast_shape_bytes=broadcast_shape_bytes
         )
+        self.prior_num_filter = num_filters
         # Keep references to ParameterList objects here to make them a part of state dict.
         self.prior_weights, self.prior_biases, self.prior_factors = \
             prior_weights, prior_biases, prior_factors
+
+    def __repr__(self):
+        return f'NoisyDeepFactorizedEntropyModel with\n' \
+               f'   batch_shape={self.prior.batch_shape}\n' \
+               f'   coding_ndim={self.coding_ndim}\n' \
+               f'   num_filter={self.prior_num_filter}\n'

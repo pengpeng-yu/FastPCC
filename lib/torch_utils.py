@@ -111,10 +111,6 @@ class MLPBlock(nn.Module):
                 inplace=True)
         else: raise NotImplementedError
 
-        if self.bn is None and self.act is None and version == 'linear':
-            print('Warning: You are using a MLPBlock without activation nor batchnorm, '
-                  'which is identical to a nn.Linear(bias=True) object')
-
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.version = version
@@ -164,9 +160,15 @@ class MLPBlock(nn.Module):
             return x
 
     def __repr__(self):
-        return f'MLPBlock(in_ch={self.in_channels}, out_ch={self.out_channels}, ' \
-               f'act={self.act}, bn={self.bn}, version={self.version}, ' \
-               f'skip={self.skip_connection})'
+        info = f'MLPBlock(in_ch={self.in_channels}, out_ch={self.out_channels}, ' \
+               f'act={repr(self.act).replace("inplace=True", "")}, ' \
+               f'bn={self.bn}'
+        if self.version != 'linear':
+            info += f', version={self.version}'
+        if self.skip_connection is not None:
+            info += f', skip={self.skip_connection}'
+        info += ')'
+        return info
 
 
 class BatchNorm1dChnlLast(nn.Module):
@@ -383,6 +385,14 @@ def minkowski_tensor_split(x, split_size: Union[int, List[int]]) -> List:
             coordinate_map_key=x.coordinate_map_key,
             coordinate_manager=x.coordinate_manager))
     return ret
+
+
+def minkowski_expand_coord_2x(coord: torch.Tensor, current_tensor_stride: int):
+    assert coord.ndim == 2 and coord.shape[1] == 4
+    strides = torch.tensor(((0, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 1, 1, 0),
+                            (0, 0, 0, 1), (0, 1, 0, 1), (0, 0, 1, 1), (0, 1, 1, 1)),
+                           dtype=coord.dtype, device=coord.device) * (current_tensor_stride // 2)
+    return coord.unsqueeze(1) + strides.unsqueeze(0)
 
 
 def gumbel_sigmoid(logits, tau=1, hard=False):

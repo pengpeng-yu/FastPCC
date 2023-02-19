@@ -314,19 +314,19 @@ def noisy_deep_factorized_indexed_entropy_model_init(
             torch.cumsum(torch.tensor([0, *biases_param_numel]), dim=0) + weights_param_cum_numel[-1]
         factors_param_cum_numel = \
             torch.cumsum(torch.tensor([0, *factors_param_numel]), dim=0) + biases_param_cum_numel[-1]
-        assert index_channels == factors_param_cum_numel[-1]
+        assert index_channels == factors_param_cum_numel[-1], f'{index_channels} != {factors_param_cum_numel[-1]}'
         parameter_fns = {
             'batch_shape': lambda i: i.shape[:-1],
             'weights': lambda i: [i[..., weights_param_cum_numel[_]: weights_param_cum_numel[_ + 1]].view
-                                  (-1, num_filters[_ + 1], num_filters[_]) / 3 - 0.5
+                                  (-1, num_filters[_ + 1], num_filters[_])
                                   for _ in range(len(weights_param_numel))],
 
             'biases': lambda i: [i[..., biases_param_cum_numel[_]: biases_param_cum_numel[_ + 1]].view
-                                 (-1, biases_param_numel[_], 1) / 3 - 0.5
+                                 (-1, biases_param_numel[_], 1)
                                  for _ in range(len(biases_param_numel))],
 
             'factors': lambda i: [i[..., factors_param_cum_numel[_]: factors_param_cum_numel[_ + 1]].view
-                                  (-1, factors_param_numel[_], 1) / 3 - 0.5
+                                  (-1, factors_param_numel[_], 1)
                                   for _ in range(len(factors_param_numel))],
         }
         return parameter_fns, indexes_view_fn, {}
