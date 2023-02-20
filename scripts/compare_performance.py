@@ -6,7 +6,7 @@ import shutil
 from typing import Dict, List, Union, Tuple
 
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.pyplot import MultipleLocator
 
 from scripts.log_extract_utils import all_file_metric_dict_type, concat_values_for_dict, concat_values_for_dict_2
 from scripts.shared_config import metric_dict_filename
@@ -68,10 +68,10 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)
 
-    plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
     sample_names = next(iter(method_to_json.values())).keys()
     for sample_name in sample_names:
         fig = plt.figure(figsize=(4.5, 2.5)).add_subplot(111)
+        fig.yaxis.set_major_locator(MultipleLocator(2))
         fig.grid()
         fig.set_xlabel('bpp')
         fig.set_ylabel(y_label)
@@ -103,11 +103,11 @@ def list_mean(ls: List):
 
 
 def compute_multiple_bdrate():
-    anchor_name = 'PCGCv2'
-    anchor_secondly = False
+    anchor_name = 'Ours'
+    anchor_secondly = True
     draw_anchor = True
     output_dir = 'runs/comparison'
-    json_path_pattern = osp.join('runs', 'tests', '{}', metric_dict_filename)
+    rel_json_path_pattern = osp.join('runs', 'tests', '{}', metric_dict_filename)
     method_to_json_path: Dict[str, Union[str, List[str]]] = {
         'Ours': ['convolutional/no_par/lossl_based',
                  'convolutional/no_par/lossl_based_2x'],
@@ -115,9 +115,9 @@ def compute_multiple_bdrate():
         #           'convolutional/par6e5/lossl_based_2x'],
         # 'Ours**': ['convolutional/par15e4/lossl_based',
         #            'convolutional/par15e4/lossl_based_2x'],
-        'Ours w/o integrated lossless\n geometry compression':
-            ['convolutional/no_par/gpcc_lossl_based',
-             'convolutional/no_par/gpcc_lossl_based_2x'],
+        # 'Ours w/o integrated lossless\n geometry compression':
+        #     ['convolutional/no_par/gpcc_lossl_based',
+        #      'convolutional/no_par/gpcc_lossl_based_2x'],
         # 'Ours w/o integrated lossless\n geometry compression*':
         #     ['convolutional/par6e5/gpcc_lossl_based',
         #      'convolutional/par6e5/gpcc_lossl_based_2x'],
@@ -133,10 +133,12 @@ def compute_multiple_bdrate():
         'V-PCC': 'tmc2_geo',
         'ADLPCC': 'ADLPCC',
         'G-PCC octree': 'tmc3_geo/octree',
-        'G-PCC trisoup': 'tmc3_geo/trisoup',
+        'G-PCC trisoup': 'tmc3_geo/trisoup'
     }
-    method_to_json_path = {k: [json_path_pattern.format(v_) for v_ in (v if isinstance(v, list) else [v])]
-                           for k, v in method_to_json_path.items()}
+    method_to_json_path = {
+        k: [rel_json_path_pattern.format(v_) if not osp.isabs(v_) else v_
+            for v_ in (v if isinstance(v, list) else [v])]
+        for k, v in method_to_json_path.items()}
 
     if osp.exists(output_dir):
         shutil.rmtree(output_dir)
