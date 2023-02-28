@@ -14,7 +14,7 @@ from lib.torch_utils import minkowski_tensor_wrapped_fn
 from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel
 from lib.entropy_models.hyperprior.noisy_deep_factorized.utils import BytesListUtils
 
-from .generative_upsample import GenerativeUpsample, GenerativeUpsampleMessage
+from .generative_upsample import GenerativeUpsampleMessage, GenerativeUpsample
 
 
 class SparseLinear(nn.Linear):

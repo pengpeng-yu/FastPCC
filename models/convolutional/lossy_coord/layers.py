@@ -9,7 +9,7 @@ from lib.sparse_conv_layers import \
     ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, ResBlock, InceptionResBlock, \
     NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs
 
-from .generative_upsample import GenerativeUpsample, GenerativeUpsampleMessage
+from .generative_upsample import GenerativeUpsampleMessage, GenerativeUpsample
 
 
 BLOCKS_LIST = [ResBlock, InceptionResBlock]
