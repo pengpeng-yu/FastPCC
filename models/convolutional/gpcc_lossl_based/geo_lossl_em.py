@@ -11,7 +11,7 @@ from lib.entropy_models.continuous_batched import ContinuousBatchedEntropyModel
 from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel, \
     noisy_deep_factorized_indexed_entropy_model_init
 from lib.entropy_models.distributions.uniform_noise import NoisyDeepFactorized
-from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import BytesListUtils
+from lib.entropy_models.hyperprior.noisy_deep_factorized.utils import BytesListUtils
 
 from lib.torch_utils import concat_loss_dicts
 
@@ -84,7 +84,8 @@ class GeoLosslessEntropyModel(nn.Module):
         if self.training:
             bottom_fea_tilde, fea_loss_dict_or_bytes_list = self.bottom_fea_entropy_model(bottom_fea)
         else:
-            bottom_fea_tilde, fea_loss_dict_or_bytes_list, coding_batch_shape = self.bottom_fea_entropy_model(bottom_fea)
+            bottom_fea_tilde, fea_loss_dict_or_bytes_list, coding_batch_shape = \
+                self.bottom_fea_entropy_model(bottom_fea)
             if coding_batch_shape != torch.Size([1]): raise NotImplementedError
         strided_fea_tilde_list.append(bottom_fea_tilde)
         if self.training:

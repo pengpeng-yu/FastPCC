@@ -20,8 +20,7 @@ from ..lossy_coord.generative_upsample import GenerativeUpsampleMessage
 from ..lossy_coord.layers import \
     Encoder, Decoder, HyperDecoderUpsample, EncoderRecurrent
 from .model_config import ModelConfig
-from .sparse_tensor_specialized import \
-    GeoLosslessNoisyDeepFactorizedEntropyModel
+from .geo_lossl_em import GeoLosslessNoisyDeepFactorizedEntropyModel
 
 
 class PCC(nn.Module):
@@ -219,8 +218,7 @@ class PCC(nn.Module):
         )
         loss_dict['coord_recon_loss'] = self.get_coord_recon_loss(
             decoder_message.cached_pred_list,
-            decoder_message.cached_target_list,
-            decoder_message
+            decoder_message.cached_target_list
         )
 
         if warmup_forward and self.cfg.linear_warmup:
@@ -294,7 +292,7 @@ class PCC(nn.Module):
 
     def get_coord_recon_loss(
             self, cached_pred_list: List[ME.SparseTensor],
-            cached_target_list: List[torch.Tensor], message: GenerativeUpsampleMessage
+            cached_target_list: List[torch.Tensor]
     ):
         if self.cfg.coord_recon_loss_type == 'BCE':
             preds_num = len(cached_pred_list)

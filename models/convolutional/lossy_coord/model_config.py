@@ -47,9 +47,6 @@ class ModelConfig(SimpleConfig):
     hybrid_hyper_decoder_fea: bool = False
     upper_fea_grad_scaler: float = 1.0
 
-    # Geo lossless based EM settings
-    skip_encoding_fea: Tuple[int, ...] = ()
-
     # Loss items
     bpp_loss_factor: float = 0.2
     coord_recon_loss_type: str = 'BCE'  # BCE or Dist

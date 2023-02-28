@@ -12,8 +12,7 @@ from lib.sparse_conv_layers import \
     NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs
 from lib.torch_utils import minkowski_tensor_wrapped_fn
 from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel
-from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
-    BytesListUtils
+from lib.entropy_models.hyperprior.noisy_deep_factorized.utils import BytesListUtils
 
 from .generative_upsample import GenerativeUpsample, GenerativeUpsampleMessage
 
@@ -349,7 +348,7 @@ class Decoder(nn.Module):
             self.indexed_em = indexed_em
         self.hybrid_hyper_decoder_fea = hybrid_hyper_decoder_fea
         self.decoder_aware_residuals = decoder_aware_residuals
-        self.upper_fea_grad_scaler = upper_fea_grad_scaler  # TODO: Simplify
+        self.upper_fea_grad_scaler = upper_fea_grad_scaler
         self.coord_recon_p2points_weighted_bce = coord_recon_p2points_weighted_bce
         self.blocks = nn.Sequential(*[
             DecoderBlock(

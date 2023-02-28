@@ -28,8 +28,7 @@ from lib.entropy_models.continuous_indexed import \
 from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
     ScaleNoisyNormalEntropyModel as HyperPriorScaleNoisyNormalEM, \
     NoisyDeepFactorizedEntropyModel as HyperPriorNoisyDeepFactorizedEM
-from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
-    GeoLosslessNoisyDeepFactorizedEntropyModel
+from .geo_lossl_em import GeoLosslessNoisyDeepFactorizedEntropyModel
 
 from .generative_upsample import GenerativeUpsampleMessage
 from .layers import \
@@ -215,7 +214,7 @@ class PCC(nn.Module):
                     else:
                         hyper_dec_fea_out_chnls[idx] = hyper_dec_fea_in_chnls[idx - 1] = \
                             hyper_dec_coord_in_chnls[idx - 1] = hyper_dec_fea_intra_chnls[idx]
-            elif cfg.input_feature_type == 'Color':  # TODO: skip_encoding_fea in color case
+            elif cfg.input_feature_type == 'Color':
                 if len(cfg.skip_encoding_fea) != 0:
                     raise NotImplementedError
                 hyper_dec_fea_out_chnls = \
@@ -867,7 +866,7 @@ class PCC(nn.Module):
         pred_coord_list, pred_fea_list = color_pred.decomposed_coordinates_and_features
         batch_size = len(ori_coord_list)
         for idx in range(batch_size):
-            nearest_idx = knn_points(  # TODO: test color loss
+            nearest_idx = knn_points(
                 pred_coord_list[idx][None].to(torch.float),
                 ori_coord_list[idx][None].to(torch.float),
                 K=1, return_sorted=False

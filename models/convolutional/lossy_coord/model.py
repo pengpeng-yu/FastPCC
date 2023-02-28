@@ -23,9 +23,8 @@ from lib.entropy_models.continuous_batched import \
 from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
     ScaleNoisyNormalEntropyModel as HyperPriorScaleNoisyNormalEM, \
     NoisyDeepFactorizedEntropyModel as HyperPriorNoisyDeepFactorizedEM
-from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
-    GeoLosslessNoisyDeepFactorizedEntropyModel
 
+from .geo_lossl_em import GeoLosslessNoisyDeepFactorizedEntropyModel
 from .generative_upsample import GenerativeUpsampleMessage
 from .layers import \
     Encoder, Decoder, \
@@ -115,7 +114,6 @@ class PCC(nn.Module):
             enc_lossl = None
             hyper_dec_coord = None
             hyper_dec_fea = None
-            assert len(cfg.skip_encoding_fea) == 0
         else:
             enc_lossl = self.init_enc_rec()
             hyper_dec_coord = self.init_hyper_dec_gen_up()
@@ -127,7 +125,7 @@ class PCC(nn.Module):
             self.em_lossless_based = self.init_em_lossless_based(
                 em, enc_lossl,
                 hyper_dec_coord, hyper_dec_fea,
-                parameter_fns_factory, cfg.skip_encoding_fea
+                parameter_fns_factory
             )
         else:
             self.em = em
@@ -204,7 +202,7 @@ class PCC(nn.Module):
     def init_em_lossless_based(
             self, bottom_fea_entropy_model, encoder_geo_lossless,
             hyper_decoder_coord_geo_lossless, hyper_decoder_fea_geo_lossless,
-            parameter_fns_factory, skip_encoding_fea
+            parameter_fns_factory
     ):
         em_lossless_based = GeoLosslessNoisyDeepFactorizedEntropyModel(
             bottom_fea_entropy_model=bottom_fea_entropy_model,
@@ -220,7 +218,6 @@ class PCC(nn.Module):
             fea_parameter_fns_type='transform',
             fea_parameter_fns_factory=parameter_fns_factory,
             fea_num_filters=self.cfg.lossless_fea_num_filters,
-            skip_encoding_fea=skip_encoding_fea,
             upper_fea_grad_scaler_for_bits_loss=self.cfg.upper_fea_grad_scaler,
             bottleneck_fea_process=self.cfg.bottleneck_process,
             bottleneck_scaler=self.cfg.bottleneck_scaler,
@@ -325,8 +322,7 @@ class PCC(nn.Module):
         )
         loss_dict['coord_recon_loss'] = self.get_coord_recon_loss(
             decoder_message.cached_pred_list,
-            decoder_message.cached_target_list,
-            decoder_message
+            decoder_message.cached_target_list
         )
 
         if warmup_forward and self.cfg.linear_warmup:
@@ -531,7 +527,7 @@ class PCC(nn.Module):
 
     def get_coord_recon_loss(
             self, cached_pred_list: List[ME.SparseTensor],
-            cached_target_list: List[torch.Tensor], message: GenerativeUpsampleMessage
+            cached_target_list: List[torch.Tensor]
     ):
         if self.cfg.coord_recon_loss_type == 'BCE':
             preds_num = len(cached_pred_list)
@@ -539,7 +535,6 @@ class PCC(nn.Module):
             for idx in range(preds_num - 1, -1, -1):
                 pred = cached_pred_list[idx]
                 target = cached_target_list[idx]
-
                 recon_loss = F.binary_cross_entropy_with_logits(
                     pred.F.squeeze(dim=1),
                     target.type(pred.F.dtype)
