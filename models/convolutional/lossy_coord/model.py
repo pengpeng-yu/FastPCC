@@ -18,7 +18,6 @@ from lib.mpeg_gpcc_utils import gpcc_octree_lossless_geom_encode, gpcc_decode
 from lib.torch_utils import MLPBlock, TorchCudaMaxMemoryAllocated
 from lib.data_utils import PCData, write_ply_file
 from lib.evaluators import PCGCEvaluator
-from lib.sparse_conv_layers import GenerativeUpsampleMessage
 from lib.entropy_models.continuous_batched import \
     NoisyDeepFactorizedEntropyModel as PriorEM
 from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
@@ -27,6 +26,7 @@ from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
 from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
     GeoLosslessNoisyDeepFactorizedEntropyModel
 
+from .generative_upsample import GenerativeUpsampleMessage
 from .layers import \
     Encoder, Decoder, \
     HyperEncoder, HyperDecoder, \
@@ -107,7 +107,6 @@ class PCC(nn.Module):
         self.decoder = Decoder(
             cfg.compressed_channels,
             cfg.decoder_channels,
-            self.cfg.coord_recon_p2points_weighted_bce,
             *self.basic_block_args,
             loss_type=cfg.coord_recon_loss_type,
             dist_upper_bound=cfg.dist_upper_bound
@@ -338,7 +337,7 @@ class PCC(nn.Module):
             warmup_bpp_loss_factor = self.cfg.warmup_bpp_loss_factor
         for key in loss_dict:
             if key.endswith('bits_loss'):
-                if warmup_forward:
+                if warmup_forward and 'coord' not in key:
                     loss_dict[key] = loss_dict[key] * (
                         warmup_bpp_loss_factor / sparse_pc.shape[0])
                 else:
@@ -537,28 +536,13 @@ class PCC(nn.Module):
         if self.cfg.coord_recon_loss_type == 'BCE':
             preds_num = len(cached_pred_list)
             recon_loss_list = []
-            mg = cached_pred_list[-1].coordinate_manager
-            device = cached_pred_list[-1].device
-            bce_weights = message.bce_weights
             for idx in range(preds_num - 1, -1, -1):
                 pred = cached_pred_list[idx]
                 target = cached_target_list[idx]
-                if idx != preds_num - 1 and bce_weights is not None:
-                    kernel_map = mg.kernel_map(
-                        pred.coordinate_key, cached_pred_list[idx + 1].coordinate_key,
-                        2, kernel_size=2, is_transpose=True, is_pool=True
-                    )
-                    kernel_map = kernel_map[0][0, :]
-                    bce_weights = torch.zeros(
-                        pred.shape[0], device=device
-                    ).index_add_(0, kernel_map, bce_weights - 1)
-                    bce_weights.sigmoid_()
-                    bce_weights *= 2
 
                 recon_loss = F.binary_cross_entropy_with_logits(
                     pred.F.squeeze(dim=1),
-                    target.type(pred.F.dtype),
-                    weight=bce_weights
+                    target.type(pred.F.dtype)
                 )
                 recon_loss_list.append(recon_loss)
 

@@ -9,12 +9,13 @@ import MinkowskiEngine as ME
 from lib.torch_utils import concat_loss_dicts
 from lib.sparse_conv_layers import \
     ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, ResBlock, InceptionResBlock, \
-    NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs, \
-    GenerativeUpsample, GenerativeUpsampleMessage
+    NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs
 from lib.torch_utils import minkowski_tensor_wrapped_fn
 from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel
 from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
     BytesListUtils
+
+from .generative_upsample import GenerativeUpsample, GenerativeUpsampleMessage
 
 
 class SparseLinear(nn.Linear):

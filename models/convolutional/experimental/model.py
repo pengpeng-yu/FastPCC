@@ -21,7 +21,6 @@ from lib.mpeg_gpcc_utils import gpcc_octree_lossless_geom_encode, gpcc_decode
 from lib.torch_utils import MLPBlock, TorchCudaMaxMemoryAllocated, concat_loss_dicts
 from lib.data_utils import PCData, write_ply_file
 from lib.evaluators import PCGCEvaluator
-from lib.sparse_conv_layers import GenerativeUpsampleMessage
 from lib.entropy_models.continuous_batched import \
     NoisyDeepFactorizedEntropyModel as PriorEM
 from lib.entropy_models.continuous_indexed import \
@@ -32,6 +31,7 @@ from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
 from lib.entropy_models.hyperprior.noisy_deep_factorized.sparse_tensor_specialized import \
     GeoLosslessNoisyDeepFactorizedEntropyModel
 
+from .generative_upsample import GenerativeUpsampleMessage
 from .layers import \
     Encoder, Decoder, \
     HyperEncoder, HyperDecoder, \

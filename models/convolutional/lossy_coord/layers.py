@@ -7,8 +7,9 @@ import MinkowskiEngine as ME
 
 from lib.sparse_conv_layers import \
     ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, ResBlock, InceptionResBlock, \
-    NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs, \
-    GenerativeUpsample, GenerativeUpsampleMessage
+    NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs
+
+from .generative_upsample import GenerativeUpsample, GenerativeUpsampleMessage
 
 
 BLOCKS_LIST = [ResBlock, InceptionResBlock]
@@ -164,7 +165,7 @@ class DecoderBlock(nn.Module):
             act='relu' if kwargs.get('loss_type', None) == 'Dist' else None
         )
         self.generative_upsample = GenerativeUpsample(
-            upsample_block, classify_block, None, None, **kwargs
+            upsample_block, classify_block, **kwargs
         )
 
     def forward(self, msg: GenerativeUpsampleMessage):
@@ -179,7 +180,6 @@ class Decoder(nn.Module):
     def __init__(self,
                  in_channels: Union[int, Tuple[int, ...]],
                  intra_channels: Tuple[int, ...],
-                 coord_recon_p2points_weighted_bce: bool,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -188,7 +188,6 @@ class Decoder(nn.Module):
                  **kwargs):
         super(Decoder, self).__init__()
         in_channels = [in_channels, *intra_channels[:-1]]
-        self.coord_recon_p2points_weighted_bce = coord_recon_p2points_weighted_bce
         self.blocks = nn.Sequential(*[
             DecoderBlock(
                 in_ch, intra_ch,
@@ -199,9 +198,7 @@ class Decoder(nn.Module):
 
     def forward(self, msg: GenerativeUpsampleMessage):
         msg.cached_fea_list = []
-        msg = self.blocks[:-1](msg)
-        msg.bce_weights_type = 'p2point' if self.coord_recon_p2points_weighted_bce else ''
-        msg = self.blocks[-1](msg)
+        msg = self.blocks(msg)
         return msg
 
     def __repr__(self):
