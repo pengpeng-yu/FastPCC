@@ -1,4 +1,4 @@
-from typing import List, Callable
+from typing import Callable
 
 import numpy as np
 import torch

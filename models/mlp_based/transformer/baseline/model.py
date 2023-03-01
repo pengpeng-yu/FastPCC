@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyModel
 
 from lib.loss_functions import chamfer_loss

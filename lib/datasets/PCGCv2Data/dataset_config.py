@@ -1,6 +1,5 @@
 from lib.simple_config import SimpleConfig
 from dataclasses import dataclass
-from typing import Tuple
 
 
 @dataclass

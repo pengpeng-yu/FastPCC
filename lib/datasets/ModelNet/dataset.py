@@ -2,7 +2,6 @@ import os
 import pathlib
 import hashlib
 
-import open3d as o3d
 import numpy as np
 import torch
 import torch.utils.data

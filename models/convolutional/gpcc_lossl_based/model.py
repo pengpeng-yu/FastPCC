@@ -1,4 +1,4 @@
-from typing import List, Union, Tuple, Generator, Iterator, Optional
+from typing import List, Union, Tuple, Generator, Iterator
 import os
 import time
 import hashlib

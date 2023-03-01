@@ -1,5 +1,5 @@
 import io
-from typing import List, Tuple, Dict, Union, Sequence
+from typing import List, Tuple, Dict, Union
 import math
 
 import torch

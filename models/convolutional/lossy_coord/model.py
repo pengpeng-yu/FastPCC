@@ -448,7 +448,6 @@ class PCC(nn.Module):
             compressed_bytes_list.append(compressed_bytes)
             sparse_tensor_coords_list.append(sparse_tensor_coords)
 
-        # Log bytes of each partition.
         concat_bytes = b''.join((len(s).to_bytes(3, 'little', signed=False) + s
                                  for s in compressed_bytes_list))
         return concat_bytes, sparse_tensor_coords_list

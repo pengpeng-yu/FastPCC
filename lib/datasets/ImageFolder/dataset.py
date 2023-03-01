@@ -3,7 +3,6 @@ import pathlib
 
 import numpy as np
 import cv2
-import torch
 import torch.utils.data
 
 from lib.data_utils import IMData, im_data_collate_fn, \

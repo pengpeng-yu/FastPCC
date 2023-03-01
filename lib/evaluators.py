@@ -1,11 +1,10 @@
 import json
 from collections import defaultdict
-from typing import Tuple, List, Union, Dict
+from typing import List, Union, Dict
 import os
 import multiprocessing as mp
 
 import cv2
-import numpy as np
 import torch
 
 from lib.data_utils import PCData, write_ply_file, if_ply_has_vertex_normal

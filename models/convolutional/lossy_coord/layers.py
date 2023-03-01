@@ -411,12 +411,14 @@ class EncoderRecurrent(nn.Module):
         idx = 0
         while True:
             if idx < len(self.non_shared_blocks):
-                block, block_gate, block_out = \
-                    self.non_shared_blocks[idx], self.non_shared_blocks_gate[idx], self.non_shared_blocks_out[idx]
+                block = self.non_shared_blocks[idx]
+                block_gate = self.non_shared_blocks_gate[idx]
+                block_out = self.non_shared_blocks_out[idx]
             else:
                 tmp_idx = (idx - len(self.non_shared_blocks)) % len(self.shared_blocks)
-                block, block_gate, block_out = \
-                    self.shared_blocks[tmp_idx], self.shared_blocks_gate[tmp_idx], self.shared_blocks_out[tmp_idx]
+                block = self.shared_blocks[tmp_idx]
+                block_gate = self.shared_blocks_gate[tmp_idx]
+                block_out = self.shared_blocks_out[tmp_idx]
             idx += 1
             gate = block_gate(hx)
             forget_gate = torch.sigmoid(gate.F) * 2

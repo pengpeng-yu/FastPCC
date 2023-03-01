@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, Dict, Any, Callable
+from typing import Tuple, Union, Dict, Any, Callable
 from functools import partial
 
 import torch
@@ -17,11 +17,6 @@ from lib.torch_utils import concat_loss_dicts
 
 
 class GeoLosslessEntropyModel(nn.Module):
-    """
-    Note:
-        For lossless geometric compression.
-        Only supports batch size == 1 during testing.
-    """
     def __init__(self,
                  bottom_fea_entropy_model:
                  Union[ContinuousBatchedEntropyModel, HyperPriorEntropyModel],

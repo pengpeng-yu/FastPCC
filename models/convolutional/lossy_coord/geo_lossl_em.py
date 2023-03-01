@@ -1,6 +1,4 @@
-import io
-import math
-from typing import List, Tuple, Union, Dict, Any, Callable
+from typing import Tuple, Union, Dict, Any, Callable
 from functools import partial
 
 import torch
@@ -13,76 +11,12 @@ from lib.entropy_models.continuous_batched import ContinuousBatchedEntropyModel
 from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel, \
     noisy_deep_factorized_indexed_entropy_model_init
 from lib.entropy_models.distributions.uniform_noise import NoisyDeepFactorized
+from lib.entropy_models.hyperprior.noisy_deep_factorized.utils import BytesListUtils
 
 from lib.torch_utils import concat_loss_dicts
 
 
-class BytesListUtils:
-    @staticmethod
-    def concat_bytes_list(bytes_list: List[bytes]) -> bytes:
-        assert len(bytes_list) >= 1
-        if len(bytes_list) == 1:
-            return bytes_list[0]
-
-        bytes_len_list = []
-        for _ in bytes_list:
-            bytes_len = len(_)
-            assert bytes_len >= 1
-            bytes_len_list.append(bytes_len - 1)
-
-        bytes_len_bytes_list = []
-        bytes_len_bytes_len_list = []
-        for bytes_len in bytes_len_list:
-            bytes_len_bytes_len = math.ceil(bytes_len.bit_length() / 8)
-            bytes_len_bytes_list.append(bytes_len.to_bytes(bytes_len_bytes_len, 'little'))
-            bytes_len_bytes_len_list.append(bytes_len_bytes_len)
-
-        bytes_len_bytes_len_bits_list = []
-        for bytes_len_bytes_len in bytes_len_bytes_len_list:
-            assert 0 <= bytes_len_bytes_len <= 3
-            bytes_len_bytes_len_bits = f'{bytes_len_bytes_len:b}'
-            if len(bytes_len_bytes_len_bits) == 1:
-                bytes_len_bytes_len_bits = '0' + bytes_len_bytes_len_bits
-            bytes_len_bytes_len_bits_list.append(bytes_len_bytes_len_bits)
-        head_bytes = int(
-            '1' + ''.join(bytes_len_bytes_len_bits_list), 2
-        ).to_bytes(math.ceil(len(bytes_list) / 4 + 0.125), 'little')
-
-        concat_bytes = head_bytes + b''.join(bytes_len_bytes_list) + b''.join(bytes_list)
-        return concat_bytes
-
-    @staticmethod
-    def split_bytes_list(concat_bytes: bytes, bytes_list_len: int) -> List[bytes]:
-        if bytes_list_len == 1:
-            return [concat_bytes]
-
-        bs = io.BytesIO(concat_bytes)
-        head_bytes_len = math.ceil(bytes_list_len / 4 + 0.125)
-        head_bits = f"{int.from_bytes(bs.read(head_bytes_len), 'little'):b}"
-
-        bytes_len_bytes_len_list = []
-        for idx in range(1, bytes_list_len * 2 + 1, 2):
-            bytes_len_bytes_len_list.append(int(head_bits[idx: idx + 2], 2))
-
-        bytes_len_list = []
-        for bytes_len_bytes_len in bytes_len_bytes_len_list:
-            bytes_len_list.append(int.from_bytes(bs.read(bytes_len_bytes_len), 'little') + 1)
-
-        bytes_list = []
-        for bytes_len in bytes_len_list:
-            bytes_list.append(bs.read(bytes_len))
-
-        assert bs.read() == b''
-        bs.close()
-        return bytes_list
-
-
 class GeoLosslessEntropyModel(nn.Module):
-    """
-    Note:
-        For lossless geometric compression.
-        Only supports batch size == 1 during testing.
-    """
     def __init__(self,
                  bottom_fea_entropy_model:
                  Union[ContinuousBatchedEntropyModel, HyperPriorEntropyModel],
@@ -164,93 +98,81 @@ class GeoLosslessEntropyModel(nn.Module):
             return self.hyper_decoder_fea
 
     def forward(self, y_top: ME.SparseTensor, *args, **kwargs):
-        if self.training:
-            cm = y_top.coordinate_manager
-            strided_fea_list = self.encoder(y_top, *args, **kwargs)
-            *strided_fea_list, bottom_fea = strided_fea_list
-            strided_fea_list_len = len(strided_fea_list)
-            loss_dict = {}
-            strided_fea_tilde_list = []
+        assert self.training
+        cm = y_top.coordinate_manager
+        strided_fea_list = self.encoder(y_top, *args, **kwargs)
+        *strided_fea_list, bottom_fea = strided_fea_list
+        strided_fea_list_len = len(strided_fea_list)
+        loss_dict = {}
+        strided_fea_tilde_list = []
 
-            bottom_fea_tilde, fea_loss_dict = self.bottom_fea_entropy_model(bottom_fea)
-            strided_fea_tilde_list.append(bottom_fea_tilde)
+        bottom_fea_tilde, fea_loss_dict = self.bottom_fea_entropy_model(bottom_fea)
+        strided_fea_tilde_list.append(bottom_fea_tilde)
 
-            concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: 'fea_bottom_' + k)
-            lower_fea_tilde = bottom_fea_tilde
+        concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: 'fea_bottom_' + k)
+        lower_fea_tilde = bottom_fea_tilde
 
-            for idx in range(strided_fea_list_len - 1, -1, -1):
-                sub_hyper_decoder_coord = self.get_sub_hyper_decoder_coord(idx)
-                sub_hyper_decoder_fea = self.get_sub_hyper_decoder_fea(idx)
-                fea = strided_fea_list[idx]
+        for idx in range(strided_fea_list_len - 1, -1, -1):
+            sub_hyper_decoder_coord = self.get_sub_hyper_decoder_coord(idx)
+            sub_hyper_decoder_fea = self.get_sub_hyper_decoder_fea(idx)
+            fea = strided_fea_list[idx]
 
-                coord_target_key = fea.coordinate_map_key
-                # Same strides indicate same coordinates.
-                if lower_fea_tilde.coordinate_map_key.get_tensor_stride() != coord_target_key.get_tensor_stride():
-                    pre_coord_mask_indexes = sub_hyper_decoder_coord(lower_fea_tilde)
-                    coord_mask_indexes = self.hyper_decoder_coord_post_op(pre_coord_mask_indexes)
-                    coord_mask = self.get_coord_mask((coord_target_key, cm), pre_coord_mask_indexes)
-                    coord_mask_f_, coord_loss_dict = self.indexed_entropy_model_coord(
-                        coord_mask.F[None], coord_mask_indexes, is_first_forward=idx == strided_fea_list_len - 1
-                    )
-                    concat_loss_dicts(loss_dict, coord_loss_dict, lambda k: f'coord_{idx}_' + k)
-                else:
-                    assert sub_hyper_decoder_coord is None
+            coord_target_key = fea.coordinate_map_key
+            # Same strides indicate same coordinates.
+            if lower_fea_tilde.coordinate_map_key.get_tensor_stride() != coord_target_key.get_tensor_stride():
+                pre_coord_mask_indexes = sub_hyper_decoder_coord(lower_fea_tilde)
+                coord_mask_indexes = self.hyper_decoder_coord_post_op(pre_coord_mask_indexes)
+                coord_mask = self.get_coord_mask(
+                    cm, coord_target_key,
+                    pre_coord_mask_indexes.coordinate_map_key, pre_coord_mask_indexes.C, torch.float
+                )
+                coord_mask_f_, coord_loss_dict = self.indexed_entropy_model_coord(
+                    coord_mask[None, :, None], coord_mask_indexes,
+                    is_first_forward=idx == strided_fea_list_len - 1
+                )
+                concat_loss_dicts(loss_dict, coord_loss_dict, lambda k: f'coord_{idx}_' + k)
+            else:
+                assert sub_hyper_decoder_coord is None
 
-                if self.hybrid_hyper_decoder_fea is True:
-                    fea_info_pred = sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key).F
-                    assert fea.F.shape[1] * (
-                        len(self.indexed_entropy_model_fea.index_ranges) + 1
-                    ) == fea_info_pred.shape[1]
-                    fea_pred, pre_fea_indexes = torch.split(
-                        fea_info_pred,
-                        [fea.F.shape[1], fea_info_pred.shape[1] - fea.F.shape[1]], dim=1
-                    )
-                    fea_indexes = self.hyper_decoder_fea_post_op(pre_fea_indexes)[None]
-                    fea_pred_res_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
-                        (fea.F - fea_pred)[None], fea_indexes, is_first_forward=idx == strided_fea_list_len - 1,
-                        x_grad_scaler_for_bits_loss=self.upper_fea_grad_scaler_for_bits_loss
-                    )
-                    lower_fea_tilde = ME.SparseTensor(
-                        features=fea_pred_res_tilde[0] + fea_pred,
-                        coordinate_map_key=coord_target_key,
-                        coordinate_manager=cm
-                    )
-                else:
-                    fea_indexes = self.hyper_decoder_fea_post_op(
-                        sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key)
-                    )
-                    fea_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
-                        fea.F[None], fea_indexes, is_first_forward=idx == strided_fea_list_len - 1,
-                        x_grad_scaler_for_bits_loss=self.upper_fea_grad_scaler_for_bits_loss
-                    )
-                    lower_fea_tilde = ME.SparseTensor(
-                        features=fea_tilde[0],
-                        coordinate_map_key=coord_target_key,
-                        coordinate_manager=cm
-                    )
-                strided_fea_tilde_list.append(lower_fea_tilde)
-                concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: f'fea_{idx}_' + k)
+            if self.hybrid_hyper_decoder_fea is True:
+                fea_info_pred = sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key).F
+                assert fea.F.shape[1] * (
+                    len(self.indexed_entropy_model_fea.index_ranges) + 1
+                ) == fea_info_pred.shape[1]
+                fea_pred, pre_fea_indexes = torch.split(
+                    fea_info_pred,
+                    [fea.F.shape[1], fea_info_pred.shape[1] - fea.F.shape[1]], dim=1
+                )
+                fea_indexes = self.hyper_decoder_fea_post_op(pre_fea_indexes)[None]
+                fea_pred_res_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
+                    (fea.F - fea_pred)[None], fea_indexes, is_first_forward=idx == strided_fea_list_len - 1,
+                    x_grad_scaler_for_bits_loss=self.upper_fea_grad_scaler_for_bits_loss
+                )
+                lower_fea_tilde = ME.SparseTensor(
+                    features=fea_pred_res_tilde[0] + fea_pred,
+                    coordinate_map_key=coord_target_key,
+                    coordinate_manager=cm
+                )
+            else:
+                fea_indexes = self.hyper_decoder_fea_post_op(
+                    sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key)
+                )
+                fea_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
+                    fea.F[None], fea_indexes, is_first_forward=idx == strided_fea_list_len - 1,
+                    x_grad_scaler_for_bits_loss=self.upper_fea_grad_scaler_for_bits_loss
+                )
+                lower_fea_tilde = ME.SparseTensor(
+                    features=fea_tilde[0],
+                    coordinate_map_key=coord_target_key,
+                    coordinate_manager=cm
+                )
+            strided_fea_tilde_list.append(lower_fea_tilde)
+            concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: f'fea_{idx}_' + k)
 
-            return strided_fea_tilde_list[-1], loss_dict
-
-        else:
-            concat_bytes, bottom_fea_recon, fea_recon_ = self.compress(y_top, *args, **kwargs)
-            # You can clear the shared coordinate manager in an upper module
-            # after compression to save memory.
-            fea_recon = self.decompress(
-                concat_bytes,
-                (bottom_fea_recon.coordinate_map_key,
-                 bottom_fea_recon.coordinate_manager)
-            )
-            return bottom_fea_recon, fea_recon, concat_bytes
+        return strided_fea_tilde_list[-1], loss_dict
 
     def compress(self, y_top: ME.SparseTensor, *args, **kwargs) -> \
             Tuple[bytes, ME.SparseTensor, ME.SparseTensor]:
-        # Batch dimension of sparse tensor feature is supposed to
-        # be added in minkowski_tensor_wrapped_fn(),
-        # thus all the inputs of entropy models are supposed to
-        # have batch size == 1.
-
         strided_fea_list = self.encoder(y_top, *args, **kwargs)
         *strided_fea_list, bottom_fea = strided_fea_list
         strided_fea_list_len = len(strided_fea_list)
@@ -272,12 +194,15 @@ class GeoLosslessEntropyModel(nn.Module):
             if coord_recon_key.get_tensor_stride() != coord_target_key.get_tensor_stride():
                 pre_coord_mask_indexes = sub_hyper_decoder_coord(lower_fea_recon)
                 coord_mask_indexes = self.hyper_decoder_coord_post_op(pre_coord_mask_indexes)
-                coord_mask = self.get_coord_mask((coord_target_key, cm), pre_coord_mask_indexes)
+                coord_mask = self.get_coord_mask(
+                    cm, coord_target_key,
+                    pre_coord_mask_indexes.coordinate_map_key, pre_coord_mask_indexes.C, torch.bool
+                )
                 (coord_bytes,), coord_mask_f_ = self.indexed_entropy_model_coord.compress(
-                    coord_mask.F[None], coord_mask_indexes
+                    coord_mask[None, :, None], coord_mask_indexes
                 )
                 coord_bytes_list.append(coord_bytes)
-                coord_recon = coord_mask.C[coord_mask.F.to(torch.bool)[:, 0]]
+                coord_recon = pre_coord_mask_indexes.C[coord_mask]
                 coord_recon_key = cm.insert_and_map(
                     coord_recon, pre_coord_mask_indexes.tensor_stride,
                     pre_coord_mask_indexes.coordinate_map_key.get_key()[1] + 'pruned'
@@ -285,7 +210,6 @@ class GeoLosslessEntropyModel(nn.Module):
             else:
                 assert sub_hyper_decoder_coord is None
 
-            # Permute features from encoders to fit in with order of features from decoders.
             permutation_kernel_map = cm.kernel_map(
                 coord_target_key,
                 coord_recon_key,
@@ -412,31 +336,16 @@ class GeoLosslessEntropyModel(nn.Module):
 
     @staticmethod
     def get_coord_mask(
-            y_coords_tuple: Tuple[ME.CoordinateMapKey, ME.CoordinateManager],
-            indexes: ME.SparseTensor,
-            mapping_target_kernel_size=1,
-            mapping_target_region_type='HYPER_CROSS') -> \
-            ME.SparseTensor:
-        mapping_target_region_type = getattr(ME.RegionType, mapping_target_region_type)
-        cm = y_coords_tuple[1]
-        assert cm is indexes.coordinate_manager
-        target_key = y_coords_tuple[0]
-        kernel_map = cm.kernel_map(
-            indexes.coordinate_map_key,
-            target_key,
-            kernel_size=mapping_target_kernel_size,
-            region_type=mapping_target_region_type
-        )
-        keep_target = torch.zeros(indexes.shape[0], dtype=torch.float, device=indexes.device)
+            cm: ME.CoordinateManager,
+            coord_target_key: ME.CoordinateMapKey,
+            current_key: ME.CoordinateMapKey,
+            current_coord: torch.Tensor,
+            output_dtype) -> torch.Tensor:
+        kernel_map = cm.kernel_map(current_key, coord_target_key, kernel_size=1)
+        keep_target = torch.zeros(current_coord.shape[0], dtype=output_dtype, device=current_coord.device)
         for _, curr_in in kernel_map.items():
             keep_target[curr_in[0].type(torch.long)] = 1
-
-        target = ME.SparseTensor(
-            features=keep_target[:, None],
-            coordinate_map_key=indexes.coordinate_map_key,
-            coordinate_manager=cm
-        )
-        return target
+        return keep_target
 
 
 class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):

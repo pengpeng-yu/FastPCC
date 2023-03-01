@@ -1,6 +1,4 @@
-import io
-import math
-from typing import List, Tuple, Union, Dict, Any, Callable
+from typing import Tuple, Union, Dict, Any, Callable
 from functools import partial
 
 import torch
@@ -14,68 +12,9 @@ from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel,
     noisy_scale_normal_indexed_entropy_model_init, \
     noisy_deep_factorized_indexed_entropy_model_init
 from lib.entropy_models.distributions.uniform_noise import NoisyNormal, NoisyDeepFactorized
+from lib.entropy_models.hyperprior.noisy_deep_factorized.utils import BytesListUtils
 
 from lib.torch_utils import concat_loss_dicts
-
-
-class BytesListUtils:
-    @staticmethod
-    def concat_bytes_list(bytes_list: List[bytes]) -> bytes:
-        assert len(bytes_list) >= 1
-        if len(bytes_list) == 1:
-            return bytes_list[0]
-
-        bytes_len_list = []
-        for _ in bytes_list:
-            bytes_len = len(_)
-            assert bytes_len >= 1
-            bytes_len_list.append(bytes_len - 1)
-
-        bytes_len_bytes_list = []
-        bytes_len_bytes_len_list = []
-        for bytes_len in bytes_len_list:
-            bytes_len_bytes_len = math.ceil(bytes_len.bit_length() / 8)
-            bytes_len_bytes_list.append(bytes_len.to_bytes(bytes_len_bytes_len, 'little'))
-            bytes_len_bytes_len_list.append(bytes_len_bytes_len)
-
-        bytes_len_bytes_len_bits_list = []
-        for bytes_len_bytes_len in bytes_len_bytes_len_list:
-            assert 0 <= bytes_len_bytes_len <= 3
-            bytes_len_bytes_len_bits = f'{bytes_len_bytes_len:b}'
-            if len(bytes_len_bytes_len_bits) == 1:
-                bytes_len_bytes_len_bits = '0' + bytes_len_bytes_len_bits
-            bytes_len_bytes_len_bits_list.append(bytes_len_bytes_len_bits)
-        head_bytes = int(
-            '1' + ''.join(bytes_len_bytes_len_bits_list), 2
-        ).to_bytes(math.ceil(len(bytes_list) / 4 + 0.125), 'little')
-
-        concat_bytes = head_bytes + b''.join(bytes_len_bytes_list) + b''.join(bytes_list)
-        return concat_bytes
-
-    @staticmethod
-    def split_bytes_list(concat_bytes: bytes, bytes_list_len: int) -> List[bytes]:
-        if bytes_list_len == 1:
-            return [concat_bytes]
-
-        bs = io.BytesIO(concat_bytes)
-        head_bytes_len = math.ceil(bytes_list_len / 4 + 0.125)
-        head_bits = f"{int.from_bytes(bs.read(head_bytes_len), 'little'):b}"
-
-        bytes_len_bytes_len_list = []
-        for idx in range(1, bytes_list_len * 2 + 1, 2):
-            bytes_len_bytes_len_list.append(int(head_bits[idx: idx + 2], 2))
-
-        bytes_len_list = []
-        for bytes_len_bytes_len in bytes_len_bytes_len_list:
-            bytes_len_list.append(int.from_bytes(bs.read(bytes_len_bytes_len), 'little') + 1)
-
-        bytes_list = []
-        for bytes_len in bytes_len_list:
-            bytes_list.append(bs.read(bytes_len))
-
-        assert bs.read() == b''
-        bs.close()
-        return bytes_list
 
 
 class GeoLosslessEntropyModel(nn.Module):
@@ -193,9 +132,13 @@ class GeoLosslessEntropyModel(nn.Module):
                 if lower_fea_tilde.coordinate_map_key.get_tensor_stride() != coord_target_key.get_tensor_stride():
                     pre_coord_mask_indexes = sub_hyper_decoder_coord(lower_fea_tilde)
                     coord_mask_indexes = self.hyper_decoder_coord_post_op(pre_coord_mask_indexes)
-                    coord_mask = self.get_coord_mask((coord_target_key, cm), pre_coord_mask_indexes)
+                    coord_mask = self.get_coord_mask(
+                        cm, coord_target_key,
+                        pre_coord_mask_indexes.coordinate_map_key, pre_coord_mask_indexes.C, torch.float
+                    )
                     coord_mask_f_, coord_loss_dict = self.indexed_entropy_model_coord(
-                        coord_mask.F[None], coord_mask_indexes, is_first_forward=idx == strided_fea_list_len - 1
+                        coord_mask[None, :, None], coord_mask_indexes,
+                        is_first_forward=idx == strided_fea_list_len - 1
                     )
                     concat_loss_dicts(loss_dict, coord_loss_dict, lambda k: f'coord_{idx}_' + k)
                 else:
@@ -290,12 +233,15 @@ class GeoLosslessEntropyModel(nn.Module):
             if coord_recon_key.get_tensor_stride() != coord_target_key.get_tensor_stride():
                 pre_coord_mask_indexes = sub_hyper_decoder_coord(lower_fea_recon)
                 coord_mask_indexes = self.hyper_decoder_coord_post_op(pre_coord_mask_indexes)
-                coord_mask = self.get_coord_mask((coord_target_key, cm), pre_coord_mask_indexes)
+                coord_mask = self.get_coord_mask(
+                    cm, coord_target_key,
+                    pre_coord_mask_indexes.coordinate_map_key, pre_coord_mask_indexes.C, torch.bool
+                )
                 (coord_bytes,), coord_mask_f_ = self.indexed_entropy_model_coord.compress(
-                    coord_mask.F[None], coord_mask_indexes
+                    coord_mask[None, :, None], coord_mask_indexes
                 )
                 coord_bytes_list.append(coord_bytes)
-                coord_recon = coord_mask.C[coord_mask.F.to(torch.bool)[:, 0]]
+                coord_recon = pre_coord_mask_indexes.C[coord_mask]
                 coord_recon_key = cm.insert_and_map(
                     coord_recon, pre_coord_mask_indexes.tensor_stride,
                     pre_coord_mask_indexes.coordinate_map_key.get_key()[1] + 'pruned'
@@ -463,31 +409,16 @@ class GeoLosslessEntropyModel(nn.Module):
 
     @staticmethod
     def get_coord_mask(
-            y_coords_tuple: Tuple[ME.CoordinateMapKey, ME.CoordinateManager],
-            indexes: ME.SparseTensor,
-            mapping_target_kernel_size=1,
-            mapping_target_region_type='HYPER_CROSS') -> \
-            ME.SparseTensor:
-        mapping_target_region_type = getattr(ME.RegionType, mapping_target_region_type)
-        cm = y_coords_tuple[1]
-        assert cm is indexes.coordinate_manager
-        target_key = y_coords_tuple[0]
-        kernel_map = cm.kernel_map(
-            indexes.coordinate_map_key,
-            target_key,
-            kernel_size=mapping_target_kernel_size,
-            region_type=mapping_target_region_type
-        )
-        keep_target = torch.zeros(indexes.shape[0], dtype=torch.float, device=indexes.device)
+            cm: ME.CoordinateManager,
+            coord_target_key: ME.CoordinateMapKey,
+            current_key: ME.CoordinateMapKey,
+            current_coord: torch.Tensor,
+            output_dtype) -> torch.Tensor:
+        kernel_map = cm.kernel_map(current_key, coord_target_key, kernel_size=1)
+        keep_target = torch.zeros(current_coord.shape[0], dtype=output_dtype, device=current_coord.device)
         for _, curr_in in kernel_map.items():
             keep_target[curr_in[0].type(torch.long)] = 1
-
-        target = ME.SparseTensor(
-            features=keep_target[:, None],
-            coordinate_map_key=indexes.coordinate_map_key,
-            coordinate_manager=cm
-        )
-        return target
+        return keep_target
 
 
 class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
