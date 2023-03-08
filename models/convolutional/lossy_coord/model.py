@@ -317,6 +317,7 @@ class PCC(nn.Module):
             GenerativeUpsampleMessage(
                 fea=bottleneck_feature,
                 target_key=sparse_pc.coordinate_map_key,
+                max_stride_lossy_recon=[2 ** len(self.cfg.decoder_channels)] * 3,
                 points_num_list=points_num_list
             )
         )
@@ -501,6 +502,7 @@ class PCC(nn.Module):
         decoder_message = self.decoder(
             GenerativeUpsampleMessage(
                 fea=fea_recon,
+                max_stride_lossy_recon=[2 ** len(self.cfg.decoder_channels)] * 3,
                 points_num_list=points_num_list
             ))
         coord_recon = decoder_message.fea.C[:, 1:]

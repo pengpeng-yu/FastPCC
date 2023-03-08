@@ -135,9 +135,8 @@ class Encoder(nn.Module):
         if not self.requires_points_num_list:
             points_num_list = None
         else:
-            points_num_list = [points_num_list[0]] + \
-                              [[int(n * self.points_num_scaler) for n in _]
-                               for _ in points_num_list[1:]]
+            points_num_list = [[int(n * self.points_num_scaler) for n in _]
+                               for _ in points_num_list]
 
         return strided_fea_list, points_num_list
 

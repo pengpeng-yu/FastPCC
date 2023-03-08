@@ -23,7 +23,7 @@ def grad_scaler(x: torch.Tensor, scaler: Union[float, torch.Tensor]) -> torch.Te
     else:
         if not isinstance(scaler, torch.Tensor):
             scaler = torch.tensor([scaler], dtype=x.dtype, device=x.device)
-        return GradScalerFunction.apply(x, scaler)
+        return GradScalerFunction.apply(x.clone(), scaler)
 
 
 class LowerBoundFunction(torch.autograd.Function):

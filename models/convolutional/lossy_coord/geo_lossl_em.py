@@ -12,6 +12,7 @@ from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel,
     noisy_deep_factorized_indexed_entropy_model_init
 from lib.entropy_models.distributions.uniform_noise import NoisyDeepFactorized
 from lib.entropy_models.hyperprior.noisy_deep_factorized.utils import BytesListUtils
+from lib.entropy_models.utils import grad_scaler
 
 from lib.torch_utils import concat_loss_dicts
 
@@ -144,9 +145,9 @@ class GeoLosslessEntropyModel(nn.Module):
                     [fea.F.shape[1], fea_info_pred.shape[1] - fea.F.shape[1]], dim=1
                 )
                 fea_indexes = self.hyper_decoder_fea_post_op(pre_fea_indexes)[None]
+                fea_pred_res = grad_scaler(fea.F, self.upper_fea_grad_scaler_for_bits_loss) - fea_pred
                 fea_pred_res_tilde, fea_loss_dict = self.indexed_entropy_model_fea(
-                    (fea.F - fea_pred)[None], fea_indexes, is_first_forward=idx == strided_fea_list_len - 1,
-                    x_grad_scaler_for_bits_loss=self.upper_fea_grad_scaler_for_bits_loss
+                    fea_pred_res[None], fea_indexes, is_first_forward=idx == strided_fea_list_len - 1
                 )
                 lower_fea_tilde = ME.SparseTensor(
                     features=fea_pred_res_tilde[0] + fea_pred,

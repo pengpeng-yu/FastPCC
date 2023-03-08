@@ -10,6 +10,7 @@ from torch import nn as nn
 
 from lib.metrics.misc import precision_recall
 from lib.entropy_models.continuous_indexed import ContinuousIndexedEntropyModel
+from lib.entropy_models.utils import grad_scaler
 
 
 class GenerativeUpsampleMessage:
@@ -128,10 +129,10 @@ class GenerativeUpsample(nn.Module):
                     if message.post_fea_hook is not None:
                         fea = message.post_fea_hook(fea)
                         fea_pred = message.post_fea_hook(fea_pred)
+                    fea_pred_res = grad_scaler(fea, message.em_upper_fea_grad_scaler) - fea_pred
                     fea_pred_res_tilde, fea_loss_dict = message.indexed_em(
-                        (fea - fea_pred), fea_indexes,
+                        fea_pred_res, fea_indexes,
                         is_first_forward=len(message.em_loss_dict_list) == 0,  # Assume that the EM is shared
-                        x_grad_scaler_for_bits_loss=message.em_upper_fea_grad_scaler
                     )
                     fea_tilde = ME.SparseTensor(
                         features=fea_pred_res_tilde + fea_pred,

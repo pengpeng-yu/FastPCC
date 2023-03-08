@@ -1,4 +1,4 @@
-from typing import Tuple, List, Dict, Union, Callable, Optional
+from typing import Tuple, List, Dict, Union, Optional
 
 import torch
 try:
@@ -14,10 +14,12 @@ from lib.metrics.misc import precision_recall
 class GenerativeUpsampleMessage:
     def __init__(self,
                  fea: ME.SparseTensor,
+                 max_stride_lossy_recon: List[int],
                  target_key: Optional[ME.CoordinateMapKey] = None,
                  points_num_list: Optional[List[List[int]]] = None,
                  cached_fea_list: Optional[List[ME.SparseTensor]] = None):
         self.fea: ME.SparseTensor = fea
+        self.max_stride_lossy_recon = max_stride_lossy_recon
         self.target_key: Optional[ME.CoordinateMapKey] = target_key
         self.points_num_list: Optional[List[List[int]]] = \
             points_num_list.copy() if points_num_list is not None else None
@@ -25,8 +27,6 @@ class GenerativeUpsampleMessage:
         self.cached_pred_list: List[ME.SparseTensor] = []
         self.cached_target_list: List[torch.Tensor] = []
         self.cached_metric_list: List[Dict[str, Union[int, float]]] = []
-        self.bce_weights = None
-        self.post_fea_hook: Optional[Callable] = None
 
 
 class GenerativeUpsample(nn.Module):
@@ -54,7 +54,7 @@ class GenerativeUpsample(nn.Module):
         fea = message.fea
         fea = self.upsample_block(fea)
         pred = self.classify_block(fea)
-        keep = self.get_keep(pred, message.points_num_list)
+        keep = self.get_keep(pred, message.points_num_list, message.max_stride_lossy_recon)
 
         if self.training:
             keep_target, loss_target = self.get_target(fea, pred, message.target_key, True)
@@ -73,17 +73,24 @@ class GenerativeUpsample(nn.Module):
         return message
 
     @torch.no_grad()
-    def get_keep(self, pred: ME.SparseTensor, points_num_list: List[List[int]]) \
-            -> torch.Tensor:
+    def get_keep(self, pred: ME.SparseTensor, points_num_list: List[List[int]],
+                 max_stride_lossy_recon: List[int]) -> torch.Tensor:
+        max_stride_coord_key = ME.CoordinateMapKey(max_stride_lossy_recon, '' if self.training else 'pruned')
+        stride_scaler = [_ // __ for _, __ in zip(max_stride_coord_key.get_tensor_stride(), pred.tensor_stride)]
+        pool = ME.MinkowskiMaxPooling(stride_scaler, stride_scaler, dimension=3).to(pred.device)
+        un_pool = ME.MinkowskiPoolingTranspose(stride_scaler, stride_scaler, dimension=3).to(pred.device)
+        pred_local_max = un_pool(pool(pred, max_stride_coord_key), pred.coordinate_map_key)
+        local_max_mask = (pred.F - pred_local_max.F).squeeze(1) != 0
         if self.loss_type == 'BCE':
             if points_num_list is not None:
                 target_points_num = points_num_list.pop()
                 sample_threshold = []
-                for sample_tgt, sample in zip(target_points_num, pred.decomposed_features):
-                    if sample.shape[0] > sample_tgt:
-                        sample_threshold.append(torch.kthvalue(sample, sample.shape[0] - sample_tgt, dim=0).values)
-                    else:
-                        sample_threshold.append(torch.finfo(sample.dtype).min)
+                for sample_tgt, sample_permutation in zip(target_points_num, pred.decomposition_permutations):
+                    sample = pred.F[sample_permutation]
+                    assert sample.shape[0] > sample_tgt
+                    sample_masked = sample[local_max_mask[sample_permutation]]
+                    sample_threshold.append(
+                        torch.kthvalue(sample_masked, sample.shape[0] - sample_tgt, dim=0).values)
                 threshold = torch.tensor(sample_threshold, device=pred.F.device, dtype=pred.F.dtype)
                 threshold = threshold[pred.C[:, 0].to(torch.long)]
             else:
@@ -94,11 +101,12 @@ class GenerativeUpsample(nn.Module):
             if points_num_list is not None:
                 target_points_num = points_num_list.pop()
                 sample_threshold = []
-                for sample_tgt, sample in zip(target_points_num, pred.decomposed_features):
-                    if sample.shape[0] > sample_tgt:
-                        sample_threshold.append(torch.kthvalue(sample, sample_tgt, dim=0).values)
-                    else:
-                        sample_threshold.append(torch.finfo(sample.dtype).max)
+                for sample_tgt, sample_permutation in zip(target_points_num, pred.decomposition_permutations):
+                    sample = pred.F[sample_permutation]
+                    assert sample.shape[0] > sample_tgt
+                    sample_masked = sample[local_max_mask[sample_permutation]]
+                    sample_threshold.append(
+                        torch.kthvalue(sample, sample_tgt - (sample.shape[0] - sample_masked.shape[0]), dim=0).values)
                 threshold = torch.tensor(sample_threshold, device=pred.F.device, dtype=pred.F.dtype)
                 threshold = threshold[pred.C[:, 0].to(torch.long)]
             else:
@@ -107,6 +115,7 @@ class GenerativeUpsample(nn.Module):
 
         else:
             raise NotImplementedError
+        keep.logical_or_(~local_max_mask)
         return keep
 
     @torch.no_grad()
