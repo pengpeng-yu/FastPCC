@@ -217,9 +217,9 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     param_names_list = [[] for _ in range(len(cfg.train.optimizer))]
     for param_name, param in model.named_parameters():
         division_idx = params_divider(param_name)
-        assert division_idx >= 0
-        params_list[division_idx].append(param)
-        param_names_list[division_idx].append(param_name)
+        if division_idx >= 0:
+            params_list[division_idx].append(param)
+            param_names_list[division_idx].append(param_name)
     optimizer_list = []
     scheduler_list = []
     if len(params_list) > 1:

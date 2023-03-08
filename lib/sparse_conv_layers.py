@@ -54,17 +54,16 @@ class BaseConvBlock(nn.Module):
                  dilation=1, dimension=3,
                  region_type: str = 'HYPER_CUBE',
                  bn: bool = False,
+                 bias: Optional[bool] = None,
                  act: Union[str, nn.Module, None] = 'relu'):
         super(BaseConvBlock, self).__init__()
-
         self.region_type = getattr(ME.RegionType, region_type)
-
         self.conv = conv_class(
             in_channels, out_channels,
             kernel_size=kernel_size,
             stride=stride,
             dilation=dilation,
-            bias=not bn,
+            bias=bias if bias is not None else not bn,
             kernel_generator=ME.KernelGenerator(
                 kernel_size,
                 stride,
@@ -112,12 +111,13 @@ class ConvBlock(BaseConvBlock):
                  dilation=1, dimension=3,
                  region_type: str = 'HYPER_CUBE',
                  bn: bool = False,
+                 bias: Optional[bool] = None,
                  act: Union[str, nn.Module, None] = 'relu'):
         super(ConvBlock, self).__init__(
             ME.MinkowskiConvolution,
             in_channels, out_channels, kernel_size, stride,
             dilation, dimension,
-            region_type, bn, act
+            region_type, bn, bias, act
         )
 
 
@@ -127,12 +127,13 @@ class ConvTransBlock(BaseConvBlock):
                  dilation=1, dimension=3,
                  region_type: str = 'HYPER_CUBE',
                  bn: bool = False,
+                 bias: Optional[bool] = None,
                  act: Union[str, nn.Module, None] = 'relu'):
         super(ConvTransBlock, self).__init__(
             ME.MinkowskiConvolutionTranspose,
             in_channels, out_channels, kernel_size, stride,
             dilation, dimension,
-            region_type, bn, act
+            region_type, bn, bias, act
         )
 
 
@@ -142,12 +143,13 @@ class GenConvTransBlock(BaseConvBlock):
                  dilation=1, dimension=3,
                  region_type: str = 'HYPER_CUBE',
                  bn: bool = False,
+                 bias: Optional[bool] = None,
                  act: Union[str, nn.Module, None] = 'relu'):
         super(GenConvTransBlock, self).__init__(
             ME.MinkowskiGenerativeConvolutionTranspose,
             in_channels, out_channels, kernel_size, stride,
             dilation, dimension,
-            region_type, bn, act
+            region_type, bn, bias, act
         )
 
 
@@ -168,11 +170,7 @@ class ResBlock(nn.Module):
         out = self.conv1(self.conv0(x))
         out += x
         if self.last_act is not None:
-            out = ME.SparseTensor(
-                out.F.relu(),
-                coordinate_manager=out.coordinate_manager,
-                coordinate_map_key=out.coordinate_map_key
-            )
+            out = self.last_act(out)
         return out
 
     def __repr__(self):

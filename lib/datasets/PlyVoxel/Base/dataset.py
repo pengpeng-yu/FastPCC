@@ -77,7 +77,7 @@ class PlyVoxel(torch.utils.data.Dataset):
         # xyz
         xyz = np.asarray(point_cloud.points)
 
-        if self.cfg.random_rotation:
+        if self.is_training and self.cfg.random_rotation:
             xyz = R.random().apply(xyz)
             xyz -= xyz.min(0)
 
@@ -101,13 +101,31 @@ class PlyVoxel(torch.utils.data.Dataset):
         else:
             normal = None
 
-        if self.is_training and self.cfg.kd_tree_partition_max_points_num != 0:
-            xyz, (color, normal) = kd_tree_partition_randomly(
-                xyz,
-                self.cfg.kd_tree_partition_max_points_num,
-                (color, normal)
-            )
-            resolution = int(np.ceil((xyz.max(0) - xyz.min(0)).max()).item()) + 1
+        if self.is_training:
+            if self.cfg.kd_tree_partition_max_points_num != 0:
+                xyz, (color, normal) = kd_tree_partition_randomly(
+                    xyz,
+                    self.cfg.kd_tree_partition_max_points_num,
+                    (color, normal)
+                )
+                resolution = int(np.ceil((xyz.max(0) - xyz.min(0)).max()).item()) + 1
+
+            if self.cfg.random_flip:
+                if np.random.rand() > 0.5:
+                    xyz[:, 0] = -xyz[:, 0] + xyz[:, 0].max() + xyz[:, 0].min()
+                if np.random.rand() > 0.5:
+                    xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max() + xyz[:, 1].min()
+                if np.random.rand() > 0.5:
+                    xyz[:, 2] = -xyz[:, 2] + xyz[:, 2].max() + xyz[:, 2].min()
+
+            if self.cfg.random_rgb_offset != 0:
+                color += np.random.randint(
+                    -self.cfg.random_rgb_offset,
+                    self.cfg.random_rgb_offset + 1, (1, 3))
+                color = color.clip(0, 255)
+
+            if self.cfg.random_rgb_perm:
+                color = np.ascontiguousarray(color[:, torch.randperm(3).tolist()])
 
         return PCData(
             xyz=torch.from_numpy(xyz),
