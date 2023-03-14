@@ -71,7 +71,8 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         collate_fn=dataset.collate_fn
     )
     if model is not None:
-        model.eval()
+        if model.training:
+            model.eval()
         device = next(model.parameters()).device
     else:
         try:

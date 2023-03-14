@@ -309,7 +309,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     if cfg.train.amp:
         scaler = amp.GradScaler()
     for epoch in range(start_epoch, cfg.train.epochs):
-        model.train()
+        if not model.training:
+            model.train()
         if global_rank != -1:
             dataloader.sampler.set_epoch(epoch)
 
@@ -407,8 +408,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             tb_writer.add_scalar('Train/Epochs', epoch, global_step - 1)
 
         # Save checkpoints
-        model.eval()  # Set training = False before saving, which is necessary for entropy models.
         if local_rank in (-1, 0) and (epoch + 1) % cfg.train.ckpt_frequency == 0:
+            model.eval()  # Set training = False before saving, which is necessary for entropy models.
             ckpt_name = 'epoch_{}.pt'.format(epoch)
             ckpt = {
                 'state_dict':
@@ -424,7 +425,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             del ckpt
 
         # Model test
-        torch.cuda.empty_cache()
         if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and (epoch + 1) % cfg.train.test_frequency == 0:
             test_items = test(cfg, logger, run_dir, model)
             for item_name, item in test_items.items():
