@@ -16,7 +16,7 @@ class DatasetConfig(SimpleConfig):
     with_normal: bool = False
     random_rotation: bool = False
     random_flip: bool = False
-    random_rgb_offset: int = 10
+    random_rgb_offset: int = 0
     random_rgb_perm: bool = False
 
     ori_resolution: Union[int, Tuple[int, ...]] = (512, 1024, 2048)  # depends on the datasets themselves

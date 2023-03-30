@@ -3,12 +3,12 @@
 __pycache__/
 .DS_Store
 
-tmp/
-build/
-runs/*
-datasets/*
-weights/*
-scripts/old/*
-scripts/tmp/
+/tmp/
+/lib/entropy_models/rans_coder/build/
+/runs/
+/datasets/
+/weights/
+/scripts/old/
+/models/convolutional/debug/
 /train.sh
 /test.sh

@@ -345,7 +345,13 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                         if cfg.train.max_grad_norm[idx] != 0:
                             torch.nn.utils.clip_grad_norm_(
                                 optimizer.param_groups[0]['params'],
-                                cfg.train.max_grad_norm[idx]
+                                cfg.train.max_grad_norm[idx],
+                                error_if_nonfinite=True
+                            )
+                        if cfg.train.max_grad_value[idx] != 0:
+                            torch.nn.utils.clip_grad_value_(
+                                optimizer.param_groups[0]['params'],
+                                cfg.train.max_grad_value[idx]
                             )
                         if cfg.train.amp:
                             scaler.step(optimizer)

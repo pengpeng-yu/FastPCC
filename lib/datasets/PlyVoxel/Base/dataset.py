@@ -108,15 +108,16 @@ class PlyVoxel(torch.utils.data.Dataset):
                     self.cfg.kd_tree_partition_max_points_num,
                     (color, normal)
                 )
-                resolution = int(np.ceil((xyz.max(0) - xyz.min(0)).max()).item()) + 1
+                xyz -= xyz.min(0)
+                resolution = int(np.ceil(xyz.max())) + 1
 
             if self.cfg.random_flip:
                 if np.random.rand() > 0.5:
-                    xyz[:, 0] = -xyz[:, 0] + xyz[:, 0].max() + xyz[:, 0].min()
+                    xyz[:, 0] = -xyz[:, 0] + xyz[:, 0].max()
                 if np.random.rand() > 0.5:
-                    xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max() + xyz[:, 1].min()
+                    xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max()
                 if np.random.rand() > 0.5:
-                    xyz[:, 2] = -xyz[:, 2] + xyz[:, 2].max() + xyz[:, 2].min()
+                    xyz[:, 2] = -xyz[:, 2] + xyz[:, 2].max()
 
             if self.cfg.random_rgb_offset != 0:
                 color += np.random.randint(

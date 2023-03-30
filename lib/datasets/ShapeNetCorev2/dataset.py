@@ -1,5 +1,4 @@
 import os
-from glob import glob
 import hashlib
 
 import numpy as np
@@ -165,7 +164,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         if self.cfg.resolution != ori_resolution:
             xyz *= ((self.cfg.resolution - 1) / (ori_resolution - 1))
-        xyz = np.round(xyz)
+        xyz = np.round(xyz)  # TODO: use probs based on the num of duplications and interpolation?
         unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
         xyz = xyz[unique_map]
 
