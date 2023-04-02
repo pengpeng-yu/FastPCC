@@ -316,46 +316,49 @@ def kd_tree_partition_base(data: np.ndarray, max_num: int) -> List[np.ndarray]:
 
     dim_index = np.argmax(np.var(data, 0)).item()
     split_point = len(data) // 2
-    data_sorted = data[np.argpartition(data[:, dim_index], split_point)]
+    split_value = torch.from_numpy(data[:, dim_index]).kthvalue(split_point).values.numpy()
+    mask = data[:, dim_index] <= split_value
 
-    left_partitions = kd_tree_partition_base(data_sorted[:split_point], max_num)
-    right_partitions = kd_tree_partition_base(data_sorted[split_point:], max_num)
-    left_partitions.extend(right_partitions)
+    if split_point <= max_num:
+        return [data[mask], data[~mask]]
+    else:
+        left_partitions = kd_tree_partition_base(data[mask], max_num)
+        right_partitions = kd_tree_partition_base(data[~mask], max_num)
+        left_partitions.extend(right_partitions)
 
     return left_partitions
 
 
-def kd_tree_partition_extended(data: np.ndarray, max_num: int, extras: List[np.ndarray])\
+def kd_tree_partition_extended(data: np.ndarray, max_num: int, extras: List[np.ndarray]) \
         -> Tuple[List[np.ndarray], List[List[np.ndarray]]]:
     if len(data) <= max_num:
         return [data], [[extra] for extra in extras]
 
     dim_index = np.argmax(np.var(data, 0)).item()
     split_point = len(data) // 2
-    arg_sorted = np.argpartition(data[:, dim_index], split_point)
-    data_sorted = data[arg_sorted]
+    split_value = torch.from_numpy(data[:, dim_index]).kthvalue(split_point).values.numpy()
+    mask = data[:, dim_index] <= split_value
 
-    for idx, extra in enumerate(extras):
-        if extra is not None:
-            extras[idx] = extra[arg_sorted]
-    del arg_sorted
+    if split_point <= max_num:
+        return [data[mask], data[~mask]], [[extra[mask], extra[~mask]] for extra in extras]
+    else:
+        left_partitions, left_extra_partitions = kd_tree_partition_extended(
+            data[mask], max_num,
+            [extra[mask] if extra is not None else extra for extra in extras]
+        )
+        mask = np.logical_not(mask)
+        right_partitions, right_extra_partitions = kd_tree_partition_extended(
+            data[mask], max_num,
+            [extra[mask] if extra is not None else extra for extra in extras]
+        )
+        left_partitions.extend(right_partitions)
+        for idx, p in enumerate(right_extra_partitions):
+            left_extra_partitions[idx].extend(p)
 
-    left_partitions, left_extra_partitions = kd_tree_partition_extended(
-        data_sorted[:split_point], max_num,
-        [extra[:split_point] if extra is not None else extra for extra in extras]
-    )
-    right_partitions, right_extra_partitions = kd_tree_partition_extended(
-        data_sorted[split_point:], max_num,
-        [extra[split_point:] if extra is not None else extra for extra in extras]
-    )
-    left_partitions.extend(right_partitions)
-    for idx, p in enumerate(right_extra_partitions):
-        left_extra_partitions[idx].extend(p)
-
-    return left_partitions, left_extra_partitions
+        return left_partitions, left_extra_partitions
 
 
-def kd_tree_partition_randomly(
+def kd_tree_partition_randomly_old(
         data: np.ndarray, target_num: int, extras: Tuple[Optional[np.ndarray], ...] = (),
         choice_fn: Callable[[np.ndarray], int] = lambda d: np.argmax(np.var(d, 0)).item()
 ) -> Union[np.ndarray, Tuple[np.ndarray, Tuple[Optional[np.ndarray], ...]]]:
@@ -382,10 +385,46 @@ def kd_tree_partition_randomly(
         else:
             arg_sorted = np.argpartition(data[:, dim_index], -target_num)[-target_num:]
 
-    return kd_tree_partition_randomly(
+    return kd_tree_partition_randomly_old(
         data[arg_sorted], target_num,
         tuple(extra[arg_sorted] if isinstance(extra, np.ndarray) else extra for extra in extras),
         choice_fn
+    )
+
+
+def kd_tree_partition_randomly(
+        data: np.ndarray, target_num: int, extras: Tuple[Optional[np.ndarray], ...] = (),
+        choice_fn: Callable[[np.ndarray], int] = lambda d: np.argmax(np.var(d, 0)).item(),
+        cur_target_num_scaler: float = 0.5
+) -> Union[np.ndarray, Tuple[np.ndarray, Tuple[Optional[np.ndarray], ...]]]:
+    len_data = len(data)
+    if len_data <= target_num:
+        if len(extras) != 0:
+            return data, extras
+        else:
+            return data
+
+    dim_index = choice_fn(data)
+    cur_target_num = round(len_data * cur_target_num_scaler)
+    if cur_target_num < target_num:
+        cur_target_num = target_num
+
+    start_point = np.random.randint(len_data - cur_target_num + 1)
+    end_points = start_point + cur_target_num - 1
+    start_value = torch.from_numpy(data[:, dim_index]).kthvalue(start_point + 1).values.numpy()
+    end_value = torch.from_numpy(data[:, dim_index]).kthvalue(end_points + 1).values.numpy()
+    mask = np.logical_and(data[:, dim_index] >= start_value, data[:, dim_index] <= end_value)
+
+    data = data[mask]
+    extras = tuple(extra[mask] if isinstance(extra, np.ndarray) else extra for extra in extras)
+
+    if cur_target_num <= target_num:
+        if len(extras) != 0:
+            return data, extras
+        else:
+            return data
+    return kd_tree_partition_randomly(
+        data, target_num, extras, choice_fn
     )
 
 
