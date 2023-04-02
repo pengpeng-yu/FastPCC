@@ -111,6 +111,25 @@ class PlyVoxel(torch.utils.data.Dataset):
                 xyz -= xyz.min(0)
                 resolution = int(np.ceil(xyz.max())) + 1
 
+            if self.cfg.hard_partition_max_len != 0:
+                for dim_idx in range(3):
+                    dim_max = xyz[:, dim_idx].max(0)
+                    dim_min = xyz[:, dim_idx].min(0)
+                    if dim_max - dim_min + 1 > self.cfg.hard_partition_max_len:
+                        for _ in range(10):
+                            new_dim_min = np.random.randint(dim_min, dim_max - self.cfg.hard_partition_max_len + 2)
+                            new_dim_max = new_dim_min + self.cfg.hard_partition_max_len - 1
+                            mask = np.logical_and(xyz[:, dim_idx] >= new_dim_min, xyz[:, dim_idx] <= new_dim_max)
+                            if dim_idx != 2 or mask.sum() >= self.cfg.hard_partition_min_points_num:
+                                break
+                        xyz = xyz[mask]
+                        if color is not None:
+                            color = color[mask]
+                        if normal is not None:
+                            normal = normal[mask]
+                resolution = self.cfg.hard_partition_max_len
+                xyz -= xyz.min(0)
+
             if self.cfg.random_flip:
                 if np.random.rand() > 0.5:
                     xyz[:, 0] = -xyz[:, 0] + xyz[:, 0].max()
