@@ -17,7 +17,6 @@ from lib.torch_utils import minkowski_tensor_wrapped_fn
 BLOCKS_LIST = [ResBlock, InceptionResBlock]
 BLOCKS_DICT = {_.__name__: _ for _ in BLOCKS_LIST}
 residuals_num_per_scale = 1
-non_shared_scales_num = 6
 
 
 def make_downsample_blocks(
@@ -359,54 +358,44 @@ class Decoder(nn.Module):
 
 
 class HyperDecoderUpsample(nn.Module):
-    def __init__(self, in_channels: int,
-                 out_channels: int,
-                 intra_channels: int,
+    def __init__(self, in_channels: Tuple[int, ...],
+                 out_channels: Tuple[int, ...],
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
                  use_batch_norm: bool,
                  act: Optional[str],
                  skip_encoding_fea: int,
-                 out_channels2: int):
+                 out_channels2: Tuple[int, ...]):
         super(HyperDecoderUpsample, self).__init__()
         basic_block = partial(BLOCKS_DICT[basic_block_type],
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
 
-        def make_block(up, out_ch):
+        def make_block(up, in_ch, out_ch):
             args = (2, 2) if up else (3, 1)
             seq_cls = NNSequentialWithConvTransBlockArgs if up else NNSequentialWithConvBlockArgs
             conv_cls = ConvTransBlock if up else ConvBlock
             return seq_cls(
-                conv_cls(in_channels, intra_channels, *args,
+                conv_cls(in_ch, in_ch, *args,
                          region_type=region_type, bn=use_batch_norm, act=act),
-                *(basic_block(intra_channels) for _ in range(basic_block_num)),
-                ConvBlock(intra_channels, out_ch, 3, 1,
+                *(basic_block(in_ch) for _ in range(basic_block_num)),
+                ConvBlock(in_ch, out_ch, 3, 1,
                           region_type=region_type, bn=use_batch_norm, act=act))
 
-        self.non_shared_blocks = nn.ModuleList()
-        for _ in range(non_shared_scales_num):
+        self.blocks = nn.ModuleList()
+        for idx, (in_ch, out_ch, out_ch2) in enumerate(zip(in_channels, out_channels, out_channels2)):
             for __ in range(residuals_num_per_scale - 1):
-                self.non_shared_blocks.append(make_block(False, out_channels2 if _ <= skip_encoding_fea else out_channels))
-            self.non_shared_blocks.append(make_block(True, out_channels2 if _ <= skip_encoding_fea else out_channels))
-
-        self.shared_blocks = nn.ModuleList()
-        for _ in range(residuals_num_per_scale - 1):
-            self.shared_blocks.append(make_block(False, out_channels))
-        self.shared_blocks.append(make_block(True, out_channels))
+                self.blocks.append(make_block(False, in_ch, out_ch2 if idx <= skip_encoding_fea else out_ch))
+            self.blocks.append(make_block(True, in_ch, out_ch2 if idx <= skip_encoding_fea else out_ch))
 
     def __getitem__(self, idx):
-        if idx < len(self.non_shared_blocks):
-            return self.non_shared_blocks[idx]
-        else:
-            return self.shared_blocks[(idx - len(self.non_shared_blocks)) % residuals_num_per_scale]
+        return self.blocks[idx]
 
 
 class HyperDecoderGenUpsample(nn.Module):
-    def __init__(self, in_channels: int,
+    def __init__(self, in_channels: Tuple[int, ...],
                  out_channels: int,
-                 intra_channels: int,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
@@ -417,175 +406,137 @@ class HyperDecoderGenUpsample(nn.Module):
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
 
-        def make_block():
+        def make_block(in_ch):
             return nn.Sequential(
-                GenConvTransBlock(in_channels, intra_channels, 2, 2,
+                GenConvTransBlock(in_ch, in_ch, 2, 2,
                                   region_type=region_type, bn=use_batch_norm, act=act),
-                *(basic_block(intra_channels) for _ in range(basic_block_num)),
-                ConvBlock(intra_channels, out_channels, 3, 1,
+                *(basic_block(in_ch) for _ in range(basic_block_num)),
+                ConvBlock(in_ch, out_channels, 3, 1,
                           region_type=region_type, bn=use_batch_norm, act=None))
 
-        self.non_shared_blocks = nn.ModuleList()
-        for _ in range(non_shared_scales_num):
-            self.non_shared_blocks.append(make_block())
-
-        self.shared_blocks = make_block()
+        self.blocks = nn.ModuleList()
+        for in_ch in in_channels:
+            self.blocks.append(make_block(in_ch))
 
     def __getitem__(self, idx):
         tgt_idx = (idx % residuals_num_per_scale) - (residuals_num_per_scale - 1)
         if 0 == tgt_idx:
-            if idx // residuals_num_per_scale < len(self.non_shared_blocks):
-                return self.non_shared_blocks[idx // residuals_num_per_scale]
-            else:
-                return self.shared_blocks
+            return self.blocks[idx // residuals_num_per_scale]
         else:
             return None
 
 
-class ResidualRecurrent(nn.Module):
-    def __init__(self, in_channels: int,
-                 out_channels: int,
+class ResidualGeoLossl(nn.Module):
+    def __init__(self, in_channels: Tuple[int, ...],
+                 out_channels: Tuple[int, ...],
                  use_batch_norm: bool,
                  act: Optional[str],
                  skip_encoding_fea: int):
-        super(ResidualRecurrent, self).__init__()
+        super(ResidualGeoLossl, self).__init__()
 
-        def make_block():
+        def make_block(in_ch, out_ch):
             return nn.Sequential(
                 MLPBlock(
-                    in_channels, in_channels,
+                    in_ch, in_ch,
                     bn='nn.bn1d' if use_batch_norm else None, act=act),
                 MLPBlock(
-                    in_channels, out_channels,
+                    in_ch, out_ch,
                     bn='nn.bn1d' if use_batch_norm else None, act=None)
             )
 
-        self.non_shared_blocks = nn.ModuleList()
-        for _ in range(non_shared_scales_num):
-            if _ <= skip_encoding_fea:
-                self.non_shared_blocks.append(nn.Module())
+        self.blocks = nn.ModuleList()
+        for idx, (in_ch, out_ch) in enumerate(zip(in_channels, out_channels)):
+            if idx <= skip_encoding_fea:
+                self.blocks.append(None)
             else:
-                for __ in range(residuals_num_per_scale):
-                    self.non_shared_blocks.append(make_block())
-
-        self.shared_blocks = nn.ModuleList()
-        for __ in range(residuals_num_per_scale):
-            self.shared_blocks.append(make_block())
+                self.blocks.append(make_block(in_ch, out_ch))
 
     def __getitem__(self, idx):
-        if idx < len(self.non_shared_blocks):
-            return self.non_shared_blocks[idx]
-        else:
-            return self.shared_blocks[(idx - len(self.non_shared_blocks)) % residuals_num_per_scale]
+        return self.blocks[idx]
 
 
-class DecoderRecurrent(nn.Module):
-    def __init__(self, in_channels: int,
-                 out_channels: int,
+class DecoderGeoLossl(nn.Module):
+    def __init__(self, in_channels: Tuple[int, ...],
+                 out_channels: Tuple[int, ...],
                  use_batch_norm: bool,
                  act: Optional[str],
                  skip_encoding_fea: int,
-                 in_channels2: int):
-        super(DecoderRecurrent, self).__init__()
+                 in_channels2: Tuple[int, ...]):
+        super(DecoderGeoLossl, self).__init__()
 
-        def make_block(in_ch):
+        def make_block(in_ch, out_ch):
             return (nn.Sequential(
                 MLPBlock(
                     in_ch, in_ch,
                     bn='nn.bn1d' if use_batch_norm else None, act=act),
                 MLPBlock(
-                    in_ch, out_channels,
+                    in_ch, out_ch,
                     bn='nn.bn1d' if use_batch_norm else None, act=act)
             ))
 
-        self.non_shared_blocks = nn.ModuleList()
-        for _ in range(non_shared_scales_num):
+        self.blocks = nn.ModuleList()
+        for idx, (in_ch, out_ch, in_ch2) in enumerate(zip(in_channels, out_channels, in_channels2)):
             for __ in range(residuals_num_per_scale):
-                if _ <= skip_encoding_fea:
-                    self.non_shared_blocks.append(make_block(in_channels2))
+                if idx <= skip_encoding_fea:
+                    self.blocks.append(make_block(in_ch2, out_ch))
                 else:
-                    self.non_shared_blocks.append(make_block(in_channels))
-
-        self.shared_blocks = nn.ModuleList()
-        for __ in range(residuals_num_per_scale):
-            self.shared_blocks.append(make_block(in_channels))
+                    self.blocks.append(make_block(in_ch, out_ch))
 
     def __getitem__(self, idx):
-        if idx < len(self.non_shared_blocks):
-            return self.non_shared_blocks[idx]
-        else:
-            return self.shared_blocks[(idx - len(self.non_shared_blocks)) % residuals_num_per_scale]
+        return self.blocks[idx]
 
 
-class EncoderRecurrent(nn.Module):
+class EncoderGeoLossl(nn.Module):
     def __init__(self,
-                 in_channels: int,
-                 out_channels: int,
+                 in_channels: Tuple[int, ...],
+                 out_channels: Tuple[int, ...],
+                 skip_encoding_fea: int,
                  basic_block_type: str,
                  region_type: str,
                  basic_block_num: int,
                  use_batch_norm: bool,
                  act: Optional[str]):
-        super(EncoderRecurrent, self).__init__()
-        hidden_channels = in_channels
+        super(EncoderGeoLossl, self).__init__()
+        assert len(in_channels) + 1 == len(out_channels)
         basic_block = partial(BLOCKS_DICT[basic_block_type],
                               region_type=region_type,
                               bn=use_batch_norm, act=act)
 
-        def make_block(down):
+        def make_block(down, in_ch, out_ch):
             args = (2, 2) if down else (3, 1)
             return nn.Sequential(
-                ConvBlock(hidden_channels, hidden_channels, *args,
+                ConvBlock(in_ch, in_ch, *args,
                           region_type=region_type, bn=use_batch_norm, act=act),
-                *(basic_block(hidden_channels) for _ in range(basic_block_num)),
-                ConvBlock(hidden_channels, hidden_channels, 3, 1,
+                *(basic_block(in_ch) for _ in range(basic_block_num)),
+                ConvBlock(in_ch, out_ch, 3, 1,
                           region_type=region_type, bn=use_batch_norm, act=act)
             ), MEMLPBlock(
-                hidden_channels, out_channels, bn=use_batch_norm, act=None
+                out_ch, out_ch, bn=use_batch_norm, act=None
             )
 
-        self.non_shared_blocks_out_first = MEMLPBlock(
-            hidden_channels, out_channels, bn=use_batch_norm, act=None
-        )
-        self.non_shared_blocks = nn.ModuleList()
-        self.non_shared_blocks_out = nn.ModuleList()
-        for _ in range(non_shared_scales_num):
-            for __ in range(residuals_num_per_scale):
-                block, block_out = make_block(False if __ != residuals_num_per_scale - 1 else True)
-                self.non_shared_blocks.append(block)
-                self.non_shared_blocks_out.append(block_out)
-
-        self.shared_blocks = nn.ModuleList()
-        self.shared_blocks_out = nn.ModuleList()
-        for _ in range(residuals_num_per_scale):
-            block, block_out = make_block(False if _ != residuals_num_per_scale - 1 else True)
-            self.shared_blocks.append(block)
-            self.shared_blocks_out.append(block_out)
+        if skip_encoding_fea > -1:
+            self.blocks_out_first = None
+        else:
+            self.blocks_out_first = MEMLPBlock(
+                in_channels[0], out_channels[0], bn=use_batch_norm, act=None
+            )
+        self.blocks = nn.ModuleList()
+        self.blocks_out = nn.ModuleList()
+        for idx, (in_ch, out_ch) in enumerate(zip(in_channels, out_channels[1:])):
+            for i in range(residuals_num_per_scale):
+                block, block_out = make_block(False if i != residuals_num_per_scale - 1 else True, in_ch, out_ch)
+                self.blocks.append(block)
+                self.blocks_out.append(block_out if idx > skip_encoding_fea else None)
 
         self.out_channels = out_channels
-        self.hidden_channels = hidden_channels
+        self.skip_encoding_fea = skip_encoding_fea
 
     def forward(self, x: ME.SparseTensor, batch_size: int):
         if not self.training: assert batch_size == 1
-        strided_fea_list = [self.non_shared_blocks_out_first(x)]
+        strided_fea_list = [self.blocks_out_first(x) if self.blocks_out_first is not None else x]
 
-        idx = 0
-        while True:
-            if idx < len(self.non_shared_blocks):
-                block = self.non_shared_blocks[idx]
-                block_out = self.non_shared_blocks_out[idx]
-            else:
-                tmp_idx = (idx - len(self.non_shared_blocks)) % len(self.shared_blocks)
-                block = self.shared_blocks[tmp_idx]
-                block_out = self.shared_blocks_out[tmp_idx]
-            idx += 1
+        for block, block_out in zip(self.blocks, self.blocks_out):
             x = block(x)
-            strided_fea_list.append(block_out(x))
-            if x.C.shape[0] == batch_size:
-                break
-        if idx < len(self.non_shared_blocks) + 1:
-            print(f'Warning: EncoderRecurrent: '
-                  f'Downsample steps ({idx}) < '
-                  f'len(self.non_shared_blocks) + 1 ({len(self.non_shared_blocks) + 1})')
+            strided_fea_list.append(block_out(x) if block_out is not None else x)
 
         return strided_fea_list

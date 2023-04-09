@@ -15,7 +15,7 @@ class ModelConfig(SimpleConfig):
     activation: str = 'relu'
 
     # Basic compression settings
-    compressed_channels: int = 8
+    compressed_channels: Tuple[int, ...] = (2, 2, 2, 2, 2, 2, 2, 2)
     bottleneck_process: str = 'noise'
     bottleneck_scaler: int = 1
     prior_indexes_scaler: float = 0.0
@@ -27,9 +27,9 @@ class ModelConfig(SimpleConfig):
     encoder_channels: Tuple[int, ...] = (8, 32)
     decoder_channels: int = 8
 
-    # Recurrent part (lossless) of network
+    # Geo lossless part of network
     skip_encoding_fea: int = -1
-    recurrent_part_channels: int = 32
+    geo_lossl_part_channels: Tuple[int, ...] = (128, 128, 128, 128, 128, 128, 128, 128)
 
     # Lossless compression settings
     lossless_coord_indexes_range: Tuple[int, ...] = (1024, 1024)

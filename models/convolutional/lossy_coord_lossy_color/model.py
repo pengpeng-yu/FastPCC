@@ -18,8 +18,8 @@ from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyMode
 
 from .geo_lossl_em import GeoLosslessNoisyDeepFactorizedEntropyModel
 from .layers import Encoder, Decoder, \
-    HyperDecoderGenUpsample, HyperDecoderUpsample, EncoderRecurrent, \
-    ResidualRecurrent, DecoderRecurrent
+    HyperDecoderGenUpsample, HyperDecoderUpsample, EncoderGeoLossl, \
+    ResidualGeoLossl, DecoderGeoLossl
 from .model_config import ModelConfig
 
 
@@ -30,9 +30,9 @@ class PCC(nn.Module):
         if s.endswith("aux_param"): return 3
         else:
             if '.em_lossless_based' in s:
-                if 'non_shared_blocks_out_first' in s:
+                if '.blocks_out_first' in s:
                     return 0
-                elif '.non_shared' in s:
+                elif '.blocks' in s:
                     return 1
                 else:
                     return 2
@@ -55,6 +55,7 @@ class PCC(nn.Module):
             cfg.activation
         )
         assert len(cfg.encoder_channels) == 2
+        assert len(cfg.compressed_channels) == len(cfg.geo_lossl_part_channels)
 
         def parameter_fns_factory(in_channels, out_channels):
             ret = [
@@ -74,33 +75,29 @@ class PCC(nn.Module):
 
         self.encoder = Encoder(
             4,
-            cfg.recurrent_part_channels,
+            cfg.geo_lossl_part_channels[0],
             cfg.encoder_channels,
             cfg.adaptive_pruning,
             cfg.adaptive_pruning_num_scaler,
             *self.basic_block_args
         )
         self.decoder = Decoder(
-            cfg.recurrent_part_channels,
+            cfg.geo_lossl_part_channels[0],
             3,
             cfg.decoder_channels,
             cfg.coord_recon_loss_factor,
             cfg.color_recon_loss_factor,
             *self.basic_block_args,
         )
-        enc_lossl = EncoderRecurrent(
-            cfg.recurrent_part_channels,
-            cfg.recurrent_part_channels,
-            cfg.basic_block_type,
-            cfg.conv_region_type,
-            cfg.basic_block_num,
-            cfg.use_batch_norm,
-            cfg.activation
+        enc_lossl = EncoderGeoLossl(
+            cfg.geo_lossl_part_channels[:-1],
+            cfg.geo_lossl_part_channels,
+            cfg.skip_encoding_fea,
+            *self.basic_block_args,
         )
         hyper_dec_coord = HyperDecoderGenUpsample(
-            cfg.recurrent_part_channels,
+            cfg.geo_lossl_part_channels[1:],
             len(cfg.lossless_coord_indexes_range),
-            cfg.recurrent_part_channels,
             cfg.basic_block_type,
             cfg.conv_region_type,
             max(cfg.basic_block_num - 2, 1),
@@ -108,25 +105,27 @@ class PCC(nn.Module):
             cfg.activation
         )
         hyper_dec_fea = HyperDecoderUpsample(
-            cfg.recurrent_part_channels,
-            cfg.compressed_channels * len(cfg.prior_indexes_range) + cfg.recurrent_part_channels,
-            self.cfg.recurrent_part_channels,
+            cfg.geo_lossl_part_channels[1:],
+            tuple(_ * (len(cfg.prior_indexes_range)) + __ for _, __ in
+                  zip(cfg.compressed_channels[:-1], cfg.geo_lossl_part_channels[:-1])),
             *self.basic_block_args,
             skip_encoding_fea=cfg.skip_encoding_fea,
-            out_channels2=cfg.recurrent_part_channels
+            out_channels2=cfg.compressed_channels[:-1]
         )
         self.em_lossless_based = self.init_em_lossless_based(
             self.init_em(), enc_lossl,
-            ResidualRecurrent(
-                cfg.recurrent_part_channels + cfg.recurrent_part_channels,
-                cfg.compressed_channels, cfg.use_batch_norm, cfg.activation,
+            ResidualGeoLossl(
+                tuple(_ * 2 for _ in cfg.geo_lossl_part_channels[:-1]),
+                cfg.compressed_channels[:-1],
+                cfg.use_batch_norm, cfg.activation,
                 cfg.skip_encoding_fea,
             ),
-            DecoderRecurrent(
-                cfg.compressed_channels + cfg.recurrent_part_channels,
-                cfg.recurrent_part_channels,
+            DecoderGeoLossl(
+                tuple(_ + __ for _, __ in zip(cfg.compressed_channels[:-1], cfg.geo_lossl_part_channels[:-1])),
+                cfg.geo_lossl_part_channels[:-1],
                 cfg.use_batch_norm, cfg.activation,
-                cfg.skip_encoding_fea, cfg.recurrent_part_channels
+                cfg.skip_encoding_fea,
+                cfg.geo_lossl_part_channels[:-1]
             ),
             hyper_dec_coord, hyper_dec_fea,
             parameter_fns_factory
@@ -134,12 +133,12 @@ class PCC(nn.Module):
 
     def init_em(self) -> nn.Module:
         em = PriorEM(
-            batch_shape=torch.Size([self.cfg.recurrent_part_channels]),
+            batch_shape=torch.Size([self.cfg.geo_lossl_part_channels[-1]]),
             coding_ndim=2,
             bottleneck_process=self.cfg.bottleneck_process,
             bottleneck_scaler=1,
             init_scale=1,
-            broadcast_shape_bytes=(0,),
+            broadcast_shape_bytes=(1,),
         )
         return em
 
@@ -312,7 +311,6 @@ class PCC(nn.Module):
         feature = strided_fea_list[-1]
 
         em_bytes, bottom_fea_recon, fea_recon = self.em_lossless_based.compress(feature, 1)
-        assert bottom_fea_recon.C.shape[0] == 1
         sparse_tensor_coords_stride = bottom_fea_recon.tensor_stride[0]
         sparse_tensor_coords = bottom_fea_recon.C
 
@@ -324,10 +322,12 @@ class PCC(nn.Module):
                 ))
             bs.write(int(math.log2(sparse_tensor_coords_stride)).to_bytes(
                      1, 'little', signed=False))
-            bs.write(b''.join(
-                [_.to_bytes(1, 'little', signed=False)
-                 for _ in (sparse_tensor_coords[0, 1:] // sparse_tensor_coords_stride).tolist()]
-            ))
+            bs.write((sparse_tensor_coords[:, 1:].numel() // 2).to_bytes(2, 'little', signed=False))
+            for i, el in enumerate((sparse_tensor_coords[:, 1:].reshape(-1) // sparse_tensor_coords_stride).tolist()):
+                if i % 2 == 1:
+                    bs.write(((last_el << 4) & el).to_bytes(1, 'little', signed=False))
+                else:
+                    last_el = el
             bs.write(em_bytes)
             compressed_bytes = bs.getvalue()
         return compressed_bytes, sparse_tensor_coords
@@ -356,7 +356,8 @@ class PCC(nn.Module):
             else:
                 points_num_list = None
             tensor_stride = 2 ** int.from_bytes(bs.read(1), 'little', signed=False)
-            sparse_tensor_coords_bytes = bs.read(3)
+            sparse_tensor_coords_bytes_len = int.from_bytes(bs.read(2), 'little', signed=False)
+            sparse_tensor_coords_bytes = bs.read(sparse_tensor_coords_bytes_len)
             em_bytes = bs.read()
 
         fea_recon = self.em_lossless_based.decompress(

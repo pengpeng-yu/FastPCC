@@ -4,13 +4,13 @@ model:
   basic_block_num: 1
   use_batch_norm: False
   activation: 'relu'
-  compressed_channels: 2
+  compressed_channels: [1, 2, 2, 2, 2, 2, 2, 2]
   bottleneck_scaler: 1
   prior_indexes_scaler: 0.0
   prior_indexes_range: [1024, 1024]
   encoder_channels: [32, 64]
   decoder_channels: 32
-  recurrent_part_channels: 128
+  geo_lossl_part_channels: [128, 128, 128, 128, 128, 128, 128, 128]
   lossless_coord_indexes_range: [1024, 1024]
   lossless_fea_num_filters: [1, 3, 3, 1]
   bpp_loss_factor: 1.0

@@ -15,6 +15,8 @@ from lib.entropy_models.hyperprior.noisy_deep_factorized.utils import BytesListU
 
 from lib.torch_utils import concat_loss_dicts
 
+from .layers import residuals_num_per_scale
+
 
 class GeoLosslessEntropyModel(nn.Module):
     def __init__(self,
@@ -145,9 +147,10 @@ class GeoLosslessEntropyModel(nn.Module):
                 )
                 concat_loss_dicts(loss_dict, coord_loss_dict, lambda k: f'coord_{idx}_' + k)
 
-            if idx <= self.skip_encoding_fea:
+            if idx <= (self.skip_encoding_fea + 1) * residuals_num_per_scale - 1:
                 fea_loss_dict = {}
                 fea_pred = sub_hyper_decoder_fea(lower_fea_tilde).F
+                assert sub_residual_block is None
                 lower_fea_tilde = ME.SparseTensor(
                     features=sub_decoder_block(fea_pred[None])[0],
                     coordinate_map_key=coord_target_key,
@@ -213,7 +216,8 @@ class GeoLosslessEntropyModel(nn.Module):
             else:
                 assert sub_hyper_decoder_coord is None
 
-            if idx <= self.skip_encoding_fea:
+            if idx <= (self.skip_encoding_fea + 1) * residuals_num_per_scale - 1:
+                assert sub_residual_block is None
                 fea_pred = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key).F
                 lower_fea_recon = ME.SparseTensor(
                     features=sub_decoder_block(fea_pred[None])[0],
@@ -298,7 +302,7 @@ class GeoLosslessEntropyModel(nn.Module):
                 )[0]
 
             fea_bytes = fea_bytes_list.pop(0)
-            if idx <= self.skip_encoding_fea:
+            if idx <= (self.skip_encoding_fea + 1) * residuals_num_per_scale - 1:
                 fea_pred = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key).F
                 lower_fea_recon = ME.SparseTensor(
                     features=sub_decoder_block(fea_pred[None])[0],
