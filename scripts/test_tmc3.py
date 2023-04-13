@@ -102,7 +102,7 @@ def test_geo_intra(processes_num, immediate_dump):
     pool = mp.Pool(processes_num)
 
     for config_dir, output_dir in zip(config_dirs, output_dirs):
-        default_config_paths = glob(osp.join(config_dir, 'basketball_player_vox11_00000200', '*', 'encoder.cfg'))
+        default_config_paths = glob(osp.join(config_dir, 'longdress_vox10_1300', '*', 'encoder.cfg'))
         default_config_paths.sort()
         print(f'Test config: "{config_dir}"')
         print(f'Output to "{output_dir}"')
@@ -187,8 +187,10 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
         command_dec = \
             f'{tmc3_path}' \
             f' --mode=1' \
+            f' --outputBinaryPly={0 if "MVUB" in file_list else 1}' \
             f' --compressedStreamPath={osp.join(sub_output_dir, f"{rate_flag}.bin")}' \
             f' --reconstructedDataPath={osp.join(sub_output_dir, f"{rate_flag}_recon.ply")}'
+        # There seem to be some errors with the binary ply of MVUB
         subp_dec = subprocess.run(
             command_dec, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             shell=True, check=True, text=True

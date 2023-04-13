@@ -60,9 +60,12 @@ def write_metric_to_csv(titles: Tuple[Union[List[str], Tuple[str, ...]], ...],
 
 
 def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
-                  output_dir, d1=True, hook=None):
+                  output_dir, d1=True, c=-1, hook=None):
     distortion_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
     y_label = 'D1 PSNR' if d1 else 'D2 PSNR'
+    if c != -1:
+        distortion_key = f'c[{c}],PSNRF'
+        y_label = 'Y PSNR' if c == 0 else 'U PSNR' if c == 1 else 'V PSNR'
     output_dir = osp.join(output_dir, f'sample-wise {y_label}')
     if osp.exists(output_dir):
         shutil.rmtree(output_dir)
@@ -132,6 +135,8 @@ def compute_multiple_bdrate():
         # 'Deep backbone w/o residual**': 'convolutional/par15e4/baseline_4x',
         'V-PCC': 'tmc2_geo',
         'ADLPCC': 'ADLPCC',
+        # 'G-PCC octree-raht': 'tmc3/octree-raht'
+        # 'G-PCC octree-predlift': 'tmc3/octree-predlift'
         'G-PCC octree': 'tmc3_geo/octree',
         'G-PCC trisoup': 'tmc3_geo/trisoup'
     }
@@ -246,6 +251,9 @@ def compute_multiple_bdrate():
 
     plot_bpp_psnr(method_to_json, output_dir, hook=remove_low_psnr_for_vis)
     plot_bpp_psnr(method_to_json, output_dir, d1=False, hook=remove_low_psnr_for_vis)
+    # plot_bpp_psnr(method_to_json, output_dir, c=0)
+    # plot_bpp_psnr(method_to_json, output_dir, c=1)
+    # plot_bpp_psnr(method_to_json, output_dir, c=2)
     print('All Done')
 
 

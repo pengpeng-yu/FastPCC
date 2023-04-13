@@ -8,7 +8,7 @@ from typing import Tuple, Union
 class Config(BaseDatasetConfig):
     root: Union[str, Tuple[str, ...]] = ('datasets/Owlii', 'datasets/8iVFBv2')
     filelist_path: Union[str, Tuple[str, ...]] = (
-        'list_basketball_player_dancer_all.txt',
+        'list_basketball_player_dancer.txt',
         'list_all.txt'
     )
 

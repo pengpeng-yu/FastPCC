@@ -2,10 +2,11 @@ import os.path as osp
 from typing import Tuple, Dict, Callable, Union, List
 
 
-extracted_log_type = Dict[str, Union[float, int, str]]
-log_mappings_type = Dict[str, Tuple[str, Callable[[str], Union[float, int, str]]]]
-all_file_metric_dict_type = Dict[str, Dict[str, List[Union[int, float, str]]]]
-one_file_metric_dict_type = Dict[str, List[Union[int, float, str]]]
+basic_types = Union[float, int, str]
+extracted_log_type = Dict[str, basic_types]
+log_mappings_type = Dict[str, Tuple[str, Callable[[str], basic_types]]]
+all_file_metric_dict_type = Dict[str, Dict[str, List[basic_types]]]
+one_file_metric_dict_type = Dict[str, List[basic_types]]
 
 
 class LogExtractor:
@@ -49,6 +50,8 @@ def concat_values_for_dict(
                 b[key] = default_value
     for key, value in b.items():
         if key in a:
+            if not isinstance(a[key], List):
+                a[key] = [a[key]]
             if isinstance(value, List):
                 a[key].extend(value)
             else:
