@@ -120,8 +120,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
     # Initialize random number generator (RNG) seeds
     if not cfg.train.more_reproducible:
-        np.random.seed(global_rank + 2)
-        init_torch_seeds(global_rank + 2)
+        init_torch_seeds(1)
     else:
         np.random.seed(0)
         init_torch_seeds(0)

@@ -17,8 +17,10 @@ def get_act_module(act: Union[str, nn.Module, None]) -> Optional[nn.Module]:
             inplace=True)
     elif act == 'sigmoid':
         act_module = ME.MinkowskiSigmoid()
+    elif act == 'prelu':
+        act_module = ME.MinkowskiPReLU()
     else:
-        raise NotImplementedError
+        raise NotImplementedError(act)
     return act_module
 
 

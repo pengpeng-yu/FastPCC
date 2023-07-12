@@ -75,7 +75,10 @@ class GenerativeUpsample(nn.Module):
     @torch.no_grad()
     def get_keep(self, pred: ME.SparseTensor, points_num_list: List[List[int]],
                  max_stride_lossy_recon: List[int]) -> torch.Tensor:
-        max_stride_coord_key = ME.CoordinateMapKey(max_stride_lossy_recon, '' if self.training else 'pruned')
+        _cm = pred.coordinate_manager._manager
+        max_stride_coord_key = ME.CoordinateMapKey(
+            max_stride_lossy_recon, '' if self.training or
+                len(_cm.get_coordinate_map_keys(max_stride_lossy_recon)) == 1 else 'pruned')
         stride_scaler = [_ // __ for _, __ in zip(max_stride_coord_key.get_tensor_stride(), pred.tensor_stride)]
         pool = ME.MinkowskiMaxPooling(stride_scaler, stride_scaler, dimension=3).to(pred.device)
         un_pool = ME.MinkowskiPoolingTranspose(stride_scaler, stride_scaler, dimension=3).to(pred.device)

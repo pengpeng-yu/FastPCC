@@ -22,8 +22,8 @@ except ImportError: ME = None
 
 def init_torch_seeds(seed=0):
     # Speed-reproducibility tradeoff https://pytorch.org/docs/stable/notes/randomness.html
-    torch.manual_seed(seed)
     if seed == 0:  # slower, more reproducible
+        torch.manual_seed(seed)
         cudnn.benchmark, cudnn.deterministic = False, True
     else:  # faster, less reproducible
         cudnn.benchmark, cudnn.deterministic = True, False
@@ -83,7 +83,7 @@ class MLPBlock(nn.Module):
                  skip_connection: Optional[str] = None):
         super(MLPBlock, self).__init__()
         assert version in ['linear', 'conv']
-        assert act is None or act.split('(', 1)[0] in ['relu', 'leaky_relu']
+        assert act is None or act.split('(', 1)[0] in ['relu', 'leaky_relu', 'prelu']
         assert bn in ['nn.bn1d', 'custom', None]
         assert skip_connection in ['sum', 'concat', None]
 
@@ -109,7 +109,9 @@ class MLPBlock(nn.Module):
             self.act = nn.LeakyReLU(
                 negative_slope=float(act.split('(', 1)[1].split(')', 1)[0]),
                 inplace=True)
-        else: raise NotImplementedError
+        elif act == 'prelu':
+            self.act = nn.PReLU()
+        else: raise NotImplementedError(act)
 
         self.in_channels = in_channels
         self.out_channels = out_channels
