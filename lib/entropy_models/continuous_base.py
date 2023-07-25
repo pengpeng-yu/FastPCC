@@ -7,7 +7,7 @@ import torch.distributions
 from torch.distributions import Distribution
 
 from .utils import quantization_offset
-from .rans_coder import batched_pmf_to_quantized_cdf, IndexedRansCoder
+from .rans_coder import IndexedRansCoder
 
 
 class DistributionQuantizedCDFTable(nn.Module):
@@ -29,7 +29,7 @@ class DistributionQuantizedCDFTable(nn.Module):
                  tail_mass: float,
                  lower_bound: Union[int, torch.Tensor],
                  upper_bound: Union[int, torch.Tensor],
-                 cdf_precision: int,
+                 coding_batch_size: int,
                  overflow_coding: bool,
                  bottleneck_scaler: int
                  ):
@@ -37,7 +37,7 @@ class DistributionQuantizedCDFTable(nn.Module):
         self.base = base
         self.init_scale = init_scale
         self.tail_mass = tail_mass
-        self.cdf_precision = cdf_precision
+        self.coding_batch_size = coding_batch_size
         self.overflow_coding = overflow_coding
         self.bottleneck_scaler = bottleneck_scaler
 
@@ -65,7 +65,7 @@ class DistributionQuantizedCDFTable(nn.Module):
         self.cdf_list: List[List[int]] = [[]]
         self.cdf_offset_list: List[int] = []
         self.requires_updating_cdf_table: bool = True
-        self.range_coder = IndexedRansCoder(self.cdf_precision, self.overflow_coding)
+        self.range_coder = IndexedRansCoder(self.overflow_coding, self.coding_batch_size)
 
         if len(base.event_shape) != 0:
             raise NotImplementedError
@@ -261,11 +261,9 @@ class DistributionQuantizedCDFTable(nn.Module):
         for i in range(len(pmf_length)):
             single_pmf = pmf[i][: pmf_length[i]].tolist()
             pmf_list.append(single_pmf)
-        self.cdf_list, self.cdf_offset_list = batched_pmf_to_quantized_cdf(
-            pmf_list, cdf_offset.tolist(), self.cdf_precision, self.overflow_coding
-        )
+        self.cdf_list, self.cdf_offset_list = self.range_coder.init_with_pmfs(
+            pmf_list, self.cdf_offset_list)
         self.requires_updating_cdf_table = False
-        self.range_coder.init_with_quantized_cdfs(self.cdf_list, self.cdf_offset_list)
 
     def get_extra_state(self):
         return self.cdf_list, self.cdf_offset_list, self.requires_updating_cdf_table
@@ -302,7 +300,7 @@ class ContinuousEntropyModelBase(nn.Module):
                  tail_mass: float,
                  lower_bound: Union[int, torch.Tensor],
                  upper_bound: Union[int, torch.Tensor],
-                 range_coder_precision: int,
+                 batch_shape: torch.Size,
                  overflow_coding: bool):
         super(ContinuousEntropyModelBase, self).__init__()
         # "self.prior" is supposed to be able to generate
@@ -313,7 +311,7 @@ class ContinuousEntropyModelBase(nn.Module):
             tail_mass=tail_mass,
             lower_bound=lower_bound,
             upper_bound=upper_bound,
-            cdf_precision=range_coder_precision,
+            coding_batch_size=batch_shape.numel(),
             overflow_coding=overflow_coding,
             bottleneck_scaler=bottleneck_scaler
         )

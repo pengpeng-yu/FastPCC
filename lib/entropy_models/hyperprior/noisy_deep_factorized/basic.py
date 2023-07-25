@@ -50,8 +50,7 @@ class EntropyModel(nn.Module):
                  quantize_indexes: bool = False,
                  indexes_scaler: float = 1,
                  init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16,
+                 tail_mass: float = 2 ** -8
                  ):
         super(EntropyModel, self).__init__()
         self.hyper_encoder = hyper_encoder
@@ -67,7 +66,6 @@ class EntropyModel(nn.Module):
             bottleneck_scaler=bottleneck_scaler,
             init_scale=hyperprior_init_scale,
             tail_mass=hyperprior_tail_mass,
-            range_coder_precision=range_coder_precision,
             broadcast_shape_bytes=hyperprior_broadcast_shape_bytes
         )
         self.prior_entropy_model = ContinuousIndexedEntropyModel(
@@ -81,8 +79,7 @@ class EntropyModel(nn.Module):
             quantize_indexes=quantize_indexes,
             indexes_scaler=indexes_scaler,
             init_scale=init_scale,
-            tail_mass=tail_mass,
-            range_coder_precision=range_coder_precision
+            tail_mass=tail_mass
         )
 
     def forward(self, y, is_first_forward: bool = True):
@@ -189,8 +186,7 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
                  quantize_indexes: bool = False,
                  indexes_scaler: float = 1,
                  init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16
+                 tail_mass: float = 2 ** -8
                  ):
         parameter_fns = noisy_scale_normal_indexed_entropy_model_init(
             scale_min, scale_max, num_scales
@@ -204,7 +200,7 @@ class ScaleNoisyNormalEntropyModel(EntropyModel):
             hyperprior_broadcast_shape_bytes, prior_bytes_num_bytes,
             bottleneck_process, 1,
             indexes_bound_gradient, quantize_indexes, indexes_scaler,
-            init_scale, tail_mass, range_coder_precision
+            init_scale, tail_mass
         )
 
     def forward(self, y, is_first_forward: bool = True):
@@ -243,8 +239,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
                  quantize_indexes: bool = False,
                  indexes_scaler: float = 1,
                  init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16
+                 tail_mass: float = 2 ** -8
                  ):
         parameter_fns, indexes_view_fn, modules_to_add = \
             noisy_deep_factorized_indexed_entropy_model_init(
@@ -259,7 +254,7 @@ class NoisyDeepFactorizedEntropyModel(EntropyModel):
             hyperprior_broadcast_shape_bytes, prior_bytes_num_bytes,
             bottleneck_process, bottleneck_scaler,
             indexes_bound_gradient, quantize_indexes, indexes_scaler,
-            init_scale, tail_mass, range_coder_precision
+            init_scale, tail_mass
         )
         for module_name, module in modules_to_add.items():
             setattr(self, module_name, module)

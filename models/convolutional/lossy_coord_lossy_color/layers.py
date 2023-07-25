@@ -1,5 +1,4 @@
 from typing import List, Tuple, Optional
-from functools import partial
 
 import torch
 import torch.nn as nn
@@ -7,82 +6,13 @@ import torch.nn.functional as F
 import MinkowskiEngine as ME
 from pytorch3d.ops import knn_points
 
-from lib.torch_utils import MLPBlock
 from lib.sparse_conv_layers import \
-    ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, ResBlock, InceptionResBlock, \
+    ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, \
     NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs
 from lib.torch_utils import minkowski_tensor_wrapped_fn
 
 
-BLOCKS_LIST = [ResBlock, InceptionResBlock]
-BLOCKS_DICT = {_.__name__: _ for _ in BLOCKS_LIST}
-residuals_num_per_scale = 1
-
-
-def make_downsample_blocks(
-        in_channels: int,
-        out_channels: int,
-        intra_channels: int,
-        basic_block_type: str,
-        region_type: str,
-        basic_block_num: int,
-        use_batch_norm: bool,
-        act: Optional[str]) -> nn.ModuleList:
-    basic_block = partial(BLOCKS_DICT[basic_block_type],
-                          region_type=region_type,
-                          bn=use_batch_norm, act=act)
-    blocks = nn.ModuleList()
-    blocks.append(nn.Sequential(
-        ConvBlock(
-            in_channels, intra_channels, 2, 2,
-            region_type='HYPER_CUBE', bn=use_batch_norm, act=act
-        ),
-
-        *[basic_block(intra_channels) for _ in range(basic_block_num)],
-
-        ConvBlock(
-            intra_channels, out_channels, 3, 1,
-            region_type=region_type, bn=use_batch_norm, act=act
-        ),
-    ))
-    return blocks
-
-
-def make_upsample_block(
-        generative: bool,
-        in_channels: int,
-        out_channels: int,
-        basic_block_type: str,
-        region_type: str,
-        basic_block_num: int,
-        use_batch_norm: bool,
-        act: Optional[str]):
-    basic_block = partial(BLOCKS_DICT[basic_block_type],
-                          region_type=region_type,
-                          bn=use_batch_norm, act=act)
-    if generative is True:
-        upsample_block = GenConvTransBlock
-    else:
-        upsample_block = ConvTransBlock
-
-    ret = [
-        upsample_block(
-            in_channels, out_channels, 2, 2,
-            region_type='HYPER_CUBE', bn=use_batch_norm, act=act
-        ),
-
-        ConvBlock(
-            out_channels, out_channels, 3, 1,
-            region_type=region_type, bn=use_batch_norm, act=act
-        ),
-
-        *[basic_block(out_channels) for _ in range(basic_block_num)]
-    ]
-
-    if generative is True:
-        return nn.Sequential(*ret)
-    else:
-        return NNSequentialWithConvTransBlockArgs(*ret)
+residuals_num_per_scale = 2
 
 
 class Encoder(nn.Module):
@@ -92,36 +22,37 @@ class Encoder(nn.Module):
                  intra_channels: Tuple[int, ...],
                  requires_points_num_list: bool,
                  points_num_scaler: float,
-                 basic_block_type: str,
                  region_type: str,
-                 basic_block_num: int,
-                 use_batch_norm: bool,
                  act: Optional[str]):
         super(Encoder, self).__init__()
         self.requires_points_num_list = requires_points_num_list
         self.points_num_scaler = points_num_scaler
+        self.pre_linear = ME.MinkowskiLinear(in_channels, in_channels, bias=True)
         self.first_block = ConvBlock(
             in_channels,
-            (intra_channels[0] if len(intra_channels) > 1 else out_channels) - in_channels, 3, 1,
-            region_type=region_type, bn=use_batch_norm, act=act
+            intra_channels[0] if len(intra_channels) > 1 else out_channels, 3, 1,
+            region_type=region_type, act=act
         )
         assert len(intra_channels) == 2
-        self.blocks = make_downsample_blocks(
-            intra_channels[0], out_channels, intra_channels[1],
-            basic_block_type, region_type, basic_block_num,
-            use_batch_norm, act
+        self.blocks = nn.Sequential(
+            ConvBlock(
+                intra_channels[0], intra_channels[1], 2, 2,
+                region_type='HYPER_CUBE', act=act
+            ),
+            ConvBlock(
+                intra_channels[1], out_channels * 2, 3, 1,
+                region_type=region_type, act=act
+            )
         )
 
     def forward(self, x) -> Tuple[List[ME.SparseTensor], Optional[List[List[int]]]]:
         points_num_list = [[_.shape[0] for _ in x.decomposed_coordinates]]
         strided_fea_list = []
-        x = ME.cat([x, self.first_block(x)])
+        x = self.pre_linear(x)
+        x = self.first_block(x)
         strided_fea_list.append(x)
-        for idx, block in enumerate(self.blocks):
-            x = block(x)
-            strided_fea_list.append(x)
-            if idx != len(self.blocks) - 1:
-                points_num_list.append([_.shape[0] for _ in x.decomposed_coordinates])
+        x = self.blocks(x)
+        strided_fea_list.append(x)
 
         if not self.requires_points_num_list:
             points_num_list = None
@@ -137,36 +68,37 @@ class Decoder(nn.Module):
                  in_channels: int,
                  out_channels: int,
                  intra_channels: int,
-                 coord_recon_loss_factor: float,
-                 color_recon_loss_factor: float,
-                 basic_block_type: str,
                  region_type: str,
-                 basic_block_num: int,
-                 use_batch_norm: bool,
                  act: Optional[str]):
         super(Decoder, self).__init__()
-        self.coord_recon_loss_factor = coord_recon_loss_factor
-        self.color_recon_loss_factor = color_recon_loss_factor
-        self.upsample_block = make_upsample_block(
-            True,
-            in_channels, intra_channels,
-            basic_block_type, region_type, basic_block_num,
-            use_batch_norm, act
+        self.upsample_block = nn.Sequential(
+            GenConvTransBlock(
+                in_channels, intra_channels, 2, 2,
+                region_type='HYPER_CUBE', act=act
+            ),
+            ConvBlock(
+                intra_channels, intra_channels, 3, 1,
+                region_type=region_type, act=act
+            )
         )
         self.classify_block = ConvBlock(
             intra_channels, 1, 3, 1,
-            region_type=region_type, bn=use_batch_norm, act=None
+            region_type=region_type, act=None
         )
         self.predict_block = nn.Sequential(
-            MEMLPBlock(
-                intra_channels + 2, intra_channels + 2, bn=use_batch_norm, act=act
+            ConvBlock(
+                intra_channels + 2, intra_channels // 2, 3, 1,
+                region_type=region_type, act=act
             ),
-            MEMLPBlock(
-                intra_channels + 2, intra_channels + 2, bn=use_batch_norm, act=act
+            ConvBlock(
+                intra_channels // 2, intra_channels // 2, 3, 1,
+                region_type=region_type, act=act
             ),
-            MEMLPBlock(
-                intra_channels + 2, out_channels, bn=use_batch_norm, act=None
-            )
+            ConvBlock(
+                intra_channels // 2, out_channels, 3, 1,
+                region_type=region_type, act=None
+            ),
+            ME.MinkowskiLinear(out_channels, out_channels, bias=True)
         )
         self.pruning = ME.MinkowskiPruning()
 
@@ -186,7 +118,7 @@ class Decoder(nn.Module):
         keep_target = self.get_target(pred, target_key)
         fea = ME.cat(
             fea, ME.SparseTensor(
-                torch.stack((keep, torch.ones_like(keep, dtype=torch.float)), dim=1),
+                keep[:, None].expand(-1, 2),
                 coordinate_manager=fea.coordinate_manager,
                 coordinate_map_key=fea.coordinate_map_key
             ))
@@ -195,7 +127,7 @@ class Decoder(nn.Module):
             pred, fea.F, keep, target_key, target_rgb,
         )
         loss_dict['coord_recon_loss'] = self.get_coord_recon_loss(pred, keep_target)
-        loss_dict['color_recon_loss'] = rgb_loss * self.color_recon_loss_factor
+        loss_dict['color_recon_loss'] = rgb_loss
         return loss_dict
 
     def test_forward(self, fea, points_num_list):
@@ -204,7 +136,7 @@ class Decoder(nn.Module):
         keep = self.get_keep(pred, points_num_list[0])
         fea = ME.cat(
             fea, ME.SparseTensor(
-                torch.stack((keep, torch.ones_like(keep, dtype=torch.float)), dim=1),
+                keep[:, None].expand(-1, 2),
                 coordinate_manager=fea.coordinate_manager,
                 coordinate_map_key=fea.coordinate_map_key
             ))
@@ -244,11 +176,9 @@ class Decoder(nn.Module):
     def get_coord_recon_loss(self, pred: ME.SparseTensor, target: torch.Tensor):
         recon_loss = F.binary_cross_entropy_with_logits(
             pred.F.squeeze(dim=1),
-            target.type(pred.F.dtype)
+            target.type(pred.F.dtype),
+            reduction='sum'
         )
-
-        if self.coord_recon_loss_factor != 1:
-            recon_loss *= self.coord_recon_loss_factor
         return recon_loss
 
     @minkowski_tensor_wrapped_fn({1: 0})
@@ -277,7 +207,7 @@ class Decoder(nn.Module):
                 batched_tgt_rgb[tgt_coord_row_ids]
             )
             rgb_loss_list.append(rgb_loss)
-        sum_rgb_loss = sum([_.sum() for _ in rgb_loss_list]) / batched_tgt_rgb.shape[0]
+        sum_rgb_loss = sum([_.sum() for _ in rgb_loss_list])
 
         return sum_rgb_loss
 
@@ -360,34 +290,28 @@ class Decoder(nn.Module):
 class HyperDecoderUpsample(nn.Module):
     def __init__(self, in_channels: Tuple[int, ...],
                  out_channels: Tuple[int, ...],
-                 basic_block_type: str,
                  region_type: str,
-                 basic_block_num: int,
-                 use_batch_norm: bool,
-                 act: Optional[str],
-                 skip_encoding_fea: int,
-                 out_channels2: Tuple[int, ...]):
+                 act: Optional[str]):
         super(HyperDecoderUpsample, self).__init__()
-        basic_block = partial(BLOCKS_DICT[basic_block_type],
-                              region_type=region_type,
-                              bn=use_batch_norm, act=act)
 
         def make_block(up, in_ch, out_ch):
             args = (2, 2) if up else (3, 1)
             seq_cls = NNSequentialWithConvTransBlockArgs if up else NNSequentialWithConvBlockArgs
             conv_cls = ConvTransBlock if up else ConvBlock
             return seq_cls(
-                conv_cls(in_ch, in_ch, *args,
-                         region_type=region_type, bn=use_batch_norm, act=act),
-                *(basic_block(in_ch) for _ in range(basic_block_num)),
-                ConvBlock(in_ch, out_ch, 3, 1,
-                          region_type=region_type, bn=use_batch_norm, act=act))
+                conv_cls(max(in_ch, 1), out_ch, *args,
+                         region_type=region_type, act=act),
+                ConvBlock(out_ch, out_ch, 3, 1,
+                          region_type=region_type, act=act))
 
         self.blocks = nn.ModuleList()
-        for idx, (in_ch, out_ch, out_ch2) in enumerate(zip(in_channels, out_channels, out_channels2)):
+        for idx, (in_ch, out_ch) in enumerate(zip(in_channels, out_channels)):
             for __ in range(residuals_num_per_scale - 1):
-                self.blocks.append(make_block(False, in_ch, out_ch2 if idx <= skip_encoding_fea else out_ch))
-            self.blocks.append(make_block(True, in_ch, out_ch2 if idx <= skip_encoding_fea else out_ch))
+                self.blocks.append(make_block(False, out_ch, out_ch))
+            self.blocks.append(make_block(True, in_ch, out_ch))
+
+    def __len__(self):
+        return len(self.blocks)
 
     def __getitem__(self, idx):
         return self.blocks[idx]
@@ -396,23 +320,16 @@ class HyperDecoderUpsample(nn.Module):
 class HyperDecoderGenUpsample(nn.Module):
     def __init__(self, in_channels: Tuple[int, ...],
                  out_channels: int,
-                 basic_block_type: str,
                  region_type: str,
-                 basic_block_num: int,
-                 use_batch_norm: bool,
                  act: Optional[str]):
         super(HyperDecoderGenUpsample, self).__init__()
-        basic_block = partial(BLOCKS_DICT[basic_block_type],
-                              region_type=region_type,
-                              bn=use_batch_norm, act=act)
 
         def make_block(in_ch):
             return nn.Sequential(
-                GenConvTransBlock(in_ch, in_ch, 2, 2,
-                                  region_type=region_type, bn=use_batch_norm, act=act),
-                *(basic_block(in_ch) for _ in range(basic_block_num)),
-                ConvBlock(in_ch, out_channels, 3, 1,
-                          region_type=region_type, bn=use_batch_norm, act=None))
+                GenConvTransBlock(in_ch, max(in_ch // 4, 1), 2, 2,
+                                  region_type=region_type, act=act),
+                ConvBlock(max(in_ch // 4, 1), out_channels, 3, 1,
+                          region_type=region_type, act=None))
 
         self.blocks = nn.ModuleList()
         for in_ch in in_channels:
@@ -426,61 +343,76 @@ class HyperDecoderGenUpsample(nn.Module):
             return None
 
 
+class SubResidualGeoLossl(nn.Module):
+    def __init__(self, in_ch, out_ch, region_type, act):
+        super(SubResidualGeoLossl, self).__init__()
+        self.blocks = nn.Sequential(
+            ConvBlock(in_ch, in_ch // 2, 3, 1, region_type=region_type, act=act),
+            ConvBlock(in_ch // 2, out_ch, 3, 1, region_type=region_type, act=None)
+        )
+
+    def forward(self, x, y):
+        x = ME.cat((x, y))
+        x = self.blocks(x)
+        return x
+
+
 class ResidualGeoLossl(nn.Module):
     def __init__(self, in_channels: Tuple[int, ...],
                  out_channels: Tuple[int, ...],
-                 use_batch_norm: bool,
-                 act: Optional[str],
-                 skip_encoding_fea: int):
+                 region_type: str,
+                 act: Optional[str]):
         super(ResidualGeoLossl, self).__init__()
-
-        def make_block(in_ch, out_ch):
-            return nn.Sequential(
-                MLPBlock(
-                    in_ch, in_ch,
-                    bn='nn.bn1d' if use_batch_norm else None, act=act),
-                MLPBlock(
-                    in_ch, out_ch,
-                    bn='nn.bn1d' if use_batch_norm else None, act=None)
-            )
-
         self.blocks = nn.ModuleList()
         for idx, (in_ch, out_ch) in enumerate(zip(in_channels, out_channels)):
-            if idx <= skip_encoding_fea:
-                self.blocks.append(None)
-            else:
-                self.blocks.append(make_block(in_ch, out_ch))
+            for __ in range(residuals_num_per_scale):
+                self.blocks.append(SubResidualGeoLossl(in_ch, out_ch, region_type, act))
+
+    def __len__(self):
+        return len(self.blocks)
 
     def __getitem__(self, idx):
         return self.blocks[idx]
 
 
+class SubDecoderGeoLossl(nn.Module):
+    def __init__(self, in_ch, in_ch2, out_ch, region_type, act):
+        super(SubDecoderGeoLossl, self).__init__()
+        self.residual_decoder = nn.Sequential(
+            ConvBlock(in_ch, out_ch // 2, 1, 1, region_type=region_type, act=act),
+            ConvBlock(out_ch // 2, out_ch, 1, 1, region_type=region_type, act=act)
+        )
+        self.decoder = nn.Sequential(
+            ConvBlock(
+                out_ch + in_ch2,
+                out_ch, 1, 1, region_type=region_type, act=act
+            ),
+            ConvBlock(
+                out_ch, out_ch, 1, 1, region_type=region_type, act=act
+            )
+        )
+
+    def forward(self, x, y):
+        x = self.residual_decoder(x)
+        x = self.decoder(ME.cat((x, y)))
+        return x
+
+
 class DecoderGeoLossl(nn.Module):
     def __init__(self, in_channels: Tuple[int, ...],
+                 in_channels2: Tuple[int, ...],
                  out_channels: Tuple[int, ...],
-                 use_batch_norm: bool,
-                 act: Optional[str],
-                 skip_encoding_fea: int,
-                 in_channels2: Tuple[int, ...]):
+                 region_type: str,
+                 act: Optional[str]):
         super(DecoderGeoLossl, self).__init__()
-
-        def make_block(in_ch, out_ch):
-            return (nn.Sequential(
-                MLPBlock(
-                    in_ch, in_ch,
-                    bn='nn.bn1d' if use_batch_norm else None, act=act),
-                MLPBlock(
-                    in_ch, out_ch,
-                    bn='nn.bn1d' if use_batch_norm else None, act=act)
-            ))
-
         self.blocks = nn.ModuleList()
         for idx, (in_ch, out_ch, in_ch2) in enumerate(zip(in_channels, out_channels, in_channels2)):
             for __ in range(residuals_num_per_scale):
-                if idx <= skip_encoding_fea:
-                    self.blocks.append(make_block(in_ch2, out_ch))
-                else:
-                    self.blocks.append(make_block(in_ch, out_ch))
+                self.blocks.append(SubDecoderGeoLossl(
+                    in_ch, in_ch2, out_ch, region_type, act))
+
+    def __len__(self):
+        return len(self.blocks)
 
     def __getitem__(self, idx):
         return self.blocks[idx]
@@ -490,46 +422,42 @@ class EncoderGeoLossl(nn.Module):
     def __init__(self,
                  in_channels: Tuple[int, ...],
                  out_channels: Tuple[int, ...],
-                 skip_encoding_fea: int,
-                 basic_block_type: str,
                  region_type: str,
-                 basic_block_num: int,
-                 use_batch_norm: bool,
                  act: Optional[str]):
         super(EncoderGeoLossl, self).__init__()
         assert len(in_channels) + 1 == len(out_channels)
-        basic_block = partial(BLOCKS_DICT[basic_block_type],
-                              region_type=region_type,
-                              bn=use_batch_norm, act=act)
 
         def make_block(down, in_ch, out_ch):
+            in_ch *= 2
             args = (2, 2) if down else (3, 1)
             return nn.Sequential(
                 ConvBlock(in_ch, in_ch, *args,
-                          region_type=region_type, bn=use_batch_norm, act=act),
-                *(basic_block(in_ch) for _ in range(basic_block_num)),
-                ConvBlock(in_ch, out_ch, 3, 1,
-                          region_type=region_type, bn=use_batch_norm, act=act)
+                          region_type=region_type, act=act),
+                ConvBlock(in_ch, in_ch, 3, 1,
+                          region_type=region_type, act=act)
             ), MEMLPBlock(
-                out_ch, out_ch, bn=use_batch_norm, act=None
+                in_ch, out_ch, act=act
             )
 
-        if skip_encoding_fea > -1:
-            self.blocks_out_first = None
-        else:
-            self.blocks_out_first = MEMLPBlock(
-                in_channels[0], out_channels[0], bn=use_batch_norm, act=None
-            )
+        self.blocks_out_first = MEMLPBlock(
+            in_channels[0] * 2, out_channels[0], act=act
+        )
         self.blocks = nn.ModuleList()
         self.blocks_out = nn.ModuleList()
         for idx, (in_ch, out_ch) in enumerate(zip(in_channels, out_channels[1:])):
             for i in range(residuals_num_per_scale):
-                block, block_out = make_block(False if i != residuals_num_per_scale - 1 else True, in_ch, out_ch)
+                block, block_out = make_block(
+                    False if i != residuals_num_per_scale - 1 else True,
+                    in_ch, in_ch if i != residuals_num_per_scale - 1 else out_ch
+                )
                 self.blocks.append(block)
-                self.blocks_out.append(block_out if idx > skip_encoding_fea else None)
+                self.blocks_out.append(block_out)
 
         self.out_channels = out_channels
-        self.skip_encoding_fea = skip_encoding_fea
+        assert len(self.blocks) == len(self.blocks_out)
+
+    def __len__(self):
+        return len(self.blocks)
 
     def forward(self, x: ME.SparseTensor, batch_size: int):
         if not self.training: assert batch_size == 1

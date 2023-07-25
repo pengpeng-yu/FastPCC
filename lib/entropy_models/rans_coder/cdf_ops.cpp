@@ -2,11 +2,8 @@
 
 
 std::vector<uint32_t>
-pmf_to_quantized_cdf(std::vector<double> &pmf, int32_t &offset, uint32_t precision,
-    bool overflow_coding)
+pmf_to_quantized_cdf(std::vector<double> &pmf, int32_t &offset, bool overflow_coding)
 {
-    assert(precision <= 32);
-    const uint32_t prob_scale = 1u << precision;
     std::vector<uint32_t> cdf;
     if (overflow_coding)
         cdf.resize(pmf.size() + 2);
@@ -30,9 +27,9 @@ pmf_to_quantized_cdf(std::vector<double> &pmf, int32_t &offset, uint32_t precisi
 
     std::partial_sum(pmf.begin(), pmf.end(), pmf.begin());
     std::transform(pmf.begin(), pmf.end(), cdf.begin() + 1,
-                   [prob_scale, total](auto p)
-                   { return static_cast<uint32_t>(std::round(prob_scale * (p / total))); });
-    cdf.back() = prob_scale;
+                   [total](auto p)
+                   { return static_cast<uint32_t>(std::round(PROB_SCALE * (p / total))); });
+    cdf.back() = PROB_SCALE;
 
     assert(cdf.size() >= 3);
     if (overflow_coding)
@@ -68,7 +65,7 @@ pmf_to_quantized_cdf(std::vector<double> &pmf, int32_t &offset, uint32_t precisi
             cdf[i] = cdf[i + cdf_start];
         }
         cdf.resize(cdf_size);
-        cdf.back() = prob_scale;
+        cdf.back() = PROB_SCALE;
     }
 
     for (size_t i = 0; i < cdf.size() - 1; i++)
@@ -108,7 +105,7 @@ pmf_to_quantized_cdf(std::vector<double> &pmf, int32_t &offset, uint32_t precisi
 
 #ifndef	NDEBUG
     // calculate updated freqs and make sure we didn't screw anything up
-    assert(cdf[0] == 0 && cdf.back() == prob_scale);
+    assert(cdf[0] == 0 && cdf.back() == PROB_SCALE);
     for (size_t i = 0; i < cdf.size() - 1; i++)
     {
         assert(cdf[i + 1] > cdf[i]);
@@ -121,7 +118,6 @@ std::tuple<std::vector<std::vector<uint32_t>>, std::vector<int32_t>>
 batched_pmf_to_quantized_cdf(
     std::vector<std::vector<double>> &pmfs,
     std::vector<int32_t> &offsets,
-    uint32_t precision,
     bool overflow_coding)
 {
     std::vector<std::vector<uint32_t>> cdfs;
@@ -130,7 +126,7 @@ batched_pmf_to_quantized_cdf(
     {
         auto &pmf = pmfs[i];
         auto &offset = offsets[i];
-        cdfs.push_back(pmf_to_quantized_cdf(pmf, offset, precision, overflow_coding));
+        cdfs.push_back(pmf_to_quantized_cdf(pmf, offset, overflow_coding));
     }
     return std::make_tuple(cdfs, offsets);
 }

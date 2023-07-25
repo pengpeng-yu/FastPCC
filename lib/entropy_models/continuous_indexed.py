@@ -2,6 +2,7 @@ from typing import List, Tuple, Union, Dict, Any, Callable
 import math
 from functools import partial
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.distributions
@@ -31,12 +32,9 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                  tail_mass: float = 2 ** -8,
                  lower_bound: Union[int, torch.Tensor] = 0,
                  upper_bound: Union[int, torch.Tensor] = -1,
-                 range_coder_precision: int = 16,
+                 batch_shape: torch.Size = torch.Size([1]),
                  overflow_coding: bool = True):
         """
-        The prior of ContinuousIndexedEntropyModel object is rebuilt
-        in each forwarding during training.
-
         batch_shape of prior is determined by index_ranges and parameter_fns.
         `indexes` must have the same shape as the bottleneck tensor,
         with an additional dimension at innermost axis if len(index_ranges) > 1.
@@ -70,7 +68,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             tail_mass=tail_mass,
             lower_bound=lower_bound,
             upper_bound=upper_bound,
-            range_coder_precision=range_coder_precision,
+            batch_shape=batch_shape,
             overflow_coding=overflow_coding
         )
         # TODO: mark this buffer as ignored in DDP broadcasting.
@@ -225,8 +223,8 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
         collapsed_x = quantized_x.reshape(-1, coding_unit_shape.numel())
 
         bytes_list = self.prior.range_coder.encode_with_indexes(
-            collapsed_x.tolist(),
-            flat_indexes.tolist()
+            collapsed_x.cpu().numpy(),
+            flat_indexes.cpu().numpy()
         )
 
         if self.bottleneck_scaler != 1:
@@ -249,12 +247,14 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
 
         input_shape = flat_indexes.shape
         coding_unit_shape = input_shape[-self.coding_ndim:]
-        flat_indexes = flat_indexes.reshape(-1, coding_unit_shape.numel())
+        flat_indexes = flat_indexes.reshape(-1, coding_unit_shape.numel()).cpu().numpy()
 
-        symbols = self.prior.range_coder.decode_with_indexes(
-            bytes_list, flat_indexes.tolist()
+        symbols = np.empty_like(flat_indexes)
+        self.prior.range_coder.decode_with_indexes(
+            bytes_list, flat_indexes, symbols
         )
-        symbols = torch.tensor(symbols, device=target_device)
+        symbols = torch.from_numpy(symbols).to(target_device)
+
         if self.quantize_bottleneck_in_eval is True:
             symbols = self.dequantize(symbols, offset=0)
             # TODO: offset=quantization_offset(self.make_prior(indexes)))?
@@ -387,7 +387,6 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
                  tail_mass: float = 2 ** -8,
                  lower_bound: Union[int, torch.Tensor] = 0,
                  upper_bound: Union[int, torch.Tensor] = -1,
-                 range_coder_precision: int = 16,
                  overflow_coding: bool = True):
         parameter_fns, self.indexes_view_fn, modules_to_add = \
             noisy_deep_factorized_indexed_entropy_model_init(
@@ -397,8 +396,7 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
             partial(NoisyDeepFactorized, noise_width=1 / bottleneck_scaler), index_ranges, parameter_fns,
             coding_ndim, bottleneck_process, bottleneck_scaler, quantize_bottleneck_in_eval,
             indexes_bound_gradient, quantize_indexes, indexes_scaler, indexes_offset,
-            init_scale, tail_mass, lower_bound, upper_bound,
-            range_coder_precision, overflow_coding
+            init_scale, tail_mass, lower_bound, upper_bound, overflow_coding
         )
         for module_name, module in modules_to_add.items():
             setattr(self, module_name, module)
@@ -450,8 +448,7 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
                  quantize_indexes: bool = False,
                  indexes_scaler: float = 1,
                  init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16):
+                 tail_mass: float = 2 ** -8):
         super(LocationScaleIndexedEntropyModel, self).__init__(
             prior_fn=prior_fn,
             index_ranges=(num_scales,),
@@ -463,8 +460,7 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
             quantize_indexes=quantize_indexes,
             indexes_scaler=indexes_scaler,
             init_scale=init_scale,
-            tail_mass=tail_mass,
-            range_coder_precision=range_coder_precision
+            tail_mass=tail_mass
         )
 
     def forward(self, x: torch.Tensor, scale_indexes: torch.Tensor, loc=None,

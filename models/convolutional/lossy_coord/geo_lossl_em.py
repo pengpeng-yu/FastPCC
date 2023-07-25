@@ -44,8 +44,7 @@ class GeoLosslessEntropyModel(nn.Module):
                  quantize_indexes: bool = False,
                  indexes_scaler: float = 1,
                  init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16
+                 tail_mass: float = 2 ** -8
                  ):
         super(GeoLosslessEntropyModel, self).__init__()
         self.bottom_fea_entropy_model = bottom_fea_entropy_model
@@ -68,7 +67,6 @@ class GeoLosslessEntropyModel(nn.Module):
             indexes_scaler=indexes_scaler,
             lower_bound=0,
             upper_bound=1,
-            range_coder_precision=range_coder_precision,
             overflow_coding=False
         )
         self.indexed_entropy_model_fea = ContinuousIndexedEntropyModel(
@@ -82,8 +80,7 @@ class GeoLosslessEntropyModel(nn.Module):
             quantize_indexes=quantize_indexes,
             indexes_scaler=indexes_scaler,
             init_scale=init_scale,
-            tail_mass=tail_mass,
-            range_coder_precision=range_coder_precision
+            tail_mass=tail_mass
         )
 
     def get_sub_hyper_decoder_coord(self, idx):
@@ -375,8 +372,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  quantize_indexes: bool = False,
                  indexes_scaler: float = 1,
                  init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16
+                 tail_mass: float = 2 ** -8
                  ):
         coord_parameter_fns, coord_indexes_view_fn, coord_modules_to_add = \
             noisy_deep_factorized_indexed_entropy_model_init(
@@ -398,7 +394,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
             upper_fea_grad_scaler_for_bits_loss,
             bottleneck_fea_process, bottleneck_scaler,
             indexes_bound_gradient, quantize_indexes, indexes_scaler,
-            init_scale, tail_mass, range_coder_precision
+            init_scale, tail_mass
         )
         for module_name, module in coord_modules_to_add.items():
             setattr(self, 'coord_' + module_name, module)

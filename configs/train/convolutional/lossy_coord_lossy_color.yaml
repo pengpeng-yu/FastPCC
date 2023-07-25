@@ -1,25 +1,19 @@
 model_path: models.convolutional.lossy_coord_lossy_color
 model:
-  basic_block_type: 'ResBlock'
-  basic_block_num: 1
-  use_batch_norm: False
-  activation: 'relu'
-  compressed_channels: [1, 2, 2, 2, 2, 2, 2, 2]
-  bottleneck_scaler: 1
-  prior_indexes_scaler: 0.0
-  prior_indexes_range: [1024, 1024]
+  activation: 'prelu'
+  compressed_channels: [1, 1, 1, 1, 1, 1, 1]
+  bottleneck_scaler: 2
   encoder_channels: [32, 64]
   decoder_channels: 32
-  geo_lossl_part_channels: [128, 128, 128, 128, 128, 128, 128, 128]
-  lossless_coord_indexes_range: [1024, 1024]
-  lossless_fea_num_filters: [1, 3, 3, 1]
-  bpp_loss_factor: 1.0
   adaptive_pruning: True
-  adaptive_pruning_num_scaler: 1.0
-  coord_recon_loss_factor: 0.001
+  adaptive_pruning_num_scaler: 1.01
+  geo_lossl_part_channels: [128, 128, 128, 128, 128, 128, 1]
+  bits_loss_factor: 1.0
+  coord_recon_loss_factor: 0.4
   color_recon_loss_factor: 0.2
   warmup_steps: 5000
-  warmup_bpp_loss_factor: 0.00001
+  warmup_fea_loss_factor: 0.01
+  warmup_color_loss_factor: 0.00001
   linear_warmup: True
 
 
@@ -29,13 +23,13 @@ train:
   amp: False
   find_unused_parameters: False
   batch_size: 4
-  num_workers: 1
+  num_workers: 4
   optimizer: [AdamW, AdamW, AdamW, Adam]
   momentum: 0.9
-  weight_decay: [0.0001, 0.0001, 0.0001, 0.0]
+  weight_decay: [0.00001, 0.00001, 0.00001, 0.0]
   max_grad_norm: [1.0, 1.0, 1.0, 0.0]
 
-  learning_rate: [0.001, 0.0006, 0.0002, 0.005]
+  learning_rate: [0.002, 0.0006, 0.0002, 0.005]
   epochs: 350
 
   scheduler: Step
@@ -51,10 +45,10 @@ train:
   dataset_path: 'lib.datasets.PlyVoxel.8iVFBv2'
   dataset:
     filelist_path: 'list_longdress_soldier_all.txt'
-    kd_tree_partition_max_points_num: 200000
+    kd_tree_partition_max_points_num: 120000
     with_color: True
     random_rotation: False
-    random_flip: False
+    random_flip: True
     random_rgb_perm: False
 
 

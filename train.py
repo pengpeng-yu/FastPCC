@@ -225,11 +225,19 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         for idx, param_names in enumerate(param_names_list):
             logger.info(f'Param Group {idx}:\n' + '\n'.join(param_names))
 
-    def get_optimizer_class(name: str, momentum: float):
+    def get_optimizer_class(name: str, momentum: float, beta2: float = 0.999):
         if name == 'Adam':
-            return partial(torch.optim.Adam, betas=(momentum, 0.999))
+            return partial(torch.optim.Adam, betas=(momentum, beta2), amsgrad=False)
+        if name == 'AdamAMS':
+            return partial(torch.optim.Adam, betas=(momentum, beta2), amsgrad=True)
         elif name == 'AdamW':
-            return partial(torch.optim.AdamW, betas=(momentum, 0.999))
+            return partial(torch.optim.AdamW, betas=(momentum, beta2), amsgrad=False)
+        elif name == 'AdamWAMS':
+            return partial(torch.optim.AdamW, betas=(momentum, beta2), amsgrad=True)
+        elif name == 'RAdam':
+            return partial(torch.optim.RAdam, betas=(momentum, beta2))
+        elif name == 'Adamax':
+            return partial(torch.optim.Adamax, betas=(momentum, beta2))
         elif name == 'SGD':
             return partial(torch.optim.SGD, momentum=momentum, nesterov=momentum != 0.0)
         else:

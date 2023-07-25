@@ -11,12 +11,11 @@ try:
 except ImportError: pass
 
 from lib.utils import Timer
-from lib.torch_utils import MLPBlock, TorchCudaMaxMemoryAllocated, concat_loss_dicts
+from lib.torch_utils import TorchCudaMaxMemoryAllocated, concat_loss_dicts
 from lib.data_utils import PCData
 from lib.evaluators import PCGCEvaluator
-from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyModel as PriorEM
 
-from .geo_lossl_em import GeoLosslessNoisyDeepFactorizedEntropyModel
+from .geo_lossl_em import GeoLosslessEntropyModel
 from .layers import Encoder, Decoder, \
     HyperDecoderGenUpsample, HyperDecoderUpsample, EncoderGeoLossl, \
     ResidualGeoLossl, DecoderGeoLossl
@@ -47,31 +46,8 @@ class PCC(nn.Module):
         self.evaluator = PCGCEvaluator(
             cfg.mpeg_pcc_error_command, 16
         )
-        self.basic_block_args = (
-            cfg.basic_block_type,
-            cfg.conv_region_type,
-            cfg.basic_block_num,
-            cfg.use_batch_norm,
-            cfg.activation
-        )
         assert len(cfg.encoder_channels) == 2
         assert len(cfg.compressed_channels) == len(cfg.geo_lossl_part_channels)
-
-        def parameter_fns_factory(in_channels, out_channels):
-            ret = [
-                *(MLPBlock(
-                    in_channels, in_channels,
-                    bn='nn.bn1d' if cfg.use_batch_norm else None,
-                    act=cfg.activation
-                ) for _ in range(cfg.parameter_fns_mlp_num - 2)),
-                MLPBlock(
-                    in_channels, out_channels,
-                    bn='nn.bn1d' if cfg.use_batch_norm else None,
-                    act=cfg.activation
-                ),
-                nn.Linear(out_channels, out_channels, bias=True)
-            ]
-            return nn.Sequential(*ret)
 
         self.encoder = Encoder(
             4,
@@ -79,95 +55,68 @@ class PCC(nn.Module):
             cfg.encoder_channels,
             cfg.adaptive_pruning,
             cfg.adaptive_pruning_num_scaler,
-            *self.basic_block_args
+            cfg.conv_region_type,
+            cfg.activation
         )
         self.decoder = Decoder(
             cfg.geo_lossl_part_channels[0],
             3,
             cfg.decoder_channels,
-            cfg.coord_recon_loss_factor,
-            cfg.color_recon_loss_factor,
-            *self.basic_block_args,
+            cfg.conv_region_type,
+            cfg.activation
         )
         enc_lossl = EncoderGeoLossl(
             cfg.geo_lossl_part_channels[:-1],
             cfg.geo_lossl_part_channels,
-            cfg.skip_encoding_fea,
-            *self.basic_block_args,
+            cfg.conv_region_type,
+            cfg.activation
         )
         hyper_dec_coord = HyperDecoderGenUpsample(
             cfg.geo_lossl_part_channels[1:],
-            len(cfg.lossless_coord_indexes_range),
-            cfg.basic_block_type,
+            1,
             cfg.conv_region_type,
-            max(cfg.basic_block_num - 2, 1),
-            cfg.use_batch_norm,
             cfg.activation
         )
         hyper_dec_fea = HyperDecoderUpsample(
             cfg.geo_lossl_part_channels[1:],
-            tuple(_ * (len(cfg.prior_indexes_range)) + __ for _, __ in
-                  zip(cfg.compressed_channels[:-1], cfg.geo_lossl_part_channels[:-1])),
-            *self.basic_block_args,
-            skip_encoding_fea=cfg.skip_encoding_fea,
-            out_channels2=cfg.compressed_channels[:-1]
+            cfg.geo_lossl_part_channels[:-1],
+            cfg.conv_region_type,
+            cfg.activation
         )
         self.em_lossless_based = self.init_em_lossless_based(
-            self.init_em(), enc_lossl,
+            enc_lossl,
             ResidualGeoLossl(
                 tuple(_ * 2 for _ in cfg.geo_lossl_part_channels[:-1]),
                 cfg.compressed_channels[:-1],
-                cfg.use_batch_norm, cfg.activation,
-                cfg.skip_encoding_fea,
+                cfg.conv_region_type, cfg.activation,
             ),
             DecoderGeoLossl(
-                tuple(_ + __ for _, __ in zip(cfg.compressed_channels[:-1], cfg.geo_lossl_part_channels[:-1])),
+                cfg.compressed_channels[:-1],
                 cfg.geo_lossl_part_channels[:-1],
-                cfg.use_batch_norm, cfg.activation,
-                cfg.skip_encoding_fea,
-                cfg.geo_lossl_part_channels[:-1]
+                cfg.geo_lossl_part_channels[:-1],
+                cfg.conv_region_type,
+                cfg.activation
             ),
-            hyper_dec_coord, hyper_dec_fea,
-            parameter_fns_factory
+            hyper_dec_coord, hyper_dec_fea
         )
-
-    def init_em(self) -> nn.Module:
-        em = PriorEM(
-            batch_shape=torch.Size([self.cfg.geo_lossl_part_channels[-1]]),
-            coding_ndim=2,
-            bottleneck_process=self.cfg.bottleneck_process,
-            bottleneck_scaler=1,
-            init_scale=1,
-            broadcast_shape_bytes=(1,),
-        )
-        return em
+        self.linear_warmup_fea_step = (self.cfg.warmup_fea_loss_factor -
+                                       self.cfg.bits_loss_factor) / self.cfg.warmup_steps
+        self.linear_warmup_color_step = (self.cfg.warmup_color_loss_factor -
+                                         self.cfg.color_recon_loss_factor) / self.cfg.warmup_steps
 
     def init_em_lossless_based(
-            self, bottom_fea_entropy_model, encoder_geo_lossless, residual_block, decoder_block,
+            self, encoder_geo_lossless, residual_block, decoder_block,
             hyper_decoder_coord_geo_lossless, hyper_decoder_fea_geo_lossless,
-            parameter_fns_factory
     ):
-        em_lossless_based = GeoLosslessNoisyDeepFactorizedEntropyModel(
-            bottom_fea_entropy_model=bottom_fea_entropy_model,
+        em_lossless_based = GeoLosslessEntropyModel(
+            self.cfg.geo_lossl_part_channels[-1],
+            self.cfg.bottleneck_process,
+            self.cfg.bottleneck_scaler,
             encoder=encoder_geo_lossless,
             residual_block=residual_block,
             decoder_block=decoder_block,
             hyper_decoder_coord=hyper_decoder_coord_geo_lossless,
-            hyper_decoder_fea=hyper_decoder_fea_geo_lossless,
-            coord_index_ranges=self.cfg.lossless_coord_indexes_range,
-            coord_parameter_fns_type='transform',
-            coord_parameter_fns_factory=parameter_fns_factory,
-            coord_num_filters=(1, 3, 3, 1),
-            fea_index_ranges=self.cfg.prior_indexes_range,
-            fea_parameter_fns_type='transform',
-            fea_parameter_fns_factory=parameter_fns_factory,
-            skip_encoding_fea=self.cfg.skip_encoding_fea,
-            fea_num_filters=self.cfg.lossless_fea_num_filters,
-            bottleneck_fea_process=self.cfg.bottleneck_process,
-            bottleneck_scaler=self.cfg.bottleneck_scaler,
-            quantize_indexes=self.cfg.quantize_indexes,
-            indexes_scaler=self.cfg.prior_indexes_scaler,
-            init_scale=5 / self.cfg.bottleneck_scaler
+            hyper_decoder_fea=hyper_decoder_fea_geo_lossless
         )
         return em_lossless_based
 
@@ -237,20 +186,27 @@ class PCC(nn.Module):
         )
         concat_loss_dicts(loss_dict, decoder_loss_dict)
 
-        if warmup_forward and self.cfg.linear_warmup:
-            warmup_bpp_loss_factor = self.cfg.warmup_bpp_loss_factor - \
-                (self.cfg.warmup_bpp_loss_factor - self.cfg.bpp_loss_factor) \
-                / self.cfg.warmup_steps * training_step
+        if warmup_forward:
+            if self.cfg.linear_warmup:
+                fea_loss_factor = self.cfg.warmup_fea_loss_factor - \
+                    self.linear_warmup_fea_step * training_step
+                color_loss_factor = self.cfg.warmup_color_loss_factor - \
+                    self.linear_warmup_color_step * training_step
+            else:
+                fea_loss_factor = self.cfg.warmup_fea_loss_factor
+                color_loss_factor = self.cfg.warmup_color_loss_factor
         else:
-            warmup_bpp_loss_factor = self.cfg.warmup_bpp_loss_factor
+            fea_loss_factor = self.cfg.bits_loss_factor
+            color_loss_factor = self.cfg.color_recon_loss_factor
+
         for key in loss_dict:
             if key.endswith('bits_loss'):
-                if warmup_forward and 'coord' not in key:  # do not warm up for coord_idx_bits_loss
-                    loss_dict[key] = loss_dict[key] * (
-                        warmup_bpp_loss_factor / sparse_pc.shape[0])
+                if 'fea' in key:
+                    loss_dict[key] *= fea_loss_factor
                 else:
-                    loss_dict[key] = loss_dict[key] * (
-                        self.cfg.bpp_loss_factor / sparse_pc.shape[0])
+                    loss_dict[key] *= self.cfg.bits_loss_factor
+        loss_dict['color_recon_loss'] *= color_loss_factor
+        loss_dict['coord_recon_loss'] *= self.cfg.coord_recon_loss_factor
 
         loss_dict['loss'] = sum(loss_dict.values())
         for key in loss_dict:

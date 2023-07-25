@@ -37,8 +37,7 @@ class GeoLosslessEntropyModel(nn.Module):
                  quantize_indexes: bool = False,
                  indexes_scaler: float = 1,
                  init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16
+                 tail_mass: float = 2 ** -8
                  ):
         super(GeoLosslessEntropyModel, self).__init__()
         self.bottom_fea_entropy_model = bottom_fea_entropy_model
@@ -57,8 +56,7 @@ class GeoLosslessEntropyModel(nn.Module):
             quantize_indexes=quantize_indexes,
             indexes_scaler=indexes_scaler,
             init_scale=init_scale,
-            tail_mass=tail_mass,
-            range_coder_precision=range_coder_precision
+            tail_mass=tail_mass
         )
 
     def get_sub_hyper_decoder_fea(self, idx):
@@ -155,8 +153,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  quantize_indexes: bool = False,
                  indexes_scaler: float = 1,
                  init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 range_coder_precision: int = 16
+                 tail_mass: float = 2 ** -8
                  ):
         fea_parameter_fns, fea_indexes_view_fn, fea_modules_to_add = \
             noisy_deep_factorized_indexed_entropy_model_init(
@@ -170,7 +167,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
             fea_index_ranges, fea_parameter_fns, fea_indexes_view_fn,
             bottleneck_fea_process, bottleneck_scaler,
             indexes_bound_gradient, quantize_indexes, indexes_scaler,
-            init_scale, tail_mass, range_coder_precision
+            init_scale, tail_mass
         )
         for module_name, module in fea_modules_to_add.items():
             setattr(self, 'fea_' + module_name, module)

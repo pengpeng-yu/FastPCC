@@ -2,6 +2,7 @@ import io
 from typing import List, Tuple, Dict, Union
 import math
 
+import numpy as np
 import torch
 import torch.distributions
 from torch.distributions import Distribution
@@ -24,14 +25,10 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                  tail_mass: float = 2 ** -8,
                  lower_bound: Union[int, torch.Tensor] = 0,
                  upper_bound: Union[int, torch.Tensor] = -1,
-                 range_coder_precision: int = 16,
+                 batch_shape: torch.Size = torch.Size([1]),
                  overflow_coding: bool = True,
                  broadcast_shape_bytes: Tuple[int, ...] = (2,)):
         """
-        Generally, prior object should have parameters on target device when being
-        constructed, since functions of nn.Module like "to()" or "cuda()" has
-        no effect on it.
-
         The innermost `self.coding_ndim` dimensions are treated as one coding unit,
         i.e. are compressed into one string each. Any additional dimensions to the
         left are treated as batch dimensions.
@@ -48,20 +45,13 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             tail_mass=tail_mass,
             lower_bound=lower_bound,
             upper_bound=upper_bound,
-            range_coder_precision=range_coder_precision,
+            batch_shape=batch_shape,
             overflow_coding=overflow_coding
         )
         assert coding_ndim >= self.prior.batch_ndim
         self.bottleneck_scaler = bottleneck_scaler
         self.quantize_bottleneck_in_eval = quantize_bottleneck_in_eval
         self.broadcast_shape_bytes = broadcast_shape_bytes
-
-    def build_indexes(self, broadcast_shape: torch.Size):
-        indexes = torch.arange(self.prior.batch_numel, dtype=torch.int32)
-        indexes = indexes.reshape(self.prior.batch_shape)
-        indexes = indexes.repeat(*broadcast_shape,
-                                 *[1] * len(self.prior.batch_shape))
-        return indexes
 
     @minkowski_tensor_wrapped_fn({1: 0})
     def forward(self, x: torch.Tensor,
@@ -117,16 +107,8 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             quantized_x = x.to(torch.int32)
         # collapse batch dimensions and coding_unit dimensions
         collapsed_x = quantized_x.reshape(-1, coding_unit_shape.numel())
-        indexes = self.build_indexes(broadcast_shape).reshape(-1).tolist()  # shape: coding_unit_shape.numel()
 
-        bytes_list = []
-        for unit_idx in range(collapsed_x.shape[0]):
-            bytes_list.append(
-                self.prior.range_coder.encode_with_indexes(
-                    [collapsed_x[unit_idx].tolist()],
-                    [indexes]
-                )[0]
-            )
+        bytes_list = self.prior.range_coder.encode(collapsed_x.cpu().numpy())
 
         # Log broadcast shape.
         assert len(self.broadcast_shape_bytes) == len(broadcast_shape)
@@ -162,22 +144,15 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                 for bytes_num in self.broadcast_shape_bytes:
                     broadcast_shape.append(int.from_bytes(bs.read(bytes_num), 'little', signed=False))
             broadcast_shape = torch.Size(broadcast_shape)
+            bytes_list = [_[broadcast_shape_total_bytes:] for _ in bytes_list]
         else:
             broadcast_shape = broadcast_shape or torch.Size([1] * len(self.broadcast_shape_bytes))
-            broadcast_shape_total_bytes = 0
-            broadcast_shape_bytes = b''
 
-        indexes = self.build_indexes(broadcast_shape).reshape(-1).tolist()
+        symbols = np.empty((batch_shape.numel(),
+                            broadcast_shape.numel() * self.prior.batch_shape.numel()), np.int32)
+        self.prior.range_coder.decode(bytes_list, symbols)
+        symbols = torch.from_numpy(symbols).to(target_device)
 
-        symbols = []
-        for s in bytes_list:
-            assert s[:broadcast_shape_total_bytes] == broadcast_shape_bytes
-            symbols.append(
-                self.prior.range_coder.decode_with_indexes(
-                    [s[broadcast_shape_total_bytes:]], [indexes],
-                )[0]
-            )
-        symbols = torch.tensor(symbols, device=target_device)
         if self.quantize_bottleneck_in_eval is True:
             symbols = self.dequantize(symbols)
         else:
@@ -200,7 +175,6 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
                  tail_mass: float = 2 ** -8,
                  lower_bound: Union[int, torch.Tensor] = 0,
                  upper_bound: Union[int, torch.Tensor] = -1,
-                 range_coder_precision: int = 16,
                  overflow_coding: bool = True,
                  broadcast_shape_bytes: Tuple[int, ...] = (2,)):
         prior_weights, prior_biases, prior_factors = \
@@ -223,7 +197,6 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
             tail_mass=tail_mass,
             lower_bound=lower_bound,
             upper_bound=upper_bound,
-            range_coder_precision=range_coder_precision,
             overflow_coding=overflow_coding,
             broadcast_shape_bytes=broadcast_shape_bytes
         )
