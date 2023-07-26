@@ -37,20 +37,17 @@ class PCC(nn.Module):
 
     def params_divider(self, s: str) -> int:
         if self.cfg.recurrent_part_enabled:
-            if s.endswith("aux_param"): return 3
-            else:
-                if '.em_lossless_based' in s:
-                    if 'non_shared_blocks_out_first' in s:
-                        return 0
-                    elif '.non_shared' in s:
-                        return 1
-                    else:
-                        return 2
-                else:
+            if '.em_lossless_based' in s:
+                if 'non_shared_blocks_out_first' in s:
                     return 0
+                elif '.non_shared' in s:
+                    return 1
+                else:
+                    return 2
+            else:
+                return 0
         else:
-            if s.endswith("aux_param"): return 1
-            else: return 0
+            return 0
 
     def __init__(self, cfg: ModelConfig):
         super(PCC, self).__init__()
@@ -167,6 +164,7 @@ class PCC(nn.Module):
                     hyper_decoder=hyper_decoder,
                     hyperprior_batch_shape=torch.Size([self.cfg.hyper_compressed_channels]),
                     hyperprior_broadcast_shape_bytes=(3,),
+                    hyperprior_init_scale=10 / self.cfg.bottleneck_scaler,
                     prior_bytes_num_bytes=3,
                     coding_ndim=2,
                     num_scales=self.cfg.prior_indexes_range[0],
@@ -175,7 +173,6 @@ class PCC(nn.Module):
                     bottleneck_process=self.cfg.bottleneck_process,
                     quantize_indexes=self.cfg.quantize_indexes,
                     indexes_scaler=self.cfg.prior_indexes_scaler,
-                    init_scale=10 / self.cfg.bottleneck_scaler,
                 )
             elif self.cfg.hyperprior == 'NoisyDeepFactorized':
                 em = HyperPriorNoisyDeepFactorizedEM(
@@ -183,6 +180,7 @@ class PCC(nn.Module):
                     hyper_decoder=hyper_decoder,
                     hyperprior_batch_shape=torch.Size([self.cfg.hyper_compressed_channels]),
                     hyperprior_broadcast_shape_bytes=(3,),
+                    hyperprior_init_scale=10 / self.cfg.bottleneck_scaler,
                     prior_bytes_num_bytes=3,
                     coding_ndim=2,
                     index_ranges=self.cfg.prior_indexes_range,
@@ -192,8 +190,7 @@ class PCC(nn.Module):
                     bottleneck_process=self.cfg.bottleneck_process,
                     bottleneck_scaler=self.cfg.bottleneck_scaler,
                     quantize_indexes=self.cfg.quantize_indexes,
-                    indexes_scaler=self.cfg.prior_indexes_scaler,
-                    init_scale=10 / self.cfg.bottleneck_scaler
+                    indexes_scaler=self.cfg.prior_indexes_scaler
                 )
             else:
                 raise NotImplementedError
@@ -222,8 +219,7 @@ class PCC(nn.Module):
             bottleneck_fea_process=self.cfg.bottleneck_process,
             bottleneck_scaler=self.cfg.bottleneck_scaler,
             quantize_indexes=self.cfg.quantize_indexes,
-            indexes_scaler=self.cfg.prior_indexes_scaler,
-            init_scale=10 / self.cfg.bottleneck_scaler
+            indexes_scaler=self.cfg.prior_indexes_scaler
         )
         return em_lossless_based
     

@@ -21,10 +21,8 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                  bottleneck_process: str = 'noise',
                  bottleneck_scaler: int = 1,
                  quantize_bottleneck_in_eval: bool = True,
-                 init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 lower_bound: Union[int, torch.Tensor] = 0,
-                 upper_bound: Union[int, torch.Tensor] = -1,
+                 lower_bound: Union[int, torch.Tensor] = -64,
+                 upper_bound: Union[int, torch.Tensor] = 64,
                  batch_shape: torch.Size = torch.Size([1]),
                  overflow_coding: bool = True,
                  broadcast_shape_bytes: Tuple[int, ...] = (2,)):
@@ -41,8 +39,6 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
             coding_ndim=coding_ndim,
             bottleneck_process=bottleneck_process,
             bottleneck_scaler=bottleneck_scaler,
-            init_scale=init_scale,
-            tail_mass=tail_mass,
             lower_bound=lower_bound,
             upper_bound=upper_bound,
             batch_shape=batch_shape,
@@ -54,8 +50,7 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
         self.broadcast_shape_bytes = broadcast_shape_bytes
 
     @minkowski_tensor_wrapped_fn({1: 0})
-    def forward(self, x: torch.Tensor,
-                is_first_forward: bool = True) \
+    def forward(self, x: torch.Tensor) \
             -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]],
                      Tuple[torch.Tensor, List[bytes], torch.Size]]:
         """
@@ -71,10 +66,6 @@ class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
                 processed_x = processed_x / self.bottleneck_scaler
             log_probs = self.prior.log_prob(processed_x)
             loss_dict = {'bits_loss': log_probs.sum() / (-math.log(2))}
-            if is_first_forward:
-                aux_loss = self.prior.aux_loss()
-                if aux_loss is not None:
-                    loss_dict['aux_loss'] = aux_loss
             return processed_x, loss_dict
 
         else:
@@ -172,9 +163,8 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
                  bottleneck_scaler: int = 1,
                  quantize_bottleneck_in_eval: bool = True,
                  init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 lower_bound: Union[int, torch.Tensor] = 0,
-                 upper_bound: Union[int, torch.Tensor] = -1,
+                 lower_bound: Union[int, torch.Tensor] = -64,
+                 upper_bound: Union[int, torch.Tensor] = 64,
                  overflow_coding: bool = True,
                  broadcast_shape_bytes: Tuple[int, ...] = (2,)):
         prior_weights, prior_biases, prior_factors = \
@@ -193,8 +183,6 @@ class NoisyDeepFactorizedEntropyModel(ContinuousBatchedEntropyModel):
             bottleneck_process=bottleneck_process,
             bottleneck_scaler=bottleneck_scaler,
             quantize_bottleneck_in_eval=quantize_bottleneck_in_eval,
-            init_scale=init_scale,
-            tail_mass=tail_mass,
             lower_bound=lower_bound,
             upper_bound=upper_bound,
             overflow_coding=overflow_coding,

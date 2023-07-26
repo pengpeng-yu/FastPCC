@@ -154,10 +154,8 @@ class PCC(nn.Module):
 
     @staticmethod
     def params_divider(s: str) -> int:
-        if s.endswith("aux_param"): return 2
-        else:
-            if 'em' not in s: return 0
-            else: return 1
+        if 'em' not in s: return 0
+        else: return 1
 
     def __init__(self, cfg: ModelConfig):
         super().__init__()

@@ -26,17 +26,15 @@ class PCC(nn.Module):
 
     @staticmethod
     def params_divider(s: str) -> int:
-        if s.endswith("aux_param"): return 3
-        else:
-            if '.em_lossless_based' in s:
-                if '.blocks_out_first' in s:
-                    return 0
-                elif '.blocks' in s:
-                    return 1
-                else:
-                    return 2
-            else:
+        if '.em_lossless_based' in s:
+            if '.blocks_out_first' in s:
                 return 0
+            elif '.blocks' in s:
+                return 1
+            else:
+                return 2
+        else:
+            return 0
 
     def __init__(self, cfg: ModelConfig):
         super(PCC, self).__init__()

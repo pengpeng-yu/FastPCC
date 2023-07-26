@@ -35,9 +35,7 @@ class GeoLosslessEntropyModel(nn.Module):
                  bottleneck_scaler: int = 1,
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
-                 indexes_scaler: float = 1,
-                 init_scale: float = 10,
-                 tail_mass: float = 2 ** -8
+                 indexes_scaler: float = 1
                  ):
         super(GeoLosslessEntropyModel, self).__init__()
         self.bottom_fea_entropy_model = bottom_fea_entropy_model
@@ -54,9 +52,7 @@ class GeoLosslessEntropyModel(nn.Module):
             bottleneck_scaler=bottleneck_scaler,
             indexes_bound_gradient=indexes_bound_gradient,
             quantize_indexes=quantize_indexes,
-            indexes_scaler=indexes_scaler,
-            init_scale=init_scale,
-            tail_mass=tail_mass
+            indexes_scaler=indexes_scaler
         )
 
     def get_sub_hyper_decoder_fea(self, idx):
@@ -151,9 +147,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  bottleneck_scaler: int = 1,
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
-                 indexes_scaler: float = 1,
-                 init_scale: float = 10,
-                 tail_mass: float = 2 ** -8
+                 indexes_scaler: float = 1
                  ):
         fea_parameter_fns, fea_indexes_view_fn, fea_modules_to_add = \
             noisy_deep_factorized_indexed_entropy_model_init(
@@ -166,8 +160,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
             partial(NoisyDeepFactorized, noise_width=1 / bottleneck_scaler),
             fea_index_ranges, fea_parameter_fns, fea_indexes_view_fn,
             bottleneck_fea_process, bottleneck_scaler,
-            indexes_bound_gradient, quantize_indexes, indexes_scaler,
-            init_scale, tail_mass
+            indexes_bound_gradient, quantize_indexes, indexes_scaler
         )
         for module_name, module in fea_modules_to_add.items():
             setattr(self, 'fea_' + module_name, module)

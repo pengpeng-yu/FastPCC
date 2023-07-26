@@ -21,7 +21,7 @@ from lib.torch_utils import concat_loss_dicts
 class GeoLosslessEntropyModel(nn.Module):
     """
     Note:
-        For lossless geometric compression.
+        For lossless geometry compression.
         Only supports batch size == 1 during testing.
     """
     def __init__(self,
@@ -49,9 +49,7 @@ class GeoLosslessEntropyModel(nn.Module):
                  bottleneck_scaler: int = 1,
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
-                 indexes_scaler: float = 1,
-                 init_scale: float = 10,
-                 tail_mass: float = 2 ** -8
+                 indexes_scaler: float = 1
                  ):
         super(GeoLosslessEntropyModel, self).__init__()
         self.bottom_fea_entropy_model = bottom_fea_entropy_model
@@ -87,9 +85,7 @@ class GeoLosslessEntropyModel(nn.Module):
             bottleneck_scaler=bottleneck_scaler,
             indexes_bound_gradient=indexes_bound_gradient,
             quantize_indexes=quantize_indexes,
-            indexes_scaler=indexes_scaler,
-            init_scale=init_scale,
-            tail_mass=tail_mass
+            indexes_scaler=indexes_scaler
         )
 
     def get_sub_hyper_decoder_coord(self, idx):
@@ -440,9 +436,7 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
                  bottleneck_fea_process: str = 'noise',
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
-                 indexes_scaler: float = 1,
-                 init_scale: float = 10,
-                 tail_mass: float = 2 ** -8
+                 indexes_scaler: float = 1
                  ):
         coord_parameter_fns = noisy_scale_normal_indexed_entropy_model_init(
             coord_index_scale_min, coord_index_scale_max, coord_index_num_scales
@@ -458,8 +452,7 @@ class GeoLosslessScaleNoisyNormalEntropyModel(GeoLosslessEntropyModel):
             lambda x: x, lambda x: x,
             skip_encoding_fea, upper_fea_grad_scaler_for_bits_loss,
             bottleneck_fea_process, 1,
-            indexes_bound_gradient, quantize_indexes, indexes_scaler,
-            init_scale, tail_mass
+            indexes_bound_gradient, quantize_indexes, indexes_scaler
         )
 
 
@@ -488,9 +481,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
                  bottleneck_scaler: int = 1,
                  indexes_bound_gradient: str = 'identity_if_towards',
                  quantize_indexes: bool = False,
-                 indexes_scaler: float = 1,
-                 init_scale: float = 10,
-                 tail_mass: float = 2 ** -8
+                 indexes_scaler: float = 1
                  ):
         coord_parameter_fns, coord_indexes_view_fn, coord_modules_to_add = \
             noisy_deep_factorized_indexed_entropy_model_init(
@@ -511,8 +502,7 @@ class GeoLosslessNoisyDeepFactorizedEntropyModel(GeoLosslessEntropyModel):
             coord_indexes_view_fn, fea_indexes_view_fn,
             skip_encoding_fea, upper_fea_grad_scaler_for_bits_loss,
             bottleneck_fea_process, bottleneck_scaler,
-            indexes_bound_gradient, quantize_indexes, indexes_scaler,
-            init_scale, tail_mass
+            indexes_bound_gradient, quantize_indexes, indexes_scaler
         )
         for module_name, module in coord_modules_to_add.items():
             setattr(self, 'coord_' + module_name, module)

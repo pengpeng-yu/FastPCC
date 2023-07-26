@@ -45,17 +45,15 @@ class PCC(nn.Module):
 
     @staticmethod
     def params_divider(s: str) -> int:
-        if s.endswith("aux_param"): return 2
-        else:
-            if 'em_lossless_based' in s:
-                if 'encoder' in s or 'decoder' in s:
-                    return 0
-                else:
-                    return 1
-            elif 'em' in s:
-                return 1
-            else:
+        if 'em_lossless_based' in s:
+            if 'encoder' in s or 'decoder' in s:
                 return 0
+            else:
+                return 1
+        elif 'em' in s:
+            return 1
+        else:
+            return 0
 
     def __init__(self, cfg: ModelConfig):
         super(PCC, self).__init__()
@@ -158,8 +156,7 @@ class PCC(nn.Module):
                         bottleneck_process=cfg.bottleneck_process,
                         bottleneck_scaler=255,
                         quantize_indexes=cfg.quantize_indexes,
-                        indexes_scaler=cfg.prior_indexes_scaler,
-                        init_scale=1
+                        indexes_scaler=cfg.prior_indexes_scaler
                     )
                     lossy_decoder_residual_out_channels = \
                         (cfg.compressed_channels,) * (self.normal_part_coder_num - 1)\
@@ -296,6 +293,7 @@ class PCC(nn.Module):
                     hyper_decoder=hyper_decoder,
                     hyperprior_batch_shape=torch.Size([self.cfg.hyper_compressed_channels]),
                     hyperprior_broadcast_shape_bytes=(3,),
+                    hyperprior_init_scale=10 / self.cfg.bottleneck_scaler,
                     prior_bytes_num_bytes=3,
                     coding_ndim=2,
                     num_scales=self.cfg.prior_indexes_range[0],
@@ -303,8 +301,7 @@ class PCC(nn.Module):
                     scale_max=64,
                     bottleneck_process=self.cfg.bottleneck_process,
                     quantize_indexes=self.cfg.quantize_indexes,
-                    indexes_scaler=self.cfg.prior_indexes_scaler,
-                    init_scale=10 / self.cfg.bottleneck_scaler,
+                    indexes_scaler=self.cfg.prior_indexes_scaler
                 )
             elif self.cfg.hyperprior == 'NoisyDeepFactorized':
                 em = HyperPriorNoisyDeepFactorizedEM(
@@ -312,6 +309,7 @@ class PCC(nn.Module):
                     hyper_decoder=hyper_decoder,
                     hyperprior_batch_shape=torch.Size([self.cfg.hyper_compressed_channels]),
                     hyperprior_broadcast_shape_bytes=(3,),
+                    hyperprior_init_scale=10 / self.cfg.bottleneck_scaler,
                     prior_bytes_num_bytes=3,
                     coding_ndim=2,
                     index_ranges=self.cfg.prior_indexes_range,
@@ -321,8 +319,7 @@ class PCC(nn.Module):
                     bottleneck_process=self.cfg.bottleneck_process,
                     bottleneck_scaler=self.cfg.bottleneck_scaler,
                     quantize_indexes=self.cfg.quantize_indexes,
-                    indexes_scaler=self.cfg.prior_indexes_scaler,
-                    init_scale=10 / self.cfg.bottleneck_scaler
+                    indexes_scaler=self.cfg.prior_indexes_scaler
                 )
             else:
                 raise NotImplementedError
@@ -352,8 +349,7 @@ class PCC(nn.Module):
             bottleneck_fea_process=self.cfg.bottleneck_process,
             bottleneck_scaler=self.cfg.bottleneck_scaler,
             quantize_indexes=self.cfg.quantize_indexes,
-            indexes_scaler=self.cfg.prior_indexes_scaler,
-            init_scale=10 / self.cfg.bottleneck_scaler
+            indexes_scaler=self.cfg.prior_indexes_scaler
         )
         return em_lossless_based
     

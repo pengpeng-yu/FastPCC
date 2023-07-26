@@ -21,7 +21,7 @@ class DeepFactorized(Distribution):
         self.biases = biases
         self.factors = factors
 
-    def logits_cdf(self, value: torch.Tensor, stop_gradient=False):
+    def logits_cdf(self, value: torch.Tensor):
         assert self.batch_shape == value.shape[-len(self.batch_shape):]
         value_shape = value.shape
         value = value.contiguous().view(-1, 1, self.batch_shape.numel()).permute(2, 1, 0).contiguous()
@@ -29,16 +29,13 @@ class DeepFactorized(Distribution):
         assert n_iter == len(self.biases) == len(self.factors) + 1
         for i in range(n_iter):
             weight = self.weights[i]
-            if stop_gradient: weight = weight.detach()
             value = torch.matmul(F.softplus(weight), value)
 
             bias = self.biases[i]
-            if stop_gradient: bias = bias.detach()
             value += bias
 
             if i < n_iter - 1:
                 factor = self.factors[i]
-                if stop_gradient: factor = factor.detach()
                 value += torch.tanh(factor) * torch.tanh(value)
         return value.permute(2, 1, 0).contiguous().view(value_shape)
 

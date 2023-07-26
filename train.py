@@ -136,11 +136,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     if hasattr(model, 'params_divider'):
         params_divider = model.params_divider
     else:
-        if len(cfg.train.optimizer) == 2:
-            params_divider: Callable[[str], int] = lambda s: 0 if not s.endswith("aux_param") else 1
-        else:
-            assert len(cfg.train.optimizer) == 1
-            params_divider: Callable[[str], int] = lambda s: 0
+        assert len(cfg.train.optimizer) == 1
+        params_divider: Callable[[str], int] = lambda s: 0
 
     if cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) == 1 and False:  # disabled
         model = model.to(device)
@@ -393,14 +390,11 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                             f'Train/Learning_rate_{idx}',
                             optimizer.param_groups[0]['lr'], global_step
                         )
-                    total_wo_aux = 0.0
                     for item_name, item in loss_dict.items():
                         if item_name != 'loss':
                             item_category = item_name.rsplit("_", 1)[-1].capitalize()
                             tb_writer.add_scalar(f'Train/{item_category}/{item_name}', item, global_step)
-                            if item_category == 'Loss' and not item_name.endswith('aux_loss'):
-                                total_wo_aux += loss_dict[item_name]
-                    tb_writer.add_scalar('Train/Loss/total_wo_aux', total_wo_aux, global_step)
+                    tb_writer.add_scalar('Train/Loss/total', loss_dict['loss'].item(), global_step)
 
             global_step += 1
             for idx, scheduler in enumerate(scheduler_list):

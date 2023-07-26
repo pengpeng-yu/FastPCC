@@ -27,17 +27,15 @@ class PCC(nn.Module):
 
     @staticmethod
     def params_divider(s: str) -> int:
-        if s.endswith("aux_param"): return 3
-        else:
-            if '.em_lossless_based' in s:
-                if 'non_shared_blocks_out_first' in s:
-                    return 0
-                elif '.non_shared' in s:
-                    return 1
-                else:
-                    return 2
-            else:
+        if '.em_lossless_based' in s:
+            if 'non_shared_blocks_out_first' in s:
                 return 0
+            elif '.non_shared' in s:
+                return 1
+            else:
+                return 2
+        else:
+            return 0
 
     def __init__(self, cfg: ModelConfig):
         super(PCC, self).__init__()
@@ -131,8 +129,7 @@ class PCC(nn.Module):
             bottleneck_fea_process=self.cfg.bottleneck_process,
             bottleneck_scaler=self.cfg.bottleneck_scaler,
             quantize_indexes=self.cfg.quantize_indexes,
-            indexes_scaler=self.cfg.prior_indexes_scaler,
-            init_scale=10 / self.cfg.bottleneck_scaler
+            indexes_scaler=self.cfg.prior_indexes_scaler
         )
         return em_lossless_based
     
@@ -213,6 +210,7 @@ class PCC(nn.Module):
             GenerativeUpsampleMessage(
                 fea=bottleneck_feature,
                 target_key=sparse_pc.coordinate_map_key,
+                max_stride_lossy_recon=[2 ** len(self.cfg.decoder_channels)] * 3,
                 points_num_list=points_num_list
             )
         )
@@ -251,6 +249,7 @@ class PCC(nn.Module):
             GenerativeUpsampleMessage(
                 fea=bottleneck_feature,
                 target_key=sparse_pc.coordinate_map_key,
+                max_stride_lossy_recon=[2 ** len(self.cfg.decoder_channels)] * 3,
                 points_num_list=points_num_list
             )
         )

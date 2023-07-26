@@ -24,10 +24,10 @@ train:
   find_unused_parameters: False
   batch_size: 4
   num_workers: 4
-  optimizer: [AdamW, AdamW, AdamW, Adam]
+  optimizer: [AdamW, AdamW, AdamW]
   momentum: 0.9
-  weight_decay: [0.00001, 0.00001, 0.00001, 0.0]
-  max_grad_norm: [1.0, 1.0, 1.0, 0.0]
+  weight_decay: [0.00001, 0.00001, 0.00001]
+  max_grad_norm: [1.0, 1.0, 1.0]
 
   learning_rate: [0.002, 0.0006, 0.0002, 0.005]
   epochs: 350

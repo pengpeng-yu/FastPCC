@@ -86,18 +86,6 @@ class UniformNoiseAdapter(Distribution):
                            sf_y_minus - sf_y_plus,
                            cdf_y_plus - cdf_y_minus)
 
-    @property
-    def logits_cdf_for_estimation(self):
-        return self.base.logits_cdf
-
-    @property
-    def log_cdf_for_estimation(self):
-        return self.base.log_cdf
-
-    @property
-    def log_survival_function_for_estimation(self):
-        return self.base.log_survival_function
-
 
 class NoisyDeepFactorized(UniformNoiseAdapter):
     def __init__(self,

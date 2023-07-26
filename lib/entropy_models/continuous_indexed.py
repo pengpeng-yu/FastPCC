@@ -28,10 +28,8 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                  quantize_indexes: bool = False,
                  indexes_scaler: float = 1,
                  indexes_offset: float = 0,
-                 init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 lower_bound: Union[int, torch.Tensor] = 0,
-                 upper_bound: Union[int, torch.Tensor] = -1,
+                 lower_bound: Union[int, torch.Tensor] = -64,
+                 upper_bound: Union[int, torch.Tensor] = 64,
                  batch_shape: torch.Size = torch.Size([1]),
                  overflow_coding: bool = True):
         """
@@ -64,8 +62,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             coding_ndim=coding_ndim,
             bottleneck_process=bottleneck_process,
             bottleneck_scaler=bottleneck_scaler,
-            init_scale=init_scale,
-            tail_mass=tail_mass,
             lower_bound=lower_bound,
             upper_bound=upper_bound,
             batch_shape=batch_shape,
@@ -153,10 +149,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
                 processed_x = processed_x / self.bottleneck_scaler
             log_probs = prior.log_prob(grad_scaler(processed_x, x_grad_scaler_for_bits_loss))
             loss_dict = {'bits_loss': log_probs.sum() / (-math.log(2))}
-            if is_first_forward:
-                aux_loss = self.prior.aux_loss()
-                if aux_loss is not None:
-                    loss_dict['aux_loss'] = aux_loss
             return processed_x, loss_dict
 
         else:
@@ -383,10 +375,9 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
                  quantize_indexes: bool = False,
                  indexes_scaler: float = 1,
                  indexes_offset: float = 0,
-                 init_scale: float = 10,
-                 tail_mass: float = 2 ** -8,
-                 lower_bound: Union[int, torch.Tensor] = 0,
-                 upper_bound: Union[int, torch.Tensor] = -1,
+                 lower_bound: Union[int, torch.Tensor] = -64,
+                 upper_bound: Union[int, torch.Tensor] = 64,
+                 batch_shape: torch.Size = torch.Size([1]),
                  overflow_coding: bool = True):
         parameter_fns, self.indexes_view_fn, modules_to_add = \
             noisy_deep_factorized_indexed_entropy_model_init(
@@ -396,7 +387,7 @@ class ContinuousNoisyDeepFactorizedIndexedEntropyModel(ContinuousIndexedEntropyM
             partial(NoisyDeepFactorized, noise_width=1 / bottleneck_scaler), index_ranges, parameter_fns,
             coding_ndim, bottleneck_process, bottleneck_scaler, quantize_bottleneck_in_eval,
             indexes_bound_gradient, quantize_indexes, indexes_scaler, indexes_offset,
-            init_scale, tail_mass, lower_bound, upper_bound, overflow_coding
+            lower_bound, upper_bound, batch_shape, overflow_coding
         )
         for module_name, module in modules_to_add.items():
             setattr(self, module_name, module)
@@ -446,9 +437,7 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
                  bottleneck_scaler: int = 1,
                  quantize_bottleneck_in_eval: bool = True,
                  quantize_indexes: bool = False,
-                 indexes_scaler: float = 1,
-                 init_scale: float = 10,
-                 tail_mass: float = 2 ** -8):
+                 indexes_scaler: float = 1):
         super(LocationScaleIndexedEntropyModel, self).__init__(
             prior_fn=prior_fn,
             index_ranges=(num_scales,),
@@ -458,9 +447,7 @@ class LocationScaleIndexedEntropyModel(ContinuousIndexedEntropyModel):
             bottleneck_scaler=bottleneck_scaler,
             quantize_bottleneck_in_eval=quantize_bottleneck_in_eval,
             quantize_indexes=quantize_indexes,
-            indexes_scaler=indexes_scaler,
-            init_scale=init_scale,
-            tail_mass=tail_mass
+            indexes_scaler=indexes_scaler
         )
 
     def forward(self, x: torch.Tensor, scale_indexes: torch.Tensor, loc=None,

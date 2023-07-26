@@ -101,8 +101,7 @@ class GeoLosslessEntropyModel(nn.Module):
 
             fea_pred = sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key)
             fea_res = sub_residual_block(fea, fea_pred)
-            fea_res_tilde, fea_loss_dict = self.bottom_fea_entropy_model(
-                fea_res, is_first_forward=False)
+            fea_res_tilde, fea_loss_dict = self.bottom_fea_entropy_model(fea_res)
             concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: f'fea_{idx}_' + k)
 
             lower_fea_tilde = sub_decoder_block(fea_res_tilde, fea_pred)

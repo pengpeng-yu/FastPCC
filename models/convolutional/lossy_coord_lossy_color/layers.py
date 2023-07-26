@@ -427,16 +427,17 @@ class EncoderGeoLossl(nn.Module):
         super(EncoderGeoLossl, self).__init__()
         assert len(in_channels) + 1 == len(out_channels)
 
-        def make_block(down, in_ch, out_ch):
+        def make_block(down, in_ch, next_in_ch, out_ch):
             in_ch *= 2
+            next_in_ch *= 2
             args = (2, 2) if down else (3, 1)
             return nn.Sequential(
                 ConvBlock(in_ch, in_ch, *args,
                           region_type=region_type, act=act),
-                ConvBlock(in_ch, in_ch, 3, 1,
+                ConvBlock(in_ch, next_in_ch, 3, 1,
                           region_type=region_type, act=act)
             ), MEMLPBlock(
-                in_ch, out_ch, act=act
+                next_in_ch, out_ch, act=act
             )
 
         self.blocks_out_first = MEMLPBlock(
@@ -448,7 +449,10 @@ class EncoderGeoLossl(nn.Module):
             for i in range(residuals_num_per_scale):
                 block, block_out = make_block(
                     False if i != residuals_num_per_scale - 1 else True,
-                    in_ch, in_ch if i != residuals_num_per_scale - 1 else out_ch
+                    in_ch,
+                    in_channels[idx + 1] if i == residuals_num_per_scale - 1
+                    and idx != len(in_channels) - 1 else in_ch,
+                    in_ch if i != residuals_num_per_scale - 1 else out_ch
                 )
                 self.blocks.append(block)
                 self.blocks_out.append(block_out)
