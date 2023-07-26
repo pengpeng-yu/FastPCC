@@ -193,7 +193,7 @@ std::vector<py::bytes> IndexedRansCoder::encode_with_indexes(
 }
 
 template <bool OVERFLOW_CODING, bool WITH_INDEXES>
-PyArrayInt32 IndexedRansCoder::_decode_with_indexes(
+int IndexedRansCoder::_decode_with_indexes(
     const std::vector<std::string> &encoded_list,
     const PyArrayInt32 &index_array,
     PyArrayInt32 &symbol_array)
@@ -259,10 +259,10 @@ PyArrayInt32 IndexedRansCoder::_decode_with_indexes(
         }
     }
     Py_END_ALLOW_THREADS
-    return symbol_array;
+    return 0;
 }
 
-PyArrayInt32 IndexedRansCoder::decode(
+int IndexedRansCoder::decode(
     const std::vector<std::string> &encoded_list,
     PyArrayInt32 &symbol_array)
 {
@@ -272,7 +272,7 @@ PyArrayInt32 IndexedRansCoder::decode(
         return _decode_with_indexes<false, false>(encoded_list, PyArrayInt32(), symbol_array);
 }
 
-PyArrayInt32 IndexedRansCoder::decode_with_indexes(
+int IndexedRansCoder::decode_with_indexes(
     const std::vector<std::string> &encoded_list,
     const PyArrayInt32 &index_array,
     PyArrayInt32 &symbol_array)
@@ -366,7 +366,7 @@ std::vector<py::bytes> BinaryRansCoder::encode(
 }
 
 
-PyArrayInt32 BinaryRansCoder::decode(
+int BinaryRansCoder::decode(
     const std::vector<std::string> &encoded_list,
     const PyArrayUint32 &prob_array,
     PyArrayBool &symbol_array)
@@ -405,7 +405,7 @@ PyArrayInt32 BinaryRansCoder::decode(
         }
     }
     Py_END_ALLOW_THREADS
-    return symbol_array;
+    return 0;
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)

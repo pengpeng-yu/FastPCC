@@ -24,6 +24,6 @@ model:
 
 train:
   optimizer: [AdamW, AdamW, AdamW]
-  weight_decay: [0.0001, 0.0001, 0.0001]
-  max_grad_norm: [1.0, 1.0, 1.0]
+  weight_decay: 0.0001
+  max_grad_norm: 1.0
   learning_rate: [0.0005, 0.0003, 0.0001]

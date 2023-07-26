@@ -33,7 +33,7 @@ class GeoLosslessEntropyModel(nn.Module):
                 coding_ndim=2,
                 bottleneck_process=bottleneck_process,
                 bottleneck_scaler=bottleneck_scaler,
-                init_scale=1,
+                init_scale=5,
                 broadcast_shape_bytes=(3,),
             )
         self.bottom_fea_entropy_model = make_em()
@@ -50,7 +50,7 @@ class GeoLosslessEntropyModel(nn.Module):
     def init_prob(dist: torch.Tensor):
         return np.clip(
             np.round(dist.sigmoid().cpu().numpy().astype(np.float64) * (1 << 16)).astype(np.uint32),
-            1, 1 << 16 - 1)
+            1, (1 << 16) - 1)
 
     def binary_encode(self, dist: torch.Tensor, x: torch.Tensor):
         assert dist.shape[0] == x.shape[0] and dist.shape[1] == 1

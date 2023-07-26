@@ -48,16 +48,16 @@ public:
     );
 
     template <bool OVERFLOW_CODING, bool WITH_INDEXES>
-    PyArrayInt32 _decode_with_indexes(
+    int _decode_with_indexes(
         const std::vector<std::string> &encoded_list,
         const PyArrayInt32 &index_array,
         PyArrayInt32 &symbol_array
     );
-    PyArrayInt32 decode(
+    int decode(
         const std::vector<std::string> &encoded_list,
         PyArrayInt32 &symbol_array
     );
-    PyArrayInt32 decode_with_indexes(
+    int decode_with_indexes(
         const std::vector<std::string> &encoded_list,
         const PyArrayInt32 &index_array,
         PyArrayInt32 &symbol_array
@@ -90,7 +90,7 @@ public:
         const PyArrayBool &symbol_array,
         const PyArrayUint32 &prob_array
     );
-    PyArrayInt32 decode(
+    int decode(
         const std::vector<std::string> &encoded_list,
         const PyArrayUint32 &prob_array,
         PyArrayBool &symbol_array
