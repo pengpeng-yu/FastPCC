@@ -45,53 +45,58 @@ class PCC(nn.Module):
             cfg.mpeg_pcc_error_command, 16
         )
         assert len(cfg.encoder_channels) == 2
-        assert len(cfg.compressed_channels) == len(cfg.geo_lossl_part_channels)
+        assert len(cfg.compressed_channels) == len(cfg.geo_lossl_channels)
+        assert len(cfg.geo_lossl_if_sample) == len(cfg.geo_lossl_channels) - 1
+        assert cfg.compressed_channels[-1] == cfg.geo_lossl_channels[-1]
 
         self.encoder = Encoder(
             4,
-            cfg.geo_lossl_part_channels[0],
+            cfg.geo_lossl_channels[0],
             cfg.encoder_channels,
             cfg.adaptive_pruning,
-            cfg.adaptive_pruning_num_scaler,
+            cfg.adaptive_pruning_scaler_train,
+            cfg.adaptive_pruning_scaler_test,
             cfg.conv_region_type,
             cfg.activation
         )
         self.decoder = Decoder(
-            cfg.geo_lossl_part_channels[0],
+            cfg.geo_lossl_channels[0],
             3,
             cfg.decoder_channels,
             cfg.conv_region_type,
             cfg.activation
         )
         enc_lossl = EncoderGeoLossl(
-            cfg.geo_lossl_part_channels[:-1],
-            cfg.geo_lossl_part_channels,
+            cfg.geo_lossl_channels[:-1],
+            cfg.geo_lossl_channels,
+            cfg.geo_lossl_if_sample,
             cfg.conv_region_type,
             cfg.activation
         )
         hyper_dec_coord = HyperDecoderGenUpsample(
-            cfg.geo_lossl_part_channels[1:],
-            1,
+            cfg.geo_lossl_channels[1:],
+            cfg.geo_lossl_if_sample,
             cfg.conv_region_type,
             cfg.activation
         )
         hyper_dec_fea = HyperDecoderUpsample(
-            cfg.geo_lossl_part_channels[1:],
-            cfg.geo_lossl_part_channels[:-1],
+            cfg.geo_lossl_channels[1:],
+            cfg.geo_lossl_channels[:-1],
+            cfg.geo_lossl_if_sample,
             cfg.conv_region_type,
             cfg.activation
         )
         self.em_lossless_based = self.init_em_lossless_based(
             enc_lossl,
             ResidualGeoLossl(
-                tuple(_ * 2 for _ in cfg.geo_lossl_part_channels[:-1]),
+                tuple(_ * 2 for _ in cfg.geo_lossl_channels[:-1]),
                 cfg.compressed_channels[:-1],
                 cfg.conv_region_type, cfg.activation,
             ),
             DecoderGeoLossl(
                 cfg.compressed_channels[:-1],
-                cfg.geo_lossl_part_channels[:-1],
-                cfg.geo_lossl_part_channels[:-1],
+                cfg.geo_lossl_channels[:-1],
+                cfg.geo_lossl_channels[:-1],
                 cfg.conv_region_type,
                 cfg.activation
             ),
@@ -107,7 +112,7 @@ class PCC(nn.Module):
             hyper_decoder_coord_geo_lossless, hyper_decoder_fea_geo_lossless,
     ):
         em_lossless_based = GeoLosslessEntropyModel(
-            self.cfg.geo_lossl_part_channels[-1],
+            self.cfg.geo_lossl_channels[-1],
             self.cfg.bottleneck_process,
             self.cfg.bottleneck_scaler,
             encoder=encoder_geo_lossless,

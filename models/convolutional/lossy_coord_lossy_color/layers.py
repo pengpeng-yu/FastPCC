@@ -21,12 +21,14 @@ class Encoder(nn.Module):
                  out_channels: int,
                  intra_channels: Tuple[int, ...],
                  requires_points_num_list: bool,
-                 points_num_scaler: float,
+                 points_num_scaler_train: float,
+                 points_num_scaler_test: float,
                  region_type: str,
                  act: Optional[str]):
         super(Encoder, self).__init__()
         self.requires_points_num_list = requires_points_num_list
-        self.points_num_scaler = points_num_scaler
+        self.points_num_scaler_train = points_num_scaler_train
+        self.points_num_scaler_test = points_num_scaler_test
         self.pre_linear = ME.MinkowskiLinear(in_channels, in_channels, bias=True)
         self.first_block = ConvBlock(
             in_channels,
@@ -54,10 +56,11 @@ class Encoder(nn.Module):
         x = self.blocks(x)
         strided_fea_list.append(x)
 
+        scaler = self.points_num_scaler_train if self.training else self.points_num_scaler_test
         if not self.requires_points_num_list:
             points_num_list = None
         else:
-            points_num_list = [[int(n * self.points_num_scaler) for n in _]
+            points_num_list = [[int(n * scaler) for n in _]
                                for _ in points_num_list]
 
         return strided_fea_list, points_num_list
@@ -290,6 +293,7 @@ class Decoder(nn.Module):
 class HyperDecoderUpsample(nn.Module):
     def __init__(self, in_channels: Tuple[int, ...],
                  out_channels: Tuple[int, ...],
+                 if_sample: Tuple[int, ...],
                  region_type: str,
                  act: Optional[str]):
         super(HyperDecoderUpsample, self).__init__()
@@ -305,10 +309,8 @@ class HyperDecoderUpsample(nn.Module):
                           region_type=region_type, act=act))
 
         self.blocks = nn.ModuleList()
-        for idx, (in_ch, out_ch) in enumerate(zip(in_channels, out_channels)):
-            for __ in range(residuals_num_per_scale - 1):
-                self.blocks.append(make_block(False, out_ch, out_ch))
-            self.blocks.append(make_block(True, in_ch, out_ch))
+        for in_ch, out_ch, up in zip(in_channels, out_channels, if_sample):
+            self.blocks.append(make_block(up, in_ch, out_ch))
 
     def __len__(self):
         return len(self.blocks)
@@ -319,7 +321,7 @@ class HyperDecoderUpsample(nn.Module):
 
 class HyperDecoderGenUpsample(nn.Module):
     def __init__(self, in_channels: Tuple[int, ...],
-                 out_channels: int,
+                 if_sample: Tuple[int, ...],
                  region_type: str,
                  act: Optional[str]):
         super(HyperDecoderGenUpsample, self).__init__()
@@ -328,19 +330,15 @@ class HyperDecoderGenUpsample(nn.Module):
             return nn.Sequential(
                 GenConvTransBlock(in_ch, max(in_ch // 4, 1), 2, 2,
                                   region_type=region_type, act=act),
-                ConvBlock(max(in_ch // 4, 1), out_channels, 3, 1,
+                ConvBlock(max(in_ch // 4, 1), 1, 3, 1,
                           region_type=region_type, act=None))
 
         self.blocks = nn.ModuleList()
-        for in_ch in in_channels:
-            self.blocks.append(make_block(in_ch))
+        for in_ch, up in zip(in_channels, if_sample):
+            self.blocks.append(make_block(in_ch) if up else None)
 
     def __getitem__(self, idx):
-        tgt_idx = (idx % residuals_num_per_scale) - (residuals_num_per_scale - 1)
-        if 0 == tgt_idx:
-            return self.blocks[idx // residuals_num_per_scale]
-        else:
-            return None
+        return self.blocks[idx]
 
 
 class SubResidualGeoLossl(nn.Module):
@@ -365,8 +363,7 @@ class ResidualGeoLossl(nn.Module):
         super(ResidualGeoLossl, self).__init__()
         self.blocks = nn.ModuleList()
         for idx, (in_ch, out_ch) in enumerate(zip(in_channels, out_channels)):
-            for __ in range(residuals_num_per_scale):
-                self.blocks.append(SubResidualGeoLossl(in_ch, out_ch, region_type, act))
+            self.blocks.append(SubResidualGeoLossl(in_ch, out_ch, region_type, act))
 
     def __len__(self):
         return len(self.blocks)
@@ -407,9 +404,8 @@ class DecoderGeoLossl(nn.Module):
         super(DecoderGeoLossl, self).__init__()
         self.blocks = nn.ModuleList()
         for idx, (in_ch, out_ch, in_ch2) in enumerate(zip(in_channels, out_channels, in_channels2)):
-            for __ in range(residuals_num_per_scale):
-                self.blocks.append(SubDecoderGeoLossl(
-                    in_ch, in_ch2, out_ch, region_type, act))
+            self.blocks.append(SubDecoderGeoLossl(
+                in_ch, in_ch2, out_ch, region_type, act))
 
     def __len__(self):
         return len(self.blocks)
@@ -422,22 +418,23 @@ class EncoderGeoLossl(nn.Module):
     def __init__(self,
                  in_channels: Tuple[int, ...],
                  out_channels: Tuple[int, ...],
+                 if_sample: Tuple[int, ...],
                  region_type: str,
                  act: Optional[str]):
         super(EncoderGeoLossl, self).__init__()
         assert len(in_channels) + 1 == len(out_channels)
 
-        def make_block(down, in_ch, next_in_ch, out_ch):
+        def make_block(down, in_ch, out_ch):
+            intra_out_ch = max(in_ch, out_ch) * 2
             in_ch *= 2
-            next_in_ch *= 2
             args = (2, 2) if down else (3, 1)
             return nn.Sequential(
                 ConvBlock(in_ch, in_ch, *args,
                           region_type=region_type, act=act),
-                ConvBlock(in_ch, next_in_ch, 3, 1,
+                ConvBlock(in_ch, intra_out_ch, 3, 1,
                           region_type=region_type, act=act)
             ), MEMLPBlock(
-                next_in_ch, out_ch, act=act
+                intra_out_ch, out_ch, act=act
             )
 
         self.blocks_out_first = MEMLPBlock(
@@ -445,17 +442,12 @@ class EncoderGeoLossl(nn.Module):
         )
         self.blocks = nn.ModuleList()
         self.blocks_out = nn.ModuleList()
-        for idx, (in_ch, out_ch) in enumerate(zip(in_channels, out_channels[1:])):
-            for i in range(residuals_num_per_scale):
-                block, block_out = make_block(
-                    False if i != residuals_num_per_scale - 1 else True,
-                    in_ch,
-                    in_channels[idx + 1] if i == residuals_num_per_scale - 1
-                    and idx != len(in_channels) - 1 else in_ch,
-                    in_ch if i != residuals_num_per_scale - 1 else out_ch
-                )
-                self.blocks.append(block)
-                self.blocks_out.append(block_out)
+        for in_ch, out_ch, down in zip(in_channels, out_channels[1:], if_sample):
+            block, block_out = make_block(
+                down, in_ch, out_ch
+            )
+            self.blocks.append(block)
+            self.blocks_out.append(block_out)
 
         self.out_channels = out_channels
         assert len(self.blocks) == len(self.blocks_out)

@@ -12,7 +12,7 @@ class ModelConfig(SimpleConfig):
     activation: str = 'relu'
 
     # Basic compression settings
-    compressed_channels: Tuple[int, ...] = (2, 2, 2, 2, 2, 2, 2, 2)
+    compressed_channels: Tuple[int, ...] = 1
     bottleneck_process: str = 'noise'
     bottleneck_scaler: int = 1
 
@@ -20,10 +20,12 @@ class ModelConfig(SimpleConfig):
     encoder_channels: Tuple[int, ...] = (8, 32)
     decoder_channels: int = 8
     adaptive_pruning: bool = True
-    adaptive_pruning_num_scaler: float = 1.0
+    adaptive_pruning_scaler_train: float = 1.0
+    adaptive_pruning_scaler_test: float = 1.0
 
     # Geo lossless part of network
-    geo_lossl_part_channels: Tuple[int, ...] = (128, 128, 128, 128, 128, 128, 128, 128)
+    geo_lossl_if_sample: Tuple[int, ...] = (1, 1)
+    geo_lossl_channels: Tuple[int, ...] = (128, 128, 1)
 
     # Loss items
     bits_loss_factor: float = 0.2
@@ -35,3 +37,7 @@ class ModelConfig(SimpleConfig):
     linear_warmup: bool = False
 
     mpeg_pcc_error_command: str = 'pc_error_d'
+
+    def check_local_value(self):
+        if len(self.compressed_channels) == 1:
+            self.compressed_channels *= len(self.geo_lossl_channels)

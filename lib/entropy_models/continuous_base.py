@@ -113,7 +113,6 @@ class DistributionQuantizedCDFTable(nn.Module):
         if self.overflow_coding:
             if not torch.all(pmf[0] == 0):
                 print(f'Warning: Possible overflow at lower bound. Max PM: {pmf[0].max().item()}')
-        if self.overflow_coding:
             if not torch.all(pmf[-1] == 0):
                 print(f'Warning: Possible overflow at upper bound. Max PM: {pmf[-1].max().item()}')
 
