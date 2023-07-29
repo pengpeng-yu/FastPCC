@@ -16,6 +16,7 @@ typedef std::vector<VecInt32> VecVecInt32;
 typedef py::array_t<int32_t, py::array::c_style | py::array::forcecast> PyArrayInt32;
 typedef py::array_t<uint32_t, py::array::c_style | py::array::forcecast> PyArrayUint32;
 typedef py::array_t<bool, py::array::c_style | py::array::forcecast> PyArrayBool;
+typedef py::array_t<double, py::array::c_style | py::array::forcecast> PyArrayDouble;
 
 
 class IndexedRansCoder
@@ -27,12 +28,13 @@ public:
         size_t enc_buf_size = DEFAULT_ENC_BUF_SIZE);
     ~IndexedRansCoder();
 
-    std::tuple<VecVecUint32, VecInt32> init_with_pmfs(
-        std::vector<std::vector<double>> &pmfs, VecInt32 &offsets
+    int init_with_pmfs(
+        PyArrayDouble &pmf_array, PyArrayInt32 &offset_array
     );
-    std::tuple<VecVecUint32, VecInt32> init_with_quantized_cdfs(
-        VecVecUint32 &quantized_cdfs, VecInt32 &offsets
+    int init_with_quantized_cdfs(
+        VecVecUint32 &quantized_cdfs, PyArrayInt32 &offset_array
     );
+    VecVecUint32 get_cdfs();
 
     template <bool OVERFLOW_CODING, bool WITH_INDEXES>
     std::vector<py::bytes> _encode_with_indexes(
@@ -73,7 +75,7 @@ private:
     VecVecUint32 cdfs;
     std::vector<std::vector<RansEncSymbol>> esyms_list;
     std::vector<std::vector<RansDecSymbol>> dsyms_list;
-    VecInt32 offsets;
+    PyArrayInt32 offset_array;
     std::vector<RansEncSymbol> bin_esyms;
     std::vector<RansDecSymbol> bin_dsyms;
 };

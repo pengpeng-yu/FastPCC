@@ -33,24 +33,21 @@ IndexedRansCoder::~IndexedRansCoder()
     }
 }
 
-std::tuple<VecVecUint32, VecInt32>
-IndexedRansCoder::init_with_pmfs(
-    std::vector<std::vector<double>> &pmfs,
-    VecInt32 &offsets)
+int IndexedRansCoder::init_with_pmfs(
+    PyArrayDouble &pmf_array,
+    PyArrayInt32 &offset_array)
 {
-    auto &&ret = batched_pmf_to_quantized_cdf(pmfs, offsets, overflow_coding);
-    return init_with_quantized_cdfs(std::get<0>(ret), std::get<1>(ret));
+    VecVecUint32 &&cdfs = batched_pmf_to_quantized_cdf(pmf_array, offset_array, overflow_coding);
+    return init_with_quantized_cdfs(cdfs, offset_array);
 }
 
-std::tuple<VecVecUint32, VecInt32>
-IndexedRansCoder::init_with_quantized_cdfs(
+int IndexedRansCoder::init_with_quantized_cdfs(
     VecVecUint32 &cdfs,
-    VecInt32 &offsets)
+    PyArrayInt32 &offset_array)
 {
     size_t cdfs_num = cdfs.size();
     esyms_list.resize(cdfs_num);
     dsyms_list.resize(cdfs_num);
-    assert(cdfs_num == offsets.size());
 
     for (size_t cdf_idx = 0; cdf_idx < cdfs.size(); ++cdf_idx)
     {
@@ -71,9 +68,14 @@ IndexedRansCoder::init_with_quantized_cdfs(
         }
     }
 
-    this->offsets = std::move(offsets);
+    this->offset_array = std::move(offset_array);
     this->cdfs = std::move(cdfs);
-    return std::make_tuple(this->cdfs, this->offsets);
+    return 0;
+}
+
+VecVecUint32 IndexedRansCoder::get_cdfs()
+{
+    return this->cdfs;
 }
 
 template <bool OVERFLOW_CODING, bool WITH_INDEXES>
@@ -83,6 +85,7 @@ std::vector<py::bytes> IndexedRansCoder::_encode_with_indexes(
 {
     const py::buffer_info symbol_arr_buf = symbol_array.request();
     const py::buffer_info index_arr_buf = index_array.request();
+    const int32_t * const offset_ptr = reinterpret_cast<int32_t *>(offset_array.request().ptr);
     const size_t symbols_num = symbol_arr_buf.shape[1];
     const size_t preserved_size = 4 * symbols_num;
     assert(symbol_arr_buf.ndim == 2);
@@ -100,9 +103,9 @@ std::vector<py::bytes> IndexedRansCoder::_encode_with_indexes(
     #pragma omp parallel for collapse(1)
     for (size_t unit_idx = 0; unit_idx < batch_size; ++unit_idx)
     {
-        int32_t * const symbol_ptr = reinterpret_cast<int32_t *>(
+        const int32_t * const symbol_ptr = reinterpret_cast<int32_t *>(
             static_cast<uint8_t *>(symbol_arr_buf.ptr) + unit_idx * symbol_arr_buf.strides[0]);
-        int32_t * const index_ptr = WITH_INDEXES ? reinterpret_cast<int32_t *>(
+        const int32_t * const index_ptr = WITH_INDEXES ? reinterpret_cast<int32_t *>(
             static_cast<uint8_t *>(index_arr_buf.ptr) + unit_idx * index_arr_buf.strides[0]) : nullptr;
         if (preserved_size > enc_buf_sizes[unit_idx])
         {
@@ -122,7 +125,7 @@ std::vector<py::bytes> IndexedRansCoder::_encode_with_indexes(
             const size_t sym_idx = symbols_num - 1 - forward_sym_idx;
             const size_t &cdf_idx = WITH_INDEXES ? index_ptr[sym_idx] : sym_idx % cdfs.size();
             const std::vector<RansEncSymbol> &esyms = esyms_list[cdf_idx];
-            const int32_t &offset = offsets[cdf_idx];
+            const int32_t &offset = offset_ptr[cdf_idx];
             int32_t value = symbol_ptr[sym_idx] - offset;
 
             if (OVERFLOW_CODING)
@@ -199,6 +202,8 @@ int IndexedRansCoder::_decode_with_indexes(
     PyArrayInt32 &symbol_array)
 {
     const py::buffer_info index_arr_buf = index_array.request();
+    const py::buffer_info symbol_arr_buf = symbol_array.request();
+    const int32_t * const offset_ptr = reinterpret_cast<int32_t *>(offset_array.request().ptr);
     assert(batch_size == encoded_list.size());
     const size_t symbols_num = symbol_array.request().shape[1];
     if (WITH_INDEXES)
@@ -206,15 +211,18 @@ int IndexedRansCoder::_decode_with_indexes(
         assert(symbol_array.request().shape == index_arr_buf.shape);
         assert(batch_size == index_arr_buf.shape[0]);
     }
-    auto symbol_arr_buf = symbol_array.mutable_unchecked<2>();
+    assert(symbol_array.writeable());
+    assert(symbol_arr_buf.ndim == 2);
 
     Py_BEGIN_ALLOW_THREADS
     #pragma omp parallel for collapse(1)
     for (size_t i = 0; i < batch_size; ++i)
     {
         const std::string &encoded = encoded_list[i];
-        int32_t * const index_ptr = WITH_INDEXES ? reinterpret_cast<int32_t *>(
+        const int32_t * const index_ptr = WITH_INDEXES ? reinterpret_cast<int32_t *>(
             static_cast<uint8_t *>(index_arr_buf.ptr) + i * index_arr_buf.strides[0]) : nullptr;
+        int32_t * const symbol_ptr = reinterpret_cast<int32_t *>(
+            static_cast<uint8_t *>(symbol_arr_buf.ptr) + i * symbol_arr_buf.strides[0]);
 
         RansState rans;
         uint8_t *ptr = (uint8_t *)encoded.data();
@@ -223,7 +231,7 @@ int IndexedRansCoder::_decode_with_indexes(
         for (size_t j = 0; j < symbols_num; ++j)
         {
             const size_t &cdf_idx = WITH_INDEXES ? index_ptr[j] : j % cdfs.size();
-            const uint32_t &offset = offsets[cdf_idx];
+            const int32_t &offset = offset_ptr[cdf_idx];
             const std::vector<RansDecSymbol> &dsyms = dsyms_list[cdf_idx];
             const VecUint32 &cdf = cdfs[cdf_idx];
             uint32_t cf = RansDecGet(&rans, PRECISION);
@@ -255,7 +263,7 @@ int IndexedRansCoder::_decode_with_indexes(
                     value = sign ? -value : value + max_value - 1;
                 }
             }
-            symbol_arr_buf(i, j) = value + offset;
+            symbol_ptr[j] = value + offset;
         }
     }
     Py_END_ALLOW_THREADS
@@ -325,9 +333,9 @@ std::vector<py::bytes> BinaryRansCoder::encode(
     #pragma omp parallel for collapse(1)
     for (size_t unit_idx = 0; unit_idx < batch_size; ++unit_idx)
     {
-        bool * const symbol_ptr = reinterpret_cast<bool *>(
+        const bool * const symbol_ptr = reinterpret_cast<bool *>(
             static_cast<uint8_t *>(symbol_arr_buf.ptr) + unit_idx * symbol_arr_buf.strides[0]);
-        uint32_t * const prob_ptr = reinterpret_cast<uint32_t *>(
+        const uint32_t * const prob_ptr = reinterpret_cast<uint32_t *>(
             static_cast<uint8_t *>(prob_array_buf.ptr) + unit_idx * prob_array_buf.strides[0]);
 
         if (preserved_size > enc_buf_sizes[unit_idx])
@@ -372,19 +380,22 @@ int BinaryRansCoder::decode(
     PyArrayBool &symbol_array)
 {
     const py::buffer_info prob_array_buf = prob_array.request();
-    const py::buffer_info symbol_array_buf = symbol_array.request();
-    const size_t symbols_num = symbol_array_buf.shape[1];
-    auto symbol_arr_unc = symbol_array.mutable_unchecked<2>();
+    const py::buffer_info symbol_arr_buf = symbol_array.request();
+    const size_t symbols_num = symbol_arr_buf.shape[1];
+    assert(symbol_array.writeable());
+    assert(symbol_arr_buf.ndim == 2);
     assert(batch_size == encoded_list.size());
-    assert(symbol_array_buf.shape == prob_array_buf.shape);
+    assert(symbol_arr_buf.shape == prob_array_buf.shape);
 
     Py_BEGIN_ALLOW_THREADS
     #pragma omp parallel for collapse(1)
     for (size_t i = 0; i < batch_size; ++i)
     {
         const std::string &encoded = encoded_list[i];
-        uint32_t * const prob_ptr = reinterpret_cast<uint32_t *>(
+        const uint32_t * const prob_ptr = reinterpret_cast<uint32_t *>(
             static_cast<uint8_t *>(prob_array_buf.ptr) + i * prob_array_buf.strides[0]);
+        bool * const symbol_ptr = reinterpret_cast<bool *>(
+            static_cast<uint8_t *>(symbol_arr_buf.ptr) + i * symbol_arr_buf.strides[0]);
 
         RansState rans;
         uint8_t *ptr = (uint8_t *)encoded.data();
@@ -394,12 +405,12 @@ int BinaryRansCoder::decode(
         {
             if (RansDecGet(&rans, PRECISION) < PROB_SCALE - prob_ptr[j])
             {
-                symbol_arr_unc(i, j) = 0;
+                symbol_ptr[j] = 0;
                 RansDecAdvance(&rans, &ptr, 0, PROB_SCALE - prob_ptr[j], PRECISION);
             }
             else
             {
-                symbol_arr_unc(i, j) = 1;
+                symbol_ptr[j] = 1;
                 RansDecAdvance(&rans, &ptr, PROB_SCALE - prob_ptr[j], prob_ptr[j], PRECISION);
             }
         }
@@ -410,8 +421,6 @@ int BinaryRansCoder::decode(
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
-    m.def("pmf_to_quantized_cdf", &pmf_to_quantized_cdf,
-          "Return quantized CDF for a given PMF");
     m.def("batched_pmf_to_quantized_cdf", &batched_pmf_to_quantized_cdf,
           "Return batched quantized CDFs for given PMFs");
     py::class_<IndexedRansCoder>(m, "IndexedRansCoder")
@@ -420,6 +429,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             py::arg_v("enc_buf_size", DEFAULT_ENC_BUF_SIZE))
         .def("init_with_pmfs", &IndexedRansCoder::init_with_pmfs)
         .def("init_with_quantized_cdfs", &IndexedRansCoder::init_with_quantized_cdfs)
+        .def("get_cdfs", &IndexedRansCoder::get_cdfs)
         .def("encode", &IndexedRansCoder::encode)
         .def("decode", &IndexedRansCoder::decode)
         .def("encode_with_indexes", &IndexedRansCoder::encode_with_indexes)

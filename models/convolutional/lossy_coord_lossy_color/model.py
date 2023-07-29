@@ -178,8 +178,7 @@ class PCC(nn.Module):
                       training_step: int, batch_size: int):
         warmup_forward = training_step < self.cfg.warmup_steps
 
-        strided_fea_list, points_num_list = self.encoder(sparse_pc)
-        feature = strided_fea_list[-1]
+        feature, points_num_list = self.encoder(sparse_pc)
 
         bottleneck_feature, loss_dict = self.em_lossless_based(feature, batch_size)
 
@@ -266,8 +265,7 @@ class PCC(nn.Module):
         return ret
 
     def compress(self, sparse_pc: ME.SparseTensor) -> Tuple[bytes, torch.Tensor]:
-        strided_fea_list, points_num_list = self.encoder(sparse_pc)
-        feature = strided_fea_list[-1]
+        feature, points_num_list = self.encoder(sparse_pc)
 
         em_bytes, bottom_fea_recon, fea_recon = self.em_lossless_based.compress(feature, 1)
         sparse_tensor_coords_stride = bottom_fea_recon.tensor_stride[0]

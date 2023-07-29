@@ -49,12 +49,9 @@ class Encoder(nn.Module):
 
     def forward(self, x) -> Tuple[List[ME.SparseTensor], Optional[List[List[int]]]]:
         points_num_list = [[_.shape[0] for _ in x.decomposed_coordinates]]
-        strided_fea_list = []
         x = self.pre_linear(x)
         x = self.first_block(x)
-        strided_fea_list.append(x)
         x = self.blocks(x)
-        strided_fea_list.append(x)
 
         scaler = self.points_num_scaler_train if self.training else self.points_num_scaler_test
         if not self.requires_points_num_list:
@@ -63,7 +60,7 @@ class Encoder(nn.Module):
             points_num_list = [[int(n * scaler) for n in _]
                                for _ in points_num_list]
 
-        return strided_fea_list, points_num_list
+        return x, points_num_list
 
 
 class Decoder(nn.Module):
@@ -390,6 +387,12 @@ class SubDecoderGeoLossl(nn.Module):
         )
 
     def forward(self, x, y):
+        assert isinstance(y, ME.SparseTensor)
+        if isinstance(x, torch.Tensor):
+            x = ME.SparseTensor(
+                x, coordinate_map_key=y.coordinate_map_key,
+                coordinate_manager=y.coordinate_manager
+            )
         x = self.residual_decoder(x)
         x = self.decoder(ME.cat((x, y)))
         return x

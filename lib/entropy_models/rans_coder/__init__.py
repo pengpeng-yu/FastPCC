@@ -2,7 +2,6 @@ import os
 from typing import List
 
 import numpy as np
-import torch
 from torch.utils.cpp_extension import load
 
 
@@ -48,41 +47,48 @@ def _load_and_test():
     batched_pmf_to_quantized_cdf = rans_ext_cpp.batched_pmf_to_quantized_cdf
     Coder = rans_ext_cpp.IndexedRansCoder
     BinCoder = rans_ext_cpp.BinaryRansCoder
-    torch.manual_seed(0)
+    np.random.seed(0)
 
     coder = Coder(True, 2, 100)
-    float_pmfs = torch.rand(3, 4, dtype=torch.float64) / 4
-    coder.init_with_pmfs(float_pmfs.tolist(), [-2, -2, -2])
+    float_pmfs = np.random.rand(3, 4).astype(np.float64) / 4
+    offsets = np.array([-2, -2, -2], dtype=np.int32)
+    coder.init_with_pmfs(float_pmfs, offsets)
     _test(coder, [[-2049, -2049], [2049, 2049]],
           [[0, 1], [2, 1]])
     _test(coder, [[-2, -1], [0, 10]],
           [[0, 1], [2, 1]])
 
-    quantized_cdfs, updated_offsets = batched_pmf_to_quantized_cdf(
-        float_pmfs.tolist(), [-2, -2, -2], True
+    float_pmfs = np.random.rand(3, 4).astype(np.float64) / 4
+    offsets = np.array([-2, -2, -2], dtype=np.int32)
+    quantized_cdfs = batched_pmf_to_quantized_cdf(
+        float_pmfs, offsets, True
     )
-    coder.init_with_quantized_cdfs(quantized_cdfs, updated_offsets)
+    coder.init_with_quantized_cdfs(quantized_cdfs, offsets)
     _test(coder, [[-2049, -2049], [2049, 2049]],
           [[0, 1], [2, 1]])
     _test(coder, [[-2, -1], [0, 10]],
           [[0, 1], [2, 1]])
 
-    float_pmfs = [[0, 0], [1], [0, 1], [2 ** -17, 1], [0, 0, 0, 1], [1, 0, 0, 0]]
-    quantized_cdfs, updated_offsets = coder.init_with_pmfs(float_pmfs, [0] * len(float_pmfs))
-    assert(quantized_cdfs == [[0, 1, 65536], *([[0, 65535, 65536]] * 5)])
-    assert(updated_offsets == [2, 0, 1, 1, 3, 0])
+    float_pmfs = np.array([[0, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1], [2 ** -17, 1, 0, 0]], dtype=np.float64)
+    offsets = np.array([0] * len(float_pmfs), dtype=np.int32)
+    coder.init_with_pmfs(float_pmfs, offsets)
+    quantized_cdfs = coder.get_cdfs()
+    assert np.all(quantized_cdfs == np.array([[0, 1, 65536], *([[0, 65535, 65536]] * 3)], dtype=np.uint32))
+    assert np.all(offsets == np.array([4, 0, 3, 1], np.int32))
     _test(coder, [[-2, -1], [0, 10]],
           [[0, 1], [2, 2]])
 
     coder = Coder(True, 8, 100)
-    float_pmfs = [[0, 0], [1, 1], [0, 1], [2 ** -17, 1], [0, 0, 0, 1], [1, 0, 0, 0]]
-    coder.init_with_pmfs(float_pmfs, [0] * len(float_pmfs))
+    float_pmfs = np.array([[0, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1], [2 ** -17, 1, 0, 0]], dtype=np.float64)
+    offsets = np.array([0] * len(float_pmfs), dtype=np.int32)
+    coder.init_with_pmfs(float_pmfs, offsets)
     _test(coder, [[0], [1], [0], [1], [0], [1], [3], [3]],
-          [[0], [0], [1], [1], [2], [2], [4], [5]])
+          [[0], [0], [1], [1], [2], [2], [3], [3]])
 
     coder = Coder(False, 4, 100)
-    float_pmfs = [[0, 0, 1], [1, 1, 2]]
-    coder.init_with_pmfs(float_pmfs, [0] * len(float_pmfs))
+    float_pmfs = np.array([[0, 0, 1], [1, 1, 2]], dtype=np.float64)
+    offsets = np.array([0] * len(float_pmfs), dtype=np.int32)
+    coder.init_with_pmfs(float_pmfs, offsets)
     _test(coder, [[0, 1, 1, 0]] * 4)
 
     _bin_test(BinCoder)

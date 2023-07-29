@@ -1,5 +1,6 @@
 from typing import List, Tuple, Dict, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.distributions
@@ -43,7 +44,7 @@ class DistributionQuantizedCDFTable(nn.Module):
         )
 
         self.cdf_list: List[List[int]] = [[]]
-        self.cdf_offset_list: List[int] = []
+        self.cdf_offset_list: Union[np.ndarray, List[int]] = []
         self.requires_updating_cdf_table: bool = True
         self.range_coder = IndexedRansCoder(self.overflow_coding, self.coding_batch_size)
 
@@ -116,9 +117,11 @@ class DistributionQuantizedCDFTable(nn.Module):
             if not torch.all(pmf[-1] == 0):
                 print(f'Warning: Possible overflow at upper bound. Max PM: {pmf[-1].max().item()}')
 
-        pmf = pmf.T.tolist()
-        minima = minima.tolist()
-        self.cdf_list, self.cdf_offset_list = self.range_coder.init_with_pmfs(pmf, minima)
+        pmf = pmf.T.cpu().contiguous().numpy()
+        minima = minima.cpu().contiguous().numpy()
+        self.range_coder.init_with_pmfs(pmf, minima)
+        self.cdf_offset_list = minima
+        self.cdf_list = self.range_coder.get_cdfs()
         self.requires_updating_cdf_table = False
 
     def get_extra_state(self):

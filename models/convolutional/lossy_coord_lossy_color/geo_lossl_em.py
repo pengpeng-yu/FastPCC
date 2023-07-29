@@ -1,3 +1,4 @@
+import io
 import math
 from typing import Tuple, Union
 
@@ -6,7 +7,7 @@ import torch
 import torch.nn as nn
 import MinkowskiEngine as ME
 
-from lib.entropy_models.rans_coder import BinaryRansCoder
+from lib.entropy_models.rans_coder import BinaryRansCoder, IndexedRansCoder
 from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyModel
 from lib.entropy_models.hyperprior.noisy_deep_factorized.utils import BytesListUtils
 
@@ -26,6 +27,9 @@ class GeoLosslessEntropyModel(nn.Module):
                  hyper_decoder_fea: nn.ModuleList
                  ):
         super(GeoLosslessEntropyModel, self).__init__()
+        self.compressed_channels = compressed_channels
+        self.broadcast_shape_bytes = 3
+        self.bottleneck_scaler = bottleneck_scaler
 
         def make_em():
             return NoisyDeepFactorizedEntropyModel(
@@ -34,9 +38,10 @@ class GeoLosslessEntropyModel(nn.Module):
                 bottleneck_process=bottleneck_process,
                 bottleneck_scaler=bottleneck_scaler,
                 init_scale=5,
-                broadcast_shape_bytes=(3,),
+                broadcast_shape_bytes=(self.broadcast_shape_bytes,),
             )
         self.bottom_fea_entropy_model = make_em()
+        self.rans_coder = IndexedRansCoder(False, 1)
         assert len(encoder) == len(residual_block) == \
                len(decoder_block) == len(hyper_decoder_fea)
         self.encoder = encoder
@@ -112,16 +117,19 @@ class GeoLosslessEntropyModel(nn.Module):
     def compress(self, y_top: ME.SparseTensor, *args, **kwargs) -> \
             Tuple[bytes, ME.SparseTensor, ME.SparseTensor]:
         strided_fea_list = self.encoder(y_top, *args, **kwargs)
-        *strided_fea_list, bottom_fea = strided_fea_list
-        strided_fea_list_len = len(strided_fea_list)
-        fea_bytes_list = []
-        coord_bytes_list = []
         cm = y_top.coordinate_manager
-
-        (bottom_fea_bytes,), coding_batch_shape, bottom_fea_recon = \
-            self.bottom_fea_entropy_model.compress(bottom_fea)
+        del y_top
+        *strided_fea_list, bottom_fea_recon = strided_fea_list
+        strided_fea_list_len = len(strided_fea_list)
+        fea_res_list = []
+        coord_bytes_list = []
+        bottom_fea_recon_f = bottom_fea_recon.F
+        bottom_fea_recon_f *= self.bottleneck_scaler
+        bottom_fea_recon_f.round_()
+        fea_res_list.append(bottom_fea_recon_f.cpu().to(torch.int32).numpy())
+        bottom_fea_recon_f /= self.bottleneck_scaler
         lower_fea_recon = bottom_fea_recon
-        coord_recon_key = bottom_fea_recon.coordinate_map_key
+        coord_recon_key = lower_fea_recon.coordinate_map_key
 
         for idx in range(strided_fea_list_len - 1, -1, -1):
             sub_hyper_decoder_coord = self.hyper_decoder_coord[idx]
@@ -129,6 +137,7 @@ class GeoLosslessEntropyModel(nn.Module):
             sub_residual_block = self.residual_block[idx]
             sub_decoder_block = self.decoder_block[idx]
             fea = strided_fea_list[idx]
+            strided_fea_list[idx] = None
 
             coord_target_key = fea.coordinate_map_key
             if coord_recon_key.get_tensor_stride() != coord_target_key.get_tensor_stride():
@@ -144,6 +153,7 @@ class GeoLosslessEntropyModel(nn.Module):
                     coord_mask_pred.tensor_stride,
                     coord_mask_pred.coordinate_map_key.get_key()[1] + 'pruned'
                 )[0]
+                del coord_mask, coord_mask_pred
             else:
                 assert sub_hyper_decoder_coord is None
 
@@ -156,45 +166,81 @@ class GeoLosslessEntropyModel(nn.Module):
                 coordinate_map_key=coord_recon_key,
                 coordinate_manager=cm
             )
-            del coord_target_key
+            del permutation_kernel_map, coord_target_key
 
             fea_pred = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
-            fea_res = sub_residual_block(fea, fea_pred)
-            (fea_bytes,), coding_batch_shape, fea_res_recon = \
-                self.bottom_fea_entropy_model.compress(fea_res)
+            fea_res = sub_residual_block(fea, fea_pred).F
+            del fea
+            fea_res *= self.bottleneck_scaler
+            fea_res.round_()
+            fea_res_list.append(fea_res.cpu().to(torch.int32).numpy())
 
-            lower_fea_recon = sub_decoder_block(fea_res_recon, fea_pred)
-            fea_bytes_list.append(fea_bytes)
+            fea_res /= self.bottleneck_scaler
+            lower_fea_recon = sub_decoder_block(fea_res, fea_pred)
+            del fea_pred
 
-        concat_bytes = BytesListUtils.concat_bytes_list(
-            [*coord_bytes_list, bottom_fea_bytes, *fea_bytes_list]
-        ) + len(coord_bytes_list).to_bytes(1, 'little', signed=False) + \
-            len(fea_bytes_list).to_bytes(1, 'little', signed=False)
+        with io.BytesIO() as bs:
+            bs.write(int_to_bytes(len(fea_res_list), 2))
+            for fea_res in fea_res_list:
+                bs.write(int_to_bytes(fea_res.shape[0], self.broadcast_shape_bytes))
+
+            fea_res_concat = np.concatenate(fea_res_list, axis=0)
+            del fea_res_list
+            fea_res_offset = fea_res_concat.min()
+            fea_res_pm = np.histogram(
+                fea_res_concat,
+                range(fea_res_offset.item(), fea_res_concat.max().item() + 2))[0]
+            self.rans_coder.init_with_pmfs(fea_res_pm[None], fea_res_offset[None])
+            fea_res_cdf = self.rans_coder.get_cdfs()[0]
+            fea_bytes = self.rans_coder.encode(fea_res_concat.reshape(1, -1))[0]
+
+            bs.write(int_to_bytes(len(fea_res_cdf) - 2, 1))
+            for cd in fea_res_cdf[1:-1]:
+                bs.write(int_to_bytes(cd, 2))
+            bs.write(int_to_bytes(-fea_res_offset.item(), 1))
+
+            bs.write(int_to_bytes(len(coord_bytes_list), 1))
+            bs.write(BytesListUtils.concat_bytes_list(
+                [*coord_bytes_list, fea_bytes]
+            ))
+            concat_bytes = bs.getvalue()
         return concat_bytes, bottom_fea_recon, lower_fea_recon
 
     def decompress(self, concat_bytes: bytes,
                    sparse_tensor_coords_tuple: Tuple[ME.CoordinateMapKey, ME.CoordinateManager]) \
             -> ME.SparseTensor:
         target_device = next(self.parameters()).device
-        coord_bytes_list_len = int.from_bytes(concat_bytes[-2:-1], 'little', signed=False)
-        fea_bytes_list_len = int.from_bytes(concat_bytes[-1:], 'little', signed=False)
-        concat_bytes = concat_bytes[:-2]
-        split_bytes = BytesListUtils.split_bytes_list(
-            concat_bytes, coord_bytes_list_len + fea_bytes_list_len + 1
-        )
-        coord_bytes_list = split_bytes[: coord_bytes_list_len]
-        bottom_fea_bytes = split_bytes[coord_bytes_list_len]
-        fea_bytes_list = split_bytes[coord_bytes_list_len + 1:]
         cm = sparse_tensor_coords_tuple[1]
 
-        bottom_fea_recon = self.bottom_fea_entropy_model.decompress(
-            [bottom_fea_bytes], torch.Size([1]), target_device,
-            sparse_tensor_coords_tuple=sparse_tensor_coords_tuple
+        with io.BytesIO(concat_bytes) as bs:
+            strided_fea_list_len = bytes_to_int(bs.read(2))
+            fea_res_shape_list = [bytes_to_int(bs.read(self.broadcast_shape_bytes))
+                                  for _ in range(strided_fea_list_len)]
+            fea_res_cdf = [0, *(bytes_to_int(bs.read(2))
+                                for _ in range(bytes_to_int(bs.read(1)))), 1 << 16]
+            fea_res_offset = -bytes_to_int(bs.read(1))
+            coord_bytes_list_len = bytes_to_int(bs.read(1))
+            *coord_bytes_list, fea_bytes = BytesListUtils.split_bytes_list(
+                bs.read(), coord_bytes_list_len + 1
+            )
+
+            self.rans_coder.init_with_quantized_cdfs([fea_res_cdf], np.array([fea_res_offset]))
+            fea_res_concat = np.empty((1, sum(fea_res_shape_list) * self.compressed_channels), np.int32)
+            self.rans_coder.decode([fea_bytes], fea_res_concat)
+            fea_res_concat = torch.from_numpy(
+                fea_res_concat.reshape(sum(fea_res_shape_list), self.compressed_channels)
+            ).to(dtype=torch.float, device=target_device)
+            fea_res_concat /= self.bottleneck_scaler
+            fea_res_list = list(reversed(torch.split(fea_res_concat, fea_res_shape_list, dim=0)))
+
+        lower_fea_recon = ME.SparseTensor(
+            fea_res_list.pop(),
+            coordinate_map_key=sparse_tensor_coords_tuple[0],
+            coordinate_manager=sparse_tensor_coords_tuple[1]
         )
-        lower_fea_recon = bottom_fea_recon
         coord_recon_key = lower_fea_recon.coordinate_map_key
 
-        for idx in range(fea_bytes_list_len - 1, -1, -1):
+        for idx in range(strided_fea_list_len - 2, -1, -1):  # extra length due to bottom fea
             sub_hyper_decoder_coord = self.hyper_decoder_coord[idx]
             sub_hyper_decoder_fea = self.hyper_decoder_fea[idx]
             sub_decoder_block = self.decoder_block[idx]
@@ -209,16 +255,13 @@ class GeoLosslessEntropyModel(nn.Module):
                     coord_mask_pred.tensor_stride,
                     coord_mask_pred.coordinate_map_key.get_key()[1] + 'pruned'
                 )[0]
+                del coord_mask, coord_mask_pred
 
-            fea_bytes = fea_bytes_list.pop(0)
-            fea_pred = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
-            fea_res_recon = self.bottom_fea_entropy_model.decompress(
-                [fea_bytes], torch.Size([1]), target_device,
-                sparse_tensor_coords_tuple=
-                (fea_pred.coordinate_map_key, fea_pred.coordinate_manager)
+            lower_fea_recon = sub_decoder_block(
+                fea_res_list.pop(),
+                sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
             )
-            lower_fea_recon = sub_decoder_block(fea_res_recon, fea_pred)
-        assert len(coord_bytes_list) == len(fea_bytes_list) == 0
+        assert len(coord_bytes_list) == len(fea_res_list) == 0
         return lower_fea_recon
 
     @staticmethod
@@ -233,3 +276,14 @@ class GeoLosslessEntropyModel(nn.Module):
         for _, curr_in in kernel_map.items():
             keep_target[curr_in[0].type(torch.long)] = 1
         return keep_target
+
+
+def int_to_bytes(x, length, byteorder='little', signed=False):
+    assert isinstance(x, int)
+    return x.to_bytes(length, byteorder=byteorder, signed=signed)
+
+
+def bytes_to_int(s, byteorder='little', signed=False):
+    assert isinstance(s, bytes)
+    return int.from_bytes(s, byteorder=byteorder, signed=signed)
+
