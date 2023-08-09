@@ -1,63 +1,69 @@
 import io
 import math
-from typing import List
+from typing import List, Optional
 
 
 class BytesListUtils:
     @staticmethod
-    def concat_bytes_list(bytes_list: List[bytes]) -> bytes:
-        assert len(bytes_list) >= 1
-        if len(bytes_list) == 1:
-            return bytes_list[0]
-
-        bytes_len_list = []
-        for _ in bytes_list:
-            bytes_len = len(_)
-            assert bytes_len >= 1
-            bytes_len_list.append(bytes_len - 1)
+    def concat_bytes_list(bytes_list: List[bytes], bs_io: io.BytesIO = None,
+                          head_bits_num: int = 1) -> Optional[bytes]:
+        assert len(bytes_list) > 1
 
         bytes_len_bytes_list = []
         bytes_len_bytes_len_list = []
-        for bytes_len in bytes_len_list:
+        for _ in bytes_list:
+            bytes_len = len(_)
             bytes_len_bytes_len = math.ceil(bytes_len.bit_length() / 8)
-            bytes_len_bytes_list.append(bytes_len.to_bytes(bytes_len_bytes_len, 'little'))
+            assert (bytes_len_bytes_len - 1).bit_length() <= head_bits_num
+            bytes_len_bytes_list.append(bytes_len.to_bytes(bytes_len_bytes_len, 'little', signed=False))
             bytes_len_bytes_len_list.append(bytes_len_bytes_len)
 
-        bytes_len_bytes_len_bits_list = []
-        for bytes_len_bytes_len in bytes_len_bytes_len_list:
-            assert 0 <= bytes_len_bytes_len <= 3
-            bytes_len_bytes_len_bits = f'{bytes_len_bytes_len:b}'
-            if len(bytes_len_bytes_len_bits) == 1:
-                bytes_len_bytes_len_bits = '0' + bytes_len_bytes_len_bits
-            bytes_len_bytes_len_bits_list.append(bytes_len_bytes_len_bits)
         head_bytes = int(
-            '1' + ''.join(bytes_len_bytes_len_bits_list), 2
-        ).to_bytes(math.ceil(len(bytes_list) / 4 + 0.125), 'little')
+            '1' + ''.join((format(_ - 1, f'0{head_bits_num}b') for _ in bytes_len_bytes_len_list)), 2
+        ).to_bytes(math.ceil(len(bytes_list) / (8 // head_bits_num) + 0.125), 'little', signed=False)
 
-        concat_bytes = head_bytes + b''.join(bytes_len_bytes_list) + b''.join(bytes_list)
-        return concat_bytes
+        if bs_io is None:
+            return_bytes = True
+            bs_io = io.BytesIO()
+        else:
+            return_bytes = False
+        bs_io.write(head_bytes)
+        for _ in bytes_len_bytes_list:
+            bs_io.write(_)
+        for _ in bytes_list:
+            bs_io.write(_)
+        if return_bytes:
+            ret = bs_io.getvalue()
+            bs_io.close()
+            return ret
 
     @staticmethod
-    def split_bytes_list(concat_bytes: bytes, bytes_list_len: int) -> List[bytes]:
-        if bytes_list_len == 1:
-            return [concat_bytes]
+    def split_bytes_list(concat_bytes: Optional[bytes], bytes_list_len: int,
+                         bs_io: io.BytesIO = None,
+                         head_bits_num: int = 1) -> List[bytes]:
+        if bs_io is None:
+            bytes_given = True
+        else:
+            bytes_given = False
+            assert concat_bytes is None
 
-        bs = io.BytesIO(concat_bytes)
-        head_bytes_len = math.ceil(bytes_list_len / 4 + 0.125)
-        head_bits = f"{int.from_bytes(bs.read(head_bytes_len), 'little'):b}"
+        if bytes_given:
+            bs_io = io.BytesIO(concat_bytes)
+        head_bytes_len = math.ceil(bytes_list_len / (8 // head_bits_num) + 0.125)
+        head_bits = f"{int.from_bytes(bs_io.read(head_bytes_len), 'little'):b}"[1:]
 
         bytes_len_bytes_len_list = []
-        for idx in range(1, bytes_list_len * 2 + 1, 2):
-            bytes_len_bytes_len_list.append(int(head_bits[idx: idx + 2], 2))
+        for idx in range(0, bytes_list_len * head_bits_num, head_bits_num):
+            bytes_len_bytes_len_list.append(int(head_bits[idx: idx + head_bits_num], 2) + 1)
 
         bytes_len_list = []
         for bytes_len_bytes_len in bytes_len_bytes_len_list:
-            bytes_len_list.append(int.from_bytes(bs.read(bytes_len_bytes_len), 'little') + 1)
+            bytes_len_list.append(int.from_bytes(bs_io.read(bytes_len_bytes_len), 'little'))
 
         bytes_list = []
         for bytes_len in bytes_len_list:
-            bytes_list.append(bs.read(bytes_len))
+            bytes_list.append(bs_io.read(bytes_len))
 
-        assert bs.read() == b''
-        bs.close()
+        if bytes_given:
+            bs_io.close()
         return bytes_list

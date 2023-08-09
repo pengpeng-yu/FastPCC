@@ -183,7 +183,7 @@ class Decoder(nn.Module):
 
     @minkowski_tensor_wrapped_fn({1: 0})
     def inverse_transform_for_color(self, x):
-        return x.clip_(0, 1).mul_(255)
+        return x.clip_(0, 1).mul_(255) if not self.training else x.mul_(255)
 
     def batched_recolor(
             self,

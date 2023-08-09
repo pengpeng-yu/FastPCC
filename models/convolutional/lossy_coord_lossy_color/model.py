@@ -26,7 +26,7 @@ class PCC(nn.Module):
 
     @staticmethod
     def params_divider(s: str) -> int:
-        if '.em_lossless_based' in s:
+        if 'em_lossless_based' in s:
             if '.blocks_out_first' in s:
                 return 0
             elif '.blocks' in s:
@@ -136,19 +136,23 @@ class PCC(nn.Module):
                 sparse_pc_partitions = self.get_sparse_pc_partitions(pc_data.xyz, pc_data.color)
                 return self.test_partitions_forward(sparse_pc_partitions, pc_data)
 
-    def get_sparse_pc(self, xyz: torch.Tensor, color: Optional[torch.Tensor] = None,
-                      tensor_stride: int = 1,
-                      only_return_coords: bool = False)\
-            -> Union[ME.SparseTensor, Tuple[ME.CoordinateMapKey, ME.CoordinateManager]]:
+    def set_global_cm(self):
         ME.clear_global_coordinate_manager()
         global_coord_mg = ME.CoordinateManager(
             D=3,
             coordinate_map_type=ME.CoordinateMapType.CUDA if
-            xyz.is_cuda
+            next(self.parameters()).device.type == 'cuda'
             else ME.CoordinateMapType.CPU,
             minkowski_algorithm=self.minkowski_algorithm
         )
         ME.set_global_coordinate_manager(global_coord_mg)
+        return global_coord_mg
+
+    def get_sparse_pc(self, xyz: torch.Tensor, color: Optional[torch.Tensor] = None,
+                      tensor_stride: int = 1,
+                      only_return_coords: bool = False)\
+            -> Union[ME.SparseTensor, Tuple[ME.CoordinateMapKey, ME.CoordinateManager]]:
+        global_coord_mg = self.set_global_cm()
         if only_return_coords:
             pc_coord_key = global_coord_mg.insert_and_map(xyz, [tensor_stride] * 3)[0]
             return pc_coord_key, global_coord_mg
@@ -218,12 +222,12 @@ class PCC(nn.Module):
 
     def test_forward(self, sparse_pc: ME.SparseTensor, pc_data: PCData):
         with Timer() as encoder_t, TorchCudaMaxMemoryAllocated() as encoder_m:
-            compressed_bytes, sparse_tensor_coords = self.compress(sparse_pc)
+            compressed_bytes = self.compress(sparse_pc)
         del sparse_pc
         ME.clear_global_coordinate_manager()
         torch.cuda.empty_cache()
         with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
-            coord_recon, color_recon = self.decompress(compressed_bytes, sparse_tensor_coords)
+            coord_recon, color_recon = self.decompress(compressed_bytes)
         ret = self.evaluator.log_batch(
             preds=[coord_recon],
             targets=[pc_data.xyz[:, 1:]],
@@ -264,12 +268,9 @@ class PCC(nn.Module):
         )
         return ret
 
-    def compress(self, sparse_pc: ME.SparseTensor) -> Tuple[bytes, torch.Tensor]:
+    def compress(self, sparse_pc: ME.SparseTensor) -> bytes:
         feature, points_num_list = self.encoder(sparse_pc)
-
-        em_bytes, bottom_fea_recon, fea_recon = self.em_lossless_based.compress(feature, 1)
-        sparse_tensor_coords_stride = bottom_fea_recon.tensor_stride[0]
-        sparse_tensor_coords = bottom_fea_recon.C
+        em_bytes = self.em_lossless_based.compress(feature, 1)
 
         with io.BytesIO() as bs:
             if self.cfg.adaptive_pruning:
@@ -277,17 +278,9 @@ class PCC(nn.Module):
                     (_[0].to_bytes(3, 'little', signed=False) for _ in
                      points_num_list)
                 ))
-            bs.write(int(math.log2(sparse_tensor_coords_stride)).to_bytes(
-                     1, 'little', signed=False))
-            bs.write((sparse_tensor_coords[:, 1:].numel() // 2).to_bytes(2, 'little', signed=False))
-            for i, el in enumerate((sparse_tensor_coords[:, 1:].reshape(-1) // sparse_tensor_coords_stride).tolist()):
-                if i % 2 == 1:
-                    bs.write(((last_el << 4) & el).to_bytes(1, 'little', signed=False))
-                else:
-                    last_el = el
             bs.write(em_bytes)
             compressed_bytes = bs.getvalue()
-        return compressed_bytes, sparse_tensor_coords
+        return compressed_bytes
 
     def compress_partitions(self, sparse_pc_partitions: Generator) \
             -> Tuple[bytes, List[torch.Tensor]]:
@@ -303,8 +296,7 @@ class PCC(nn.Module):
                                  for s in compressed_bytes_list))
         return concat_bytes, sparse_tensor_coords_list
 
-    def decompress(self, compressed_bytes: bytes, sparse_tensor_coords: torch.Tensor
-                   ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def decompress(self, compressed_bytes: bytes) -> Tuple[torch.Tensor, torch.Tensor]:
         with io.BytesIO(compressed_bytes) as bs:
             if self.cfg.adaptive_pruning:
                 points_num_list = []
@@ -312,18 +304,10 @@ class PCC(nn.Module):
                     points_num_list.append([int.from_bytes(bs.read(3), 'little', signed=False)])
             else:
                 points_num_list = None
-            tensor_stride = 2 ** int.from_bytes(bs.read(1), 'little', signed=False)
-            sparse_tensor_coords_bytes_len = int.from_bytes(bs.read(2), 'little', signed=False)
-            sparse_tensor_coords_bytes = bs.read(sparse_tensor_coords_bytes_len)
             em_bytes = bs.read()
 
         fea_recon = self.em_lossless_based.decompress(
-            em_bytes,
-            self.get_sparse_pc(
-                sparse_tensor_coords,
-                tensor_stride=tensor_stride,
-                only_return_coords=True
-            ))
+            em_bytes, self.set_global_cm())
 
         decoder_fea = self.decoder(fea_recon, points_num_list)
         coord_recon = decoder_fea.C[:, 1:]
