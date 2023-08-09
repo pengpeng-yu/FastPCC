@@ -41,6 +41,7 @@ class TrainConfig(SimpleConfig):
     resume_items: Tuple[str, ...] = ('state_dict',)
     resume_tensorboard: bool = False
 
+    tensorboard_port: int = 6006
     log_frequency: int = 10  # (steps) used for both logging and tensorboard
     ckpt_frequency: int = 2  # (epochs)
     test_frequency: int = 0  # (epochs) 0 means no test in training phase

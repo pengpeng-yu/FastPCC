@@ -9,6 +9,7 @@ from tqdm import tqdm
 from functools import partial
 from typing import Dict, Union, List, Callable
 import subprocess
+import socket
 
 import numpy as np
 import torch
@@ -73,29 +74,39 @@ def main():
                 logger.info(f'resumed tensorboard log file(s) in {last_tb_dir}')
         tb_writer = SummaryWriter(str(tb_logdir))
         try:
+            tb_port = cfg.train.tensorboard_port
+            while True:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    port_available = s.connect_ex(('localhost', tb_port)) != 0
+                if port_available: break
+                tb_port += 1
             tb_proc = subprocess.Popen(
                 [os.path.join(os.path.split(sys.executable)[0], 'tensorboard'),
-                 '--logdir', str(tb_logdir)],
+                 f'--port={tb_port}', '--logdir', str(tb_logdir)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 encoding='utf-8'
             )
-            stdout_line = tb_proc.stdout.readline()
             for _ in range(50):
+                stdout_line = tb_proc.stdout.readline()
+                logger.info(stdout_line)
                 if stdout_line.startswith('TensorBoard '):
                     logger.info(stdout_line.rsplit('(', 1)[0])
                     break
-                stdout_line = tb_proc.stdout.readline()
             else:
                 raise Exception
+            tb_proc.stdout.close()
         except Exception as e:
             logger.error(f'fail to launch Tensorboard')
             raise e
 
         try:
             train(cfg, local_rank, logger, tb_writer, run_dir, ckpts_dir)
-        finally:
+        except (KeyboardInterrupt, Exception) as e:
+            logger.error(e)
             tb_proc.kill()
+        else:
+            tb_proc.wait()
 
     else:
         train(cfg, local_rank, logger)
@@ -139,7 +150,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         assert len(cfg.train.optimizer) == 1
         params_divider: Callable[[str], int] = lambda s: 0
 
-    if cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) == 1 and False:  # disabled
+    if cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) == 1:
         model = model.to(device)
         logger.info('using single GPU')
     elif cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) >= 1:
