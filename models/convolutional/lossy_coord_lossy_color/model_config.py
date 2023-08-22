@@ -31,7 +31,8 @@ class ModelConfig(SimpleConfig):
     bits_loss_factor: float = 0.2
     coord_recon_loss_factor: float = 1.0
     color_recon_loss_factor: float = 1.0
-    warmup_steps: int = 1
+    warmup_fea_loss_steps: int = 1
+    warmup_color_loss_steps: int = 1
     warmup_fea_loss_factor: float = 0.2
     warmup_color_loss_factor: float = 1.0
     linear_warmup: bool = False

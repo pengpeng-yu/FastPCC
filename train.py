@@ -10,6 +10,7 @@ from functools import partial
 from typing import Dict, Union, List, Callable
 import subprocess
 import socket
+import traceback
 
 import numpy as np
 import torch
@@ -102,8 +103,11 @@ def main():
 
         try:
             train(cfg, local_rank, logger, tb_writer, run_dir, ckpts_dir)
-        except (KeyboardInterrupt, Exception) as e:
-            logger.error(e)
+        except (KeyboardInterrupt, Exception):
+            e_type, e_value, e_traceback = sys.exc_info()
+            logger.error(e_type)
+            logger.error(e_value)
+            logger.error('\n' + ''.join(traceback.format_tb(e_traceback)))
             tb_proc.kill()
         else:
             tb_proc.wait()
@@ -443,7 +447,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             del ckpt
 
         # Model test
-        if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and (epoch + 1) % cfg.train.test_frequency == 0:
+        if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and (epoch + 1) % cfg.train.test_frequency == 0 and \
+                (not getattr(model.module if is_parallel(model) else model, 'warmup_forward', False)):
             test_items = test(cfg, logger, run_dir, model)
             for item_name, item in test_items.items():
                 tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)

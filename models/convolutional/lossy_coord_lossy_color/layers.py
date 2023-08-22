@@ -11,8 +11,22 @@ from lib.sparse_conv_layers import \
     NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs
 from lib.torch_utils import minkowski_tensor_wrapped_fn
 
+RESIDUAL_VALUE_BOUND = 10
 
-residuals_num_per_scale = 2
+
+class BoundFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        ctx.save_for_backward(x)
+        return torch.clip(x, -RESIDUAL_VALUE_BOUND, RESIDUAL_VALUE_BOUND)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        x, = ctx.saved_tensors
+        grad_output = grad_output.clone()
+        grad_output[x > RESIDUAL_VALUE_BOUND] = 1
+        grad_output[x < -RESIDUAL_VALUE_BOUND] = -1
+        return grad_output, None
 
 
 class Encoder(nn.Module):
@@ -30,13 +44,12 @@ class Encoder(nn.Module):
         self.points_num_scaler_train = points_num_scaler_train
         self.points_num_scaler_test = points_num_scaler_test
         self.pre_linear = ME.MinkowskiLinear(in_channels, in_channels, bias=True)
-        self.first_block = ConvBlock(
-            in_channels,
-            intra_channels[0] if len(intra_channels) > 1 else out_channels, 3, 1,
-            region_type=region_type, act=act
-        )
         assert len(intra_channels) == 2
         self.blocks = nn.Sequential(
+            ConvBlock(
+                in_channels, intra_channels[0], 3, 1,
+                region_type=region_type, act=act
+            ),
             ConvBlock(
                 intra_channels[0], intra_channels[1], 2, 2,
                 region_type='HYPER_CUBE', act=act
@@ -44,13 +57,11 @@ class Encoder(nn.Module):
             ConvBlock(
                 intra_channels[1], out_channels * 2, 3, 1,
                 region_type=region_type, act=act
-            )
-        )
+            ))
 
     def forward(self, x) -> Tuple[List[ME.SparseTensor], Optional[List[List[int]]]]:
         points_num_list = [[_.shape[0] for _ in x.decomposed_coordinates]]
         x = self.pre_linear(x)
-        x = self.first_block(x)
         x = self.blocks(x)
 
         scaler = self.points_num_scaler_train if self.training else self.points_num_scaler_test
@@ -342,13 +353,18 @@ class SubResidualGeoLossl(nn.Module):
     def __init__(self, in_ch, out_ch, region_type, act):
         super(SubResidualGeoLossl, self).__init__()
         self.blocks = nn.Sequential(
-            ConvBlock(in_ch, in_ch // 2, 3, 1, region_type=region_type, act=act),
-            ConvBlock(in_ch // 2, out_ch, 3, 1, region_type=region_type, act=None)
+            ConvBlock(in_ch + in_ch, in_ch, 3, 1, region_type=region_type, act=act),
+            ConvBlock(in_ch, out_ch, 3, 1, region_type=region_type, act=None)
         )
 
     def forward(self, x, y):
         x = ME.cat((x, y))
         x = self.blocks(x)
+        x = ME.SparseTensor(
+            BoundFunction.apply(x.F),
+            coordinate_map_key=x.coordinate_map_key,
+            coordinate_manager=x.coordinate_manager
+        )
         return x
 
 
@@ -373,18 +389,16 @@ class SubDecoderGeoLossl(nn.Module):
     def __init__(self, in_ch, in_ch2, out_ch, region_type, act):
         super(SubDecoderGeoLossl, self).__init__()
         self.residual_decoder = nn.Sequential(
-            ConvBlock(in_ch, out_ch // 2, 1, 1, region_type=region_type, act=act),
-            ConvBlock(out_ch // 2, out_ch, 1, 1, region_type=region_type, act=act)
+            MEMLPBlock(in_ch, out_ch // 2, act=act),
+            MEMLPBlock(out_ch // 2, out_ch, act=act)
         )
         self.decoder = nn.Sequential(
-            ConvBlock(
-                out_ch + in_ch2,
-                out_ch, 1, 1, region_type=region_type, act=act
+            MEMLPBlock(
+                out_ch + in_ch2, out_ch, act=act
             ),
-            ConvBlock(
-                out_ch, out_ch, 1, 1, region_type=region_type, act=act
-            )
-        )
+            MEMLPBlock(
+                out_ch, out_ch, act=act
+            ))
 
     def forward(self, x, y):
         assert isinstance(y, ME.SparseTensor)
@@ -460,10 +474,10 @@ class EncoderGeoLossl(nn.Module):
 
     def forward(self, x: ME.SparseTensor, batch_size: int):
         if not self.training: assert batch_size == 1
-        strided_fea_list = [self.blocks_out_first(x) if self.blocks_out_first is not None else x]
+        strided_fea_list = [self.blocks_out_first(x)]
 
         for block, block_out in zip(self.blocks, self.blocks_out):
             x = block(x)
-            strided_fea_list.append(block_out(x) if block_out is not None else x)
+            strided_fea_list.append(block_out(x))
 
         return strided_fea_list

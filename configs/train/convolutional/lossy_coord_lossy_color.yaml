@@ -7,13 +7,14 @@ model:
   decoder_channels: 32
   adaptive_pruning: True
   adaptive_pruning_scaler_train: 1.01
-  adaptive_pruning_scaler_test: 1.01
-  geo_lossl_if_sample: [0, 1, 0, 1, 0, 1, 0, 1, 1, 1]
-  geo_lossl_channels: [128, 128, 128, 128, 128, 128, 128, 128, 256, 256, 1]
+  adaptive_pruning_scaler_test: 1.00
+  geo_lossl_if_sample: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+  geo_lossl_channels: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
   bits_loss_factor: 1.0
-  coord_recon_loss_factor: 0.5
+  coord_recon_loss_factor: 0.4
   color_recon_loss_factor: 0.2
-  warmup_steps: 5000
+  warmup_fea_loss_steps: 5000
+  warmup_color_loss_steps: 5000
   warmup_fea_loss_factor: 0.00001
   warmup_color_loss_factor: 0.00001
   linear_warmup: True
@@ -28,7 +29,7 @@ train:
   num_workers: 4
   optimizer: [AdamW, AdamW, AdamW]
   momentum: 0.9
-  weight_decay: 0.00001
+  weight_decay: [0.00001, 0.00001, 0.0]
   max_grad_norm: 1.0
 
   learning_rate: [0.002, 0.0006, 0.0002]
