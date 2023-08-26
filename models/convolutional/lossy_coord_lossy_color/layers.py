@@ -480,4 +480,9 @@ class EncoderGeoLossl(nn.Module):
             x = block(x)
             strided_fea_list.append(block_out(x))
 
+        strided_fea_list[-1] = ME.SparseTensor(
+            BoundFunction.apply(strided_fea_list[-1].F),
+            coordinate_map_key=x.coordinate_map_key,
+            coordinate_manager=x.coordinate_manager
+        )
         return strided_fea_list
