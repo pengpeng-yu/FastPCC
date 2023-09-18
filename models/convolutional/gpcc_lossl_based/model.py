@@ -1,7 +1,5 @@
 from typing import List, Union, Tuple, Generator, Iterator
 import os
-import time
-import hashlib
 
 import torch
 import torch.nn as nn
@@ -254,9 +252,7 @@ class PCC(nn.Module):
             )
         )
 
-        h = hashlib.md5()
-        h.update(str(time.time()).encode())
-        tmp_file_path = 'tmp-' + h.hexdigest()
+        tmp_file_path = 'tmp-' + torch.rand(1).item()
         write_ply_file(feature.C[:, 1:] // feature.tensor_stride[0], f'{tmp_file_path}.ply')
         gpcc_octree_lossless_geom_encode(
             f'{tmp_file_path}.ply', f'{tmp_file_path}.bin',

@@ -21,7 +21,7 @@ class DatasetConfig(SimpleConfig):
     mesh_sample_points_num: int = 0
     mesh_sample_point_method: str = 'uniform'
     mesh_sample_point_resolution: int = 0
-    ply_cache_dtype: str = '<f4'
+    ply_cache_dtype: str = '<u2'
 
     random_rotation: bool = False
     kd_tree_partition_max_points_num: int = 0

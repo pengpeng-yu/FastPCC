@@ -288,12 +288,9 @@ class SubDecoderGeoLossl(nn.Module):
             MEMLPBlock(out_ch // 2, out_ch, act=act)
         )
         self.decoder = nn.Sequential(
-            MEMLPBlock(
-                out_ch + in_ch2, out_ch, act=act
-            ),
-            MEMLPBlock(
-                out_ch, out_ch, act=act
-            ))
+            MEMLPBlock(out_ch + in_ch2, out_ch, act=act),
+            MEMLPBlock(out_ch, out_ch, act=act)
+        )
 
     def forward(self, x, y):
         assert isinstance(y, ME.SparseTensor)

@@ -2,8 +2,6 @@ import io
 from typing import List, Union, Tuple, Generator, Optional
 import math
 import os
-import time
-import hashlib
 
 import numpy as np
 import open3d as o3d
@@ -404,9 +402,7 @@ class PCC(nn.Module):
             sparse_tensor_coords_stride = feature.tensor_stride[0]
 
         if sparse_tensor_coords.shape[0] != 1:
-            h = hashlib.md5()
-            h.update(str(time.time()).encode())
-            tmp_file_path = 'tmp-' + h.hexdigest()
+            tmp_file_path = 'tmp-' + torch.rand(1).item()
             write_ply_file(sparse_tensor_coords[:, 1:] // sparse_tensor_coords_stride, f'{tmp_file_path}.ply')
             gpcc_octree_lossless_geom_encode(
                 f'{tmp_file_path}.ply', f'{tmp_file_path}.bin',
@@ -465,9 +461,7 @@ class PCC(nn.Module):
             else:
                 sparse_tensor_coords_bytes_len = int.from_bytes(bs.read(3), 'little', signed=False)
                 sparse_tensor_coords_bytes = bs.read(sparse_tensor_coords_bytes_len)
-                h = hashlib.md5()
-                h.update(str(time.time()).encode())
-                tmp_file_path = 'tmp-' + h.hexdigest()
+                tmp_file_path = 'tmp-' + torch.rand(1).item()
                 with open(f'{tmp_file_path}.bin', 'wb') as f:
                     f.write(sparse_tensor_coords_bytes)
                 gpcc_decode(f'{tmp_file_path}.bin', f'{tmp_file_path}.ply')

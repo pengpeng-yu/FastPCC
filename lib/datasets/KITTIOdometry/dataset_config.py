@@ -11,4 +11,4 @@ class DatasetConfig(SimpleConfig):
     train_subset_index: Tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
     test_subset_index: Tuple[int, ...] = (11,)
     coord_scaler: float = 1000.0
-    ply_cache_dtype: str = '<f4'
+    ply_cache_dtype: str = '<u2'
