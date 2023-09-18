@@ -1,4 +1,4 @@
-# include "configs/train/convolutional/baseline.yaml"
+# include "configs/train/convolutional/lossy_coord/baseline.yaml"
 
 model_path: models.convolutional.gpcc_lossl_based
 model:

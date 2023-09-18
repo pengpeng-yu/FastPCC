@@ -1,4 +1,4 @@
-# include "configs/train/convolutional/lossl_based.yaml"
+# include "configs/train/convolutional/lossy_coord/gpcc_lossl_based.yaml"
 
 model:
   compressed_channels: 2

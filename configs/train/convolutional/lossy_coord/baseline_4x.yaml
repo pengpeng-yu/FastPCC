@@ -1,4 +1,4 @@
-# include "configs/train/convolutional/baseline.yaml"
+# include "configs/train/convolutional/lossy_coord/baseline.yaml"
 
 model:
   encoder_channels: [4, 16, 64, 64, 256]
