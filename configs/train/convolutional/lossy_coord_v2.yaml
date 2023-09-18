@@ -1,0 +1,58 @@
+model_path: models.convolutional.lossy_coord_v2
+model:
+  activation: 'prelu'
+  compressed_channels: [1]
+  bottleneck_scaler: 1
+  skip_encoding_fea: 1
+  encoder_channels: [16, 64]
+  decoder_channels: [16]
+  adaptive_pruning: True
+  geo_lossl_if_sample: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+  geo_lossl_channels: [64, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
+  bits_loss_factor: 0.4
+  warmup_fea_loss_steps: 5000
+  warmup_fea_loss_factor: 0.01
+
+
+train:
+  rundir_name: 'train_convolutional_<autoindex>'
+  more_reproducible: True
+  amp: False
+  find_unused_parameters: False
+  batch_size: 8
+  num_workers: 4
+  optimizer: [AdamW, AdamW, AdamW]
+  momentum: 0.9
+  weight_decay: [0.0001, 0.0001, 0.0]
+  max_grad_norm: 1.0
+
+  learning_rate: [0.0005, 0.0003, 0.0001]
+  epochs: 70
+
+  scheduler: Step
+  lr_step_size: 20
+  lr_step_gamma: 0.3
+
+  resume_from_ckpt: ''
+  resume_items: ['state_dict']
+  ckpt_frequency: 1
+  test_frequency: 4
+
+  dataset_path: 'lib.datasets.ShapeNetCorev2'
+  dataset:
+    train_filelist_path: 'all_list_obj.txt'
+    data_format: '.obj'
+    mesh_sample_points_num: 2500000
+    mesh_sample_point_method: 'uniform'
+    mesh_sample_point_resolution: 256
+    random_rotation: True
+
+test:
+  batch_size: 1
+  num_workers: 0
+  log_frequency: 1
+  save_results: True
+  dataset_path:
+    'lib.datasets.PlyVoxel.MVUB_MPEG_GPCC_CTC_Solid'
+  dataset:
+    kd_tree_partition_max_points_num: 0

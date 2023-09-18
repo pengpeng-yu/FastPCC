@@ -19,25 +19,20 @@ class ModelConfig(SimpleConfig):
     skip_encoding_fea: int = -1
 
     # Normal part of network
-    encoder_channels: Tuple[int, ...] = (8, 32)
-    decoder_channels: Tuple[int, ...] = 8
+    encoder_channels: Tuple[int, ...] = (4, 16, 64)
+    decoder_channels: Tuple[int, ...] = (16, 4)
     adaptive_pruning: bool = True
-    adaptive_pruning_scaler_train: float = 1.0
-    adaptive_pruning_scaler_test: float = 1.0
+    adaptive_pruning_scaler: float = 1.0
 
     # Geo lossless part of network
     geo_lossl_if_sample: Tuple[int, ...] = (1, 1)
     geo_lossl_channels: Tuple[int, ...] = (128, 128, 1)
 
     # Loss items
-    use_yuv_loss: bool = False
-    bits_loss_factor: float = 0.2
+    bits_loss_factor: float = 0.4
     coord_recon_loss_factor: float = 1.0
-    color_recon_loss_factor: float = 1.0
     warmup_fea_loss_steps: int = 1
-    warmup_color_loss_steps: int = 1
-    warmup_fea_loss_factor: float = 0.2
-    warmup_color_loss_factor: float = 1.0
+    warmup_fea_loss_factor: float = 0.4
     linear_warmup: bool = False
 
     mpeg_pcc_error_command: str = 'pc_error_d'

@@ -4,13 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import MinkowskiEngine as ME
-from pytorch3d.ops import knn_points
 
-from lib.metrics.misc import gen_rgb_to_yuvbt709_param
 from lib.sparse_conv_layers import \
     ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, \
     NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs
-from lib.torch_utils import minkowski_tensor_wrapped_fn
 
 
 class BoundFunction(torch.autograd.Function):
@@ -31,31 +28,28 @@ class BoundFunction(torch.autograd.Function):
 class Encoder(nn.Module):
     def __init__(self,
                  in_channels: int,
-                 out_channels: int,
                  intra_channels: Tuple[int, ...],
                  requires_points_num_list: bool,
-                 points_num_scaler_train: float,
-                 points_num_scaler_test: float,
+                 points_num_scaler: float,
                  region_type: str,
                  act: Optional[str]):
         super(Encoder, self).__init__()
         self.requires_points_num_list = requires_points_num_list
-        self.points_num_scaler_train = points_num_scaler_train
-        self.points_num_scaler_test = points_num_scaler_test
+        self.points_num_scaler = points_num_scaler
         self.blocks = nn.ModuleList((
             ConvBlock(
                 in_channels, intra_channels[0], 3, 1,
                 region_type=region_type, act=act
             ),))
         last_ch = intra_channels[0]
-        for idx, ch in enumerate(intra_channels[1:]):
+        for ch in intra_channels[1:]:
             self.blocks.append(nn.Sequential(
                 ConvBlock(
                     last_ch, ch, 2, 2,
                     region_type='HYPER_CUBE', act=act
                 ),
                 ConvBlock(
-                    ch, ch if idx != len(intra_channels) - 2 else out_channels * 2, 3, 1,
+                    ch, ch, 3, 1,
                     region_type=region_type, act=act
                 )
             ))
@@ -68,7 +62,7 @@ class Encoder(nn.Module):
             if idx != len(self.blocks) - 1:
                 points_num_list.append([_.shape[0] for _ in x.decomposed_coordinates])
 
-        scaler = self.points_num_scaler_train if self.training else self.points_num_scaler_test
+        scaler = self.points_num_scaler
         if not self.requires_points_num_list:
             points_num_list = None
         else:
@@ -81,51 +75,39 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self,
                  in_channels: int,
-                 out_channels: int,
-                 intra_channels: Tuple[int],
+                 intra_channels: Tuple[int, ...],
                  region_type: str,
-                 act: Optional[str],
-                 use_yuv_loss: bool):
+                 act: Optional[str]):
         super(Decoder, self).__init__()
-        self.use_yuv_loss = use_yuv_loss
         self.upsample_blocks = nn.ModuleList()
         self.classify_blocks = nn.ModuleList()
         last_ch = in_channels
         for idx, ch in enumerate(intra_channels):
-            blocks = nn.Sequential(
-                GenConvTransBlock(last_ch, ch, 2, 2, region_type='HYPER_CUBE', act=act),
-                ConvBlock(ch, ch, 3, 1, region_type=region_type, act=act)
-            )
+            blocks = nn.Sequential()
+            if idx == len(intra_channels) - 1:
+                blocks.append(ConvBlock(
+                    last_ch, last_ch, 3, 1,
+                    region_type=region_type, act=act
+                ))
+            blocks.append(GenConvTransBlock(
+                last_ch, ch, 2, 2,
+                region_type='HYPER_CUBE', act=act
+            ))
+            if idx != len(intra_channels) - 1:
+                blocks.append(ConvBlock(
+                    ch, ch, 3, 1,
+                    region_type=region_type, act=act
+                ))
             self.upsample_blocks.append(blocks)
-            blocks = nn.Sequential(
-                ConvBlock(ch, ch, 3, 1, region_type=region_type, act=act),
-                ConvBlock(ch, 1, 3, 1, region_type=region_type, act=None)
-            )
-            self.classify_blocks.append(blocks)
+            self.classify_blocks.append(nn.Sequential(
+                ConvBlock(
+                    ch, ch // 2, 1, 1, act=act
+                ),
+                ConvBlock(
+                    ch // 2, 1, 1, 1, act=None
+                )))
             last_ch = ch
-        self.predict_block = nn.Sequential(
-            ConvBlock(
-                last_ch + 2, last_ch // 2, 3, 1,
-                region_type=region_type, act=act
-            ),
-            ConvBlock(
-                last_ch // 2, last_ch // 2, 3, 1,
-                region_type=region_type, act=act
-            ),
-            ConvBlock(
-                last_ch // 2, out_channels, 3, 1,
-                region_type=region_type, act=None
-            )
-        )
         self.pruning = ME.MinkowskiPruning()
-        rgb_to_yuvbt709_param = gen_rgb_to_yuvbt709_param()
-        self.register_buffer('rgb_to_yuvbt709_weight', rgb_to_yuvbt709_param[0] * 255, False)
-        self.register_buffer('rgb_to_yuvbt709_bias', rgb_to_yuvbt709_param[1] * 255, False)
-
-    def rgb_to_yuvbt709(self, rgb: torch.Tensor):
-        assert rgb.dtype == torch.float32
-        assert rgb.ndim == 2 and rgb.shape[1] == 3
-        return F.linear(rgb, self.rgb_to_yuvbt709_weight, self.rgb_to_yuvbt709_bias)
 
     def forward(self, *args, **kwargs):
         if self.training:
@@ -133,7 +115,7 @@ class Decoder(nn.Module):
         else:
             return self.test_forward(*args, **kwargs)
 
-    def train_forward(self, fea, points_num_list, target_key, target_rgb):
+    def train_forward(self, fea, points_num_list, target_key):
         loss_dict = {}
         for idx, (upsample_block, classify_block) in \
                 enumerate(zip(self.upsample_blocks, self.classify_blocks)):
@@ -143,19 +125,7 @@ class Decoder(nn.Module):
             keep_target = self.get_target(pred, target_key)
             keep |= keep_target
             loss_dict[f'coord_{idx}_recon_loss'] = self.get_coord_recon_loss(pred, keep_target)
-            if idx != len(self.upsample_blocks) - 1:
-                fea = self.pruning(fea, keep)
-        fea = ME.cat(
-            fea, ME.SparseTensor(
-                keep[:, None].expand(-1, 2),
-                coordinate_manager=fea.coordinate_manager,
-                coordinate_map_key=fea.coordinate_map_key
-            ))
-        fea = self.inverse_transform_for_color(self.predict_block(fea))
-        rgb_loss = self.batched_recolor(
-            pred, fea.F, keep, target_key, target_rgb,
-        )
-        loss_dict['color_recon_loss'] = rgb_loss
+            fea = self.pruning(fea, keep)
         return loss_dict
 
     def test_forward(self, fea, points_num_list):
@@ -164,15 +134,8 @@ class Decoder(nn.Module):
             fea = upsample_block(fea)
             keep = self.get_keep(classify_block(fea), points_num_list,
                                  [2 ** len(self.classify_blocks)] * 3)
-            if idx != len(self.upsample_blocks) - 1:
-                fea = self.pruning(fea, keep)
-        fea = ME.cat(
-            fea, ME.SparseTensor(
-                keep[:, None].expand(-1, 2),
-                coordinate_manager=fea.coordinate_manager,
-                coordinate_map_key=fea.coordinate_map_key
-            ))
-        return self.inverse_transform_for_color(self.pruning(self.predict_block(fea), keep))
+            fea = self.pruning(fea, keep)
+        return fea
 
     @torch.no_grad()
     def get_keep(self, pred: ME.SparseTensor, points_num_list: List[List[int]],
@@ -222,114 +185,6 @@ class Decoder(nn.Module):
             reduction='sum'
         )
         return recon_loss
-
-    @minkowski_tensor_wrapped_fn({1: 0})
-    def inverse_transform_for_color(self, x):
-        return x.clip_(0, 1).mul_(255) if not self.training else x.mul_(255)
-
-    def batched_recolor(
-            self,
-            batched_pred: ME.SparseTensor,
-            batched_pred_rgb: torch.Tensor,
-            batched_pred_keep_mask: torch.Tensor,
-            batched_tgt_coord_key: ME.CoordinateMapKey,
-            batched_tgt_rgb: torch.Tensor
-    ):
-        mg = batched_pred.coordinate_manager
-        rgb_loss_list = []
-        batched_tgt_coord = mg.get_coordinates(batched_tgt_coord_key)
-        for pred_row_ids, tgt_coord_row_ids in zip(
-            batched_pred._batchwise_row_indices, mg.origin_map(batched_tgt_coord_key)[1]
-        ):
-            rgb_loss = self.sample_wise_recolor(
-                batched_pred.C[pred_row_ids, 1:].to(torch.float),
-                batched_pred_rgb[pred_row_ids],
-                batched_pred_keep_mask[pred_row_ids],
-                batched_tgt_coord[tgt_coord_row_ids, 1:].to(torch.float),
-                batched_tgt_rgb[tgt_coord_row_ids]
-            )
-            rgb_loss_list.append(rgb_loss)
-        sum_rgb_loss = sum([_.sum() for _ in rgb_loss_list])
-
-        return sum_rgb_loss
-
-    def sample_wise_recolor(
-            self,
-            cand_xyz: torch.Tensor,
-            cand_rgb: torch.Tensor,
-            pred_mask: torch.Tensor,
-            tgt_xyz: torch.Tensor,
-            tgt_rgb: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Args:
-            cand_xyz: L x 3 float
-            cand_rgb: L x 3 float RGB, **with gard**
-            pred_mask: L bool, sum(pred_mask) == M
-            tgt_xyz: N x 3 float
-            tgt_rgb: L x 3 float RGB
-            Note that cand_xyz[tgt_true_mask] != tgt_xyz
-        """
-        device = cand_xyz.device
-        search_range = 8
-
-        pred_xyz = cand_xyz[pred_mask]
-        pred_rgb = cand_rgb[pred_mask]
-        recolored_pred_rgb = torch.full_like(pred_xyz, 0)
-
-        @torch.no_grad()
-        def recolor_backward():
-            tgt_to_pt_dist, tgt_to_pt_idx = knn_points(
-                tgt_xyz[None], pred_xyz[None], K=search_range, return_sorted=False
-            )[:2]
-            tgt_to_pt_dist, tgt_to_pt_idx = tgt_to_pt_dist[0], tgt_to_pt_idx[0]
-            tgt_to_pt_zero_mask = tgt_to_pt_dist == 0
-            tgt_to_pt_mask = tgt_to_pt_dist == tgt_to_pt_dist.amin(1, keepdim=True)
-            tgt_to_pt_mask.logical_and_(~tgt_to_pt_zero_mask.any(1).unsqueeze(1))
-            expanded_tgt_rgb = tgt_rgb.unsqueeze(1).expand(-1, search_range, -1)
-            masked_rec_tgt_to_pt_dist = tgt_to_pt_dist[tgt_to_pt_mask].sqrt().reciprocal_()
-            recolored_pred_rgb.index_add_(
-                0, tgt_to_pt_idx[tgt_to_pt_mask],
-                (expanded_tgt_rgb[tgt_to_pt_mask]).mul(
-                    masked_rec_tgt_to_pt_dist.unsqueeze(1))
-            )
-            recolored_pred_rgb_denominator = torch.zeros(
-                (pred_xyz.shape[0],), dtype=cand_rgb.dtype, device=device).index_add_(
-                0, tgt_to_pt_idx[tgt_to_pt_mask], masked_rec_tgt_to_pt_dist
-            )
-            tmp_mask = recolored_pred_rgb_denominator != 0
-            recolored_pred_rgb[tmp_mask] = recolored_pred_rgb[tmp_mask].div(
-                recolored_pred_rgb_denominator[tmp_mask].unsqueeze(1))
-            recolored_pred_rgb[tgt_to_pt_idx[tgt_to_pt_zero_mask]] = \
-                expanded_tgt_rgb[tgt_to_pt_zero_mask]
-            tmp_mask.logical_not_()
-            tmp_mask[tgt_to_pt_idx[tgt_to_pt_zero_mask]] = False
-            return tmp_mask
-
-        empty_rgb_mask = recolor_backward()
-
-        @torch.no_grad()
-        def recolor_forward():
-            if torch.any(empty_rgb_mask):
-                empty_rgb_xyz = pred_xyz[empty_rgb_mask]
-                empty_rgb_to_tgt_dist, empty_rgb_to_tgt_idx = knn_points(
-                    empty_rgb_xyz[None], tgt_xyz[None], K=search_range, return_sorted=False
-                )[:2]
-                empty_rgb_to_tgt_dist, empty_rgb_to_tgt_idx = empty_rgb_to_tgt_dist[0], empty_rgb_to_tgt_idx[0]
-                empty_rgb_to_tgt_mask = empty_rgb_to_tgt_dist == empty_rgb_to_tgt_dist.amin(1, keepdim=True)
-                recolored_pred_rgb[empty_rgb_mask] = torch.sum(
-                    tgt_rgb[empty_rgb_to_tgt_idx] * empty_rgb_to_tgt_mask[:, :, None], dim=1
-                ) / empty_rgb_to_tgt_mask.sum(1, keepdim=True)
-
-        recolor_forward()
-
-        if self.use_yuv_loss:
-            pred_rgb = self.rgb_to_yuvbt709(pred_rgb)
-            recolored_pred_rgb = self.rgb_to_yuvbt709(recolored_pred_rgb)
-        rgb_loss = F.l1_loss(
-            pred_rgb, recolored_pred_rgb, reduction='none'
-        )
-        return rgb_loss
 
 
 class HyperDecoderUpsample(nn.Module):
@@ -433,9 +288,12 @@ class SubDecoderGeoLossl(nn.Module):
             MEMLPBlock(out_ch // 2, out_ch, act=act)
         )
         self.decoder = nn.Sequential(
-            MEMLPBlock(out_ch + in_ch2, out_ch, act=act),
-            MEMLPBlock(out_ch, out_ch, act=act)
-        )
+            MEMLPBlock(
+                out_ch + in_ch2, out_ch, act=act
+            ),
+            MEMLPBlock(
+                out_ch, out_ch, act=act
+            ))
 
     def forward(self, x, y):
         assert isinstance(y, ME.SparseTensor)
@@ -501,8 +359,7 @@ class EncoderGeoLossl(nn.Module):
         assert len(in_channels) + 1 == len(out_channels)
 
         def make_block(down, in_ch, out_ch):
-            intra_out_ch = max(in_ch, out_ch) * 2
-            in_ch *= 2
+            intra_out_ch = max(in_ch, out_ch)
             args = (2, 2) if down else (3, 1)
             return nn.Sequential(
                 ConvBlock(in_ch, in_ch, *args,
@@ -514,7 +371,7 @@ class EncoderGeoLossl(nn.Module):
             )
 
         self.blocks_out_first = MEMLPBlock(
-            in_channels[0] * 2, out_channels[0], act=act
+            in_channels[0], out_channels[0], act=act
         ) if skip_encoding_fea < 0 else None
         self.blocks = nn.ModuleList()
         self.blocks_out = nn.ModuleList()

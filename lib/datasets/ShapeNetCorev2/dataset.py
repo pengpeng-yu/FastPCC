@@ -169,14 +169,8 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         xyz = xyz[unique_map]
 
         par_num = self.cfg.kd_tree_partition_max_points_num
-        if par_num != 0:
-            if xyz.shape[0] > par_num:
-                xyz = kd_tree_partition_randomly(xyz, par_num)
-                assert xyz.shape[0] == par_num, f'Target num: {par_num}, xyz.shape[0]: {xyz.shape[0]}'
-            # else:
-            #     if xyz.shape[0] < par_num:
-            #         self.logger.info(f'number of points in {file_path} ({xyz.shape[0]}) '
-            #                          f'is less than {par_num}')
+        if par_num != 0 and xyz.shape[0] > par_num:
+            xyz = kd_tree_partition_randomly(xyz, par_num)
 
         return PCData(
             xyz=torch.from_numpy(xyz),

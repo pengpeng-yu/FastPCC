@@ -22,6 +22,7 @@ class GeoLosslessEntropyModel(nn.Module):
                  compressed_channels: int,
                  bottleneck_process: str,
                  bottleneck_scaler: int,
+                 skip_encoding_fea: int,
                  encoder: Union[nn.Module, nn.ModuleList],
                  residual_block: nn.ModuleList,
                  decoder_block: nn.ModuleList,
@@ -33,6 +34,7 @@ class GeoLosslessEntropyModel(nn.Module):
         self.compressed_channels = compressed_channels
         self.broadcast_shape_bytes = 3
         self.bottleneck_scaler = bottleneck_scaler
+        self.skip_encoding_fea = skip_encoding_fea
 
         def make_em():
             return NoisyDeepFactorizedEntropyModel(
@@ -55,7 +57,7 @@ class GeoLosslessEntropyModel(nn.Module):
         self.binary_rans_coder = BinaryRansCoder(1)
 
     def rans_encode_with_cdf(self, target: np.ndarray, bs: io.BytesIO, offset: int = None):
-        bs.write(int_to_bytes(target.size, self.broadcast_shape_bytes))
+        bs.write(int_to_bytes(target.shape[0], self.broadcast_shape_bytes))
         if offset is None:
             offset = target.min().item()
             bs.write(int_to_bytes(-offset, 1))
@@ -71,7 +73,7 @@ class GeoLosslessEntropyModel(nn.Module):
         bs.write(int_to_bytes(len(target_bytes), 3))
         bs.write(target_bytes)
 
-    def rans_decode_with_cdf(self, bs: io.BytesIO, dtype=torch.float, offset: int = None)\
+    def rans_decode_with_cdf(self, bs: io.BytesIO, dtype=torch.float, offset: int = None, channels: int = None)\
             -> Tuple[torch.Tensor, List[int]]:
         shape_sum = bytes_to_int(bs.read(self.broadcast_shape_bytes))
         if offset is None:
@@ -82,11 +84,11 @@ class GeoLosslessEntropyModel(nn.Module):
 
         bytes_len = bytes_to_int(bs.read(3))
         target_bytes = bs.read(bytes_len)
-        target = np.empty((1, shape_sum * self.compressed_channels), np.int32)
+        target = np.empty((1, shape_sum * (channels or self.compressed_channels)), np.int32)
         self.rans_coder.decode([target_bytes], target)
 
         target = torch.from_numpy(
-            target.reshape(shape_sum, self.compressed_channels)
+            target.reshape(shape_sum, (channels or self.compressed_channels))
         ).to(dtype=dtype, device=next(self.parameters()).device)
         return target, cdf
 
@@ -144,11 +146,13 @@ class GeoLosslessEntropyModel(nn.Module):
                 ) / math.log(2)
 
             fea_pred = sub_hyper_decoder_fea(lower_fea_tilde, coord_target_key)
-            fea_res = sub_residual_block(fea, fea_pred)
-            fea_res_tilde, fea_loss_dict = self.bottom_fea_entropy_model(fea_res)
-            concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: f'fea_{idx}_' + k)
-
-            lower_fea_tilde = sub_decoder_block(fea_res_tilde, fea_pred)
+            if idx > self.skip_encoding_fea:
+                fea_res = sub_residual_block(fea, fea_pred)
+                fea_res_tilde, fea_loss_dict = self.bottom_fea_entropy_model(fea_res)
+                concat_loss_dicts(loss_dict, fea_loss_dict, lambda k: f'fea_{idx}_' + k)
+                lower_fea_tilde = sub_decoder_block(fea_res_tilde, fea_pred)
+            else:
+                lower_fea_tilde = sub_decoder_block(fea_pred)
             strided_fea_tilde_list.append(lower_fea_tilde)
 
         return strided_fea_tilde_list[-1], loss_dict
@@ -207,14 +211,17 @@ class GeoLosslessEntropyModel(nn.Module):
             del permutation_kernel_map, coord_target_key
 
             fea_pred = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
-            fea_res = sub_residual_block(fea, fea_pred).F
-            del fea
-            fea_res *= self.bottleneck_scaler
-            fea_res.round_()
-            fea_res_list.append(fea_res.cpu().to(torch.int32).numpy())
+            if idx > self.skip_encoding_fea:
+                fea_res = sub_residual_block(fea, fea_pred).F
+                del fea
+                fea_res *= self.bottleneck_scaler
+                fea_res.round_()
+                fea_res_list.append(fea_res.cpu().to(torch.int32).numpy())
 
-            fea_res /= self.bottleneck_scaler
-            lower_fea_recon = sub_decoder_block(fea_res, fea_pred)
+                fea_res /= self.bottleneck_scaler
+                lower_fea_recon = sub_decoder_block(fea_res, fea_pred)
+            else:
+                lower_fea_recon = sub_decoder_block(fea_pred)
             del fea_pred
         del lower_fea_recon
 
@@ -252,7 +259,7 @@ class GeoLosslessEntropyModel(nn.Module):
             bottom_fea_recon, fea_res_concat = torch.split(
                 fea_res_concat,
                 [bottom_fea_recon_shape, fea_res_concat.shape[0] - bottom_fea_recon_shape], dim=0)
-            bottom_coord = self.rans_decode_with_cdf(bs, torch.int32, 0)[0].reshape(-1, 3) * bottom_stride
+            bottom_coord = self.rans_decode_with_cdf(bs, torch.int32, 0, 3)[0].reshape(-1, 3) * bottom_stride
 
         lower_fea_recon = ME.SparseTensor(
             bottom_fea_recon, torch.cat((
@@ -291,16 +298,21 @@ class GeoLosslessEntropyModel(nn.Module):
                 )[0]
                 del coord_mask_true
 
-            if idx > RANDOM_DECODE_IDX:
-                cur_fea_recon, fea_res_concat = torch.split(
-                    fea_res_concat, [cur_voxels_num, fea_res_concat.shape[0] - cur_voxels_num], dim=0)
+            if idx > self.skip_encoding_fea:
+                if idx > RANDOM_DECODE_IDX:
+                    cur_fea_recon, fea_res_concat = torch.split(
+                        fea_res_concat, [cur_voxels_num, fea_res_concat.shape[0] - cur_voxels_num], dim=0)
+                else:
+                    cur_fea_recon = fea_res_dist.sample(torch.Size((cur_voxels_num, 1))).to(torch.float)
+                lower_fea_recon = sub_decoder_block(
+                    cur_fea_recon,
+                    sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
+                )
+                del cur_fea_recon
             else:
-                cur_fea_recon = fea_res_dist.sample(torch.Size((cur_voxels_num, 1))).to(torch.float)
-            lower_fea_recon = sub_decoder_block(
-                cur_fea_recon,
-                sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
-            )
-            del cur_fea_recon
+                lower_fea_recon = sub_decoder_block(
+                    sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
+                )
         assert len(coord_bytes_list) == 0
         if RANDOM_DECODE_IDX < 0:
             assert fea_res_concat.shape[0] == 0

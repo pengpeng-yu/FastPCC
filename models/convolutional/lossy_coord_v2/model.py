@@ -14,7 +14,7 @@ from lib.torch_utils import TorchCudaMaxMemoryAllocated, concat_loss_dicts
 from lib.data_utils import PCData
 from lib.evaluators import PCGCEvaluator
 
-from .geo_lossl_em import GeoLosslessEntropyModel
+from ..lossy_coord_lossy_color.geo_lossl_em import GeoLosslessEntropyModel
 from .layers import Encoder, Decoder, \
     HyperDecoderGenUpsample, HyperDecoderUpsample, EncoderGeoLossl, \
     ResidualGeoLossl, DecoderGeoLossl
@@ -46,22 +46,18 @@ class PCC(nn.Module):
         assert cfg.compressed_channels[-1] == cfg.geo_lossl_channels[-1]
 
         self.encoder = Encoder(
-            4,
-            cfg.geo_lossl_channels[0],
+            1,
             cfg.encoder_channels,
             cfg.adaptive_pruning,
-            cfg.adaptive_pruning_scaler_train,
-            cfg.adaptive_pruning_scaler_test,
+            cfg.adaptive_pruning_scaler,
             cfg.conv_region_type,
             cfg.activation
         )
         self.decoder = Decoder(
             cfg.geo_lossl_channels[0],
-            3,
             cfg.decoder_channels,
             cfg.conv_region_type,
-            cfg.activation,
-            cfg.use_yuv_loss
+            cfg.activation
         )
         enc_lossl = EncoderGeoLossl(
             cfg.geo_lossl_channels[:-1],
@@ -106,8 +102,6 @@ class PCC(nn.Module):
         )
         self.linear_warmup_fea_step = (self.cfg.warmup_fea_loss_factor -
                                        self.cfg.bits_loss_factor) / self.cfg.warmup_fea_loss_steps
-        self.linear_warmup_color_step = (self.cfg.warmup_color_loss_factor -
-                                         self.cfg.color_recon_loss_factor) / self.cfg.warmup_color_loss_steps
 
     def init_em_lossless_based(
             self, encoder_geo_lossless, residual_block, decoder_block,
@@ -128,15 +122,15 @@ class PCC(nn.Module):
 
     def forward(self, pc_data: PCData):
         if self.training:
-            sparse_pc = self.get_sparse_pc(pc_data.xyz, pc_data.color)
+            sparse_pc = self.get_sparse_pc(pc_data.xyz)
             return self.train_forward(sparse_pc, pc_data.training_step, pc_data.batch_size)
         else:
             assert pc_data.batch_size == 1, 'Only supports batch size == 1 during testing.'
             if isinstance(pc_data.xyz, torch.Tensor):
-                sparse_pc = self.get_sparse_pc(pc_data.xyz, pc_data.color)
+                sparse_pc = self.get_sparse_pc(pc_data.xyz)
                 return self.test_forward(sparse_pc, pc_data)
             else:
-                sparse_pc_partitions = self.get_sparse_pc_partitions(pc_data.xyz, pc_data.color)
+                sparse_pc_partitions = self.get_sparse_pc_partitions(pc_data.xyz)
                 return self.test_partitions_forward(sparse_pc_partitions, pc_data)
 
     def set_global_cm(self):
@@ -151,7 +145,7 @@ class PCC(nn.Module):
         ME.set_global_coordinate_manager(global_coord_mg)
         return global_coord_mg
 
-    def get_sparse_pc(self, xyz: torch.Tensor, color: Optional[torch.Tensor] = None,
+    def get_sparse_pc(self, xyz: torch.Tensor,
                       tensor_stride: int = 1,
                       only_return_coords: bool = False)\
             -> Union[ME.SparseTensor, Tuple[ME.CoordinateMapKey, ME.CoordinateManager]]:
@@ -160,13 +154,10 @@ class PCC(nn.Module):
             pc_coord_key = global_coord_mg.insert_and_map(xyz, [tensor_stride] * 3)[0]
             return pc_coord_key, global_coord_mg
         else:
-            sparse_pc_feature = torch.cat((
-                torch.div(color, 255),
-                torch.full(
-                    (color.shape[0], 1), fill_value=2,
-                    dtype=torch.float,
-                    device=color.device
-                )), 1)
+            sparse_pc_feature = torch.full(
+                (xyz.shape[0], 1), fill_value=1,
+                dtype=torch.float, device=xyz.device
+            )
             sparse_pc = ME.SparseTensor(
                 features=sparse_pc_feature,
                 coordinates=xyz,
@@ -176,10 +167,10 @@ class PCC(nn.Module):
             )
             return sparse_pc
 
-    def get_sparse_pc_partitions(self, xyz: List[torch.Tensor], color: List[torch.Tensor]) -> Generator:
+    def get_sparse_pc_partitions(self, xyz: List[torch.Tensor]) -> Generator:
         # The first one is supposed to be the original coordinates.
         for idx in range(1, len(xyz)):
-            yield self.get_sparse_pc(xyz[idx], color[idx])
+            yield self.get_sparse_pc(xyz[idx])
 
     def train_forward(self, sparse_pc: ME.SparseTensor,
                       training_step: int, batch_size: int):
@@ -189,7 +180,7 @@ class PCC(nn.Module):
 
         decoder_loss_dict = self.decoder(
             bottleneck_feature, points_num_list,
-            sparse_pc.coordinate_map_key, sparse_pc.F[:, :-1].mul(255).round_()
+            sparse_pc.coordinate_map_key
         )
         concat_loss_dicts(loss_dict, decoder_loss_dict)
 
@@ -203,15 +194,6 @@ class PCC(nn.Module):
                 fea_loss_factor = self.cfg.warmup_fea_loss_factor
         else:
             fea_loss_factor = self.cfg.bits_loss_factor
-        if training_step < self.cfg.warmup_color_loss_steps:
-            self.warmup_forward = True
-            if self.cfg.linear_warmup:
-                color_loss_factor = self.cfg.warmup_color_loss_factor - \
-                    self.linear_warmup_color_step * training_step
-            else:
-                color_loss_factor = self.cfg.warmup_color_loss_factor
-        else:
-            color_loss_factor = self.cfg.color_recon_loss_factor
 
         for key in loss_dict:
             if key.endswith('bits_loss'):
@@ -219,9 +201,8 @@ class PCC(nn.Module):
                     loss_dict[key] *= fea_loss_factor
                 else:
                     loss_dict[key] *= self.cfg.bits_loss_factor
-            if key.startswith('coord_') and key.endswith('_recon_loss'):
+            if key.startswith('coord_recon_loss'):
                 loss_dict[key] *= self.cfg.coord_recon_loss_factor
-        loss_dict['color_recon_loss'] *= color_loss_factor
 
         loss_dict['loss'] = sum(loss_dict.values())
         for key in loss_dict:
@@ -236,14 +217,12 @@ class PCC(nn.Module):
         ME.clear_global_coordinate_manager()
         torch.cuda.empty_cache()
         with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
-            coord_recon, color_recon = self.decompress(compressed_bytes)
+            coord_recon = self.decompress(compressed_bytes)
         ret = self.evaluator.log_batch(
             preds=[coord_recon],
             targets=[pc_data.xyz[:, 1:]],
             compressed_bytes_list=[compressed_bytes],
             pc_data=pc_data,
-            preds_color=[color_recon],
-            targets_color=[pc_data.color],
             extra_info_dicts=[
                 {'encoder_elapsed_time': encoder_t.elapsed_time,
                  'encoder_max_cuda_memory_allocated': encoder_m.max_memory_allocated,
@@ -260,14 +239,12 @@ class PCC(nn.Module):
         ME.clear_global_coordinate_manager()
         torch.cuda.empty_cache()
         with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
-            coord_recon, color_recon = self.decompress_partitions(compressed_bytes)
+            coord_recon = self.decompress_partitions(compressed_bytes)
         ret = self.evaluator.log_batch(
             preds=[coord_recon],
             targets=[pc_data.xyz[0]],
             compressed_bytes_list=[compressed_bytes],
             pc_data=pc_data,
-            preds_color=[color_recon],
-            targets_color=[pc_data.color[0]],
             extra_info_dicts=[
                 {'encoder_elapsed_time': encoder_t.elapsed_time,
                  'encoder_max_cuda_memory_allocated': encoder_m.max_memory_allocated,
@@ -302,11 +279,11 @@ class PCC(nn.Module):
                                  for s in compressed_bytes_list))
         return concat_bytes
 
-    def decompress(self, compressed_bytes: bytes) -> Tuple[torch.Tensor, torch.Tensor]:
+    def decompress(self, compressed_bytes: bytes) -> torch.Tensor:
         with io.BytesIO(compressed_bytes) as bs:
             if self.cfg.adaptive_pruning:
                 points_num_list = []
-                for idx in range(len(self.cfg.decoder_channels)):
+                for idx in range(len(self.encoder.blocks) - 1):
                     points_num_list.append([int.from_bytes(bs.read(3), 'little', signed=False)])
             else:
                 points_num_list = None
@@ -317,28 +294,23 @@ class PCC(nn.Module):
 
         decoder_fea = self.decoder(fea_recon, points_num_list)
         coord_recon = decoder_fea.C[:, 1:]
-        color_recon_raw = decoder_fea.F
-        color_recon = color_recon_raw.round_()
 
-        return coord_recon, color_recon
+        return coord_recon
 
     def decompress_partitions(self, concat_bytes: bytes
-                              ) -> Tuple[torch.Tensor, torch.Tensor]:
+                              ) -> torch.Tensor:
         coord_recon_list = []
-        color_recon_list = []
         concat_bytes_len = len(concat_bytes)
 
         with io.BytesIO(concat_bytes) as bs:
             while bs.tell() != concat_bytes_len:
                 length = int.from_bytes(bs.read(3), 'little', signed=False)
-                coord_recon, color_recon = self.decompress(bs.read(length))
+                coord_recon = self.decompress(bs.read(length))
                 coord_recon_list.append(coord_recon)
-                color_recon_list.append(color_recon)
                 ME.clear_global_coordinate_manager()
 
         coord_recon_concat = torch.cat(coord_recon_list, 0)
-        color_recon_concat = torch.cat(color_recon_list, 0)
-        return coord_recon_concat, color_recon_concat
+        return coord_recon_concat
 
     def train(self, mode: bool = True):
         """
