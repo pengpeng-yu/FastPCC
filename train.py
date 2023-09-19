@@ -156,7 +156,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
     if cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) == 1:
         model = model.to(device)
-        logger.info('using single GPU')
+        logger.info('using a single GPU')
     elif cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) >= 1:
         if len(cuda_ids) > 1:
             logger.error('These are designs incompatible with DP mode when using '
@@ -454,6 +454,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
             torch.cuda.empty_cache()
 
+    tb_writer.close()
     logger.info('train end')
 
 
