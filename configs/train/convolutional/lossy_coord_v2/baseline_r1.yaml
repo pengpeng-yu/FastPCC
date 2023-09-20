@@ -2,7 +2,6 @@ model_path: models.convolutional.lossy_coord_v2
 model:
   activation: 'prelu'
   compressed_channels: [1]
-  bottleneck_scaler: 1
   skip_encoding_fea: 1
   encoder_channels: [16, 64]
   decoder_channels: [16]

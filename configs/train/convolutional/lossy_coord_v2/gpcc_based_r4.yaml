@@ -1,0 +1,5 @@
+# include "configs/train/convolutional/lossy_coord_v2/gpcc_based_r3.yaml"
+
+model:
+  skip_encoding_fea: 1
+  bits_loss_factor: 1.4
