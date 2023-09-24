@@ -42,7 +42,7 @@ def concat_values_for_dict(
         a: one_file_metric_dict_type,
         b: Union[Dict[str, Union[int, float, str]], one_file_metric_dict_type],
         use_default_value_for_b: bool = True,
-        default_value='none'
+        default_value=None
 ):
     if use_default_value_for_b:
         for key in a:

@@ -1,0 +1,6 @@
+# include "configs/train/convolutional/lossy_coord_v2/baseline_r1.yaml"
+
+model:
+  encoder_channels: [16, 128]
+  geo_lossl_if_sample: [1, 1, 1, 1, 1, 1]
+  geo_lossl_channels: [128, 128, 128, 128, 128, 128, 1]

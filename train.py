@@ -98,8 +98,8 @@ def main():
                 raise Exception
             tb_proc.stdout.close()
         except Exception as e:
-            logger.error(f'fail to launch Tensorboard')
-            raise e
+            logger.warning(f'fail to launch Tensorboard')
+            tb_proc = None
 
         try:
             train(cfg, local_rank, logger, tb_writer, run_dir, ckpts_dir)
@@ -108,9 +108,11 @@ def main():
             logger.error(e_type)
             logger.error(e_value)
             logger.error('\n' + ''.join(traceback.format_tb(e_traceback)))
-            tb_proc.kill()
+            if tb_proc is not None:
+                tb_proc.kill()
         else:
-            tb_proc.wait()
+            if tb_proc is not None:
+                tb_proc.wait()
 
     else:
         train(cfg, local_rank, logger)

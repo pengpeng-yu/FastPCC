@@ -4,7 +4,9 @@ from typing import List, Union, Dict
 import os
 import multiprocessing as mp
 
-import cv2
+try:
+    import cv2
+except ImportError: cv2 = None
 import torch
 
 from lib.data_utils import PCData, write_ply_file, if_ply_has_vertex_normal

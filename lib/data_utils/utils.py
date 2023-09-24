@@ -4,7 +4,9 @@ from collections import defaultdict
 from typing import Tuple, List, Optional, Union, Dict, Callable
 
 import numpy as np
-import cv2
+try:
+    import cv2
+except ImportError: cv2 = None
 from plyfile import PlyData, PlyElement
 try:
     import open3d as o3d
