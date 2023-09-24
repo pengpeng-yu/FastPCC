@@ -1,4 +1,4 @@
-# include "configs/train/convolutional/lossy_coord/baseline.yaml"
+# include "configs/convolutional/lossy_coord/baseline.yaml"
 
 model:
   hyperprior: NoisyDeepFactorized

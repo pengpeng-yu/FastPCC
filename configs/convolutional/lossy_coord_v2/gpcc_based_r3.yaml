@@ -1,4 +1,4 @@
-# include "configs/train/convolutional/lossy_coord_v2/gpcc_based_r1.yaml"
+# include "configs/convolutional/lossy_coord_v2/gpcc_based_r1.yaml"
 
 model:
   skip_encoding_fea: -1

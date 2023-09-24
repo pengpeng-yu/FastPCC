@@ -1,4 +1,0 @@
-# include "configs/train/convolutional/lossy_coord_v2/wo_residual_r3.yaml"
-
-model:
-  bits_loss_factor: 1.4

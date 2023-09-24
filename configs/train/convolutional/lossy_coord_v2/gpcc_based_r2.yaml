@@ -1,4 +1,0 @@
-# include "configs/train/convolutional/lossy_coord_v2/gpcc_based_r1.yaml"
-
-model:
-  bits_loss_factor: 0.8

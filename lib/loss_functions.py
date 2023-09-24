@@ -1,5 +1,7 @@
 import torch
-from pytorch3d.ops.knn import knn_points
+try:
+    from pytorch3d.ops.knn import knn_points
+except ImportError: knn_points = None
 
 
 def chamfer_loss(points1: torch.Tensor, points2: torch.Tensor,

@@ -1,0 +1,5 @@
+# include "configs/convolutional/lossy_coord/hyperprior_factorized.yaml"
+
+model:
+  hyperprior: ScaleNoisyNormal
+  prior_indexes_range: [64]

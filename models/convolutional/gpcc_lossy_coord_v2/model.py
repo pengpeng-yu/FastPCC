@@ -5,9 +5,6 @@ import torch
 import torch.nn as nn
 import MinkowskiEngine as ME
 from MinkowskiEngine.MinkowskiSparseTensor import SparseTensorQuantizationMode
-try:
-    from pytorch3d.ops.knn import knn_points, knn_gather
-except ImportError: pass
 
 from lib.torch_utils import concat_loss_dicts
 from lib.data_utils import PCData
