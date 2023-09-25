@@ -171,9 +171,6 @@ class GeoLosslessEntropyModel(nn.Module):
             del fea_res_list
             self.rans_encode_with_cdf(fea_res_concat, bs)
 
-            self.rans_encode_with_cdf(
-                (bottom_fea_recon.C[:, 1:] // bottom_stride).cpu().to(torch.int32).numpy(), bs, 0)
-
             tmp_file_path = f'tmp-{torch.rand(1).item()}'
             write_ply_file(lower_fea_recon.C[:, 1:] // lower_fea_recon.tensor_stride[0], f'{tmp_file_path}.ply')
             gpcc_octree_lossless_geom_encode(
