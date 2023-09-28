@@ -1,6 +1,6 @@
 # include "configs/convolutional/lossy_coord_v2/gpcc_based_r1.yaml"
 
 model:
-  compressed_channels: [8]
+  compressed_channels: [1]
   geo_lossl_if_sample: [0, 1]
-  geo_lossl_channels: [64, 128, 8]
+  geo_lossl_channels: [64, 128, 1]

@@ -4,5 +4,5 @@ model:
   encoder_channels: [16, 64, 128]
   decoder_channels: [64, 16]
   geo_lossl_if_sample: [0, 1]
-  geo_lossl_channels: [128, 128, 8]
+  geo_lossl_channels: [128, 128, 1]
   bits_loss_factor: 1.0
