@@ -100,7 +100,7 @@ class PCGCEvaluator(Evaluator):
 
                 if self.mpeg_pcc_error_command != '':
                     write_ply_for_orig_pc = False
-                    if file_path.endswith('.ply') and pc_data.ori_resolution is not None:
+                    if file_path.endswith('.ply'):
                         if_target_has_normal = if_ply_has_vertex_normal(file_path)
                         if if_target_has_normal:
                             normal_file_path = file_path

@@ -85,20 +85,14 @@ class PCData(SampleData):
                  color: Union[torch.Tensor, List[torch.Tensor]] = None,
                  normal: Union[torch.Tensor, List[torch.Tensor]] = None,
                  class_idx: Union[int, torch.Tensor] = None,
-                 ori_resolution: Union[int, List[int]] = None,
                  resolution: Union[int, List[int]] = None,
                  file_path: Union[str, List[str]] = None,
                  batch_size: int = 0):
-        """
-        xyz is supposed to be a torch.float32 tensor in cpu
-        when initialized by a single sample.
-        """
         super(PCData, self).__init__()
         self.xyz = xyz
         self.color = color
         self.normal = normal
         self.class_idx = class_idx
-        self.ori_resolution = ori_resolution
         self.resolution = resolution
         self.file_path = file_path
         self.batch_size = batch_size
@@ -118,8 +112,9 @@ def pc_data_collate_fn(data_list: List[PCData],
                        sparse_collate: bool,
                        kd_tree_partition_max_points_num: int = 0) -> PCData:
     """
-    If sparse_collate is True, PCData.xyz will be batched
-    using ME.utils.batched_coordinates, which returns a torch.int32 tensor.
+    If sparse_collate is True, PCData.xyz will be batched to a torch.int32 tensor.
+    using ME.utils.batched_coordinates.
+    Else, PCData.xyz will be stacked as a torch.float32 tensor.
     """
     if kd_tree_partition_max_points_num > 0:
         use_kd_tree_partition = True
@@ -544,8 +539,8 @@ def normalize_coords(xyz: np.ndarray, random_crop: bool = False, random_crop_rat
             else:
                 print('Warning: bad crop')
         xyz = xyz[valid_mask]
-    xyz = (xyz - coord_min) / (coord_max - coord_min).max()
-    return xyz
+    xyz -= coord_min
+    np.divide(xyz, (coord_max - coord_min).max(), out=xyz)
 
 
 def resample_mesh_by_faces(mesh_cad, density=1.0):

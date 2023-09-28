@@ -1,14 +1,10 @@
 import os
 import pathlib
-import hashlib
 
 import numpy as np
 import torch
 import torch.utils.data
 from scipy.spatial.transform import Rotation as R
-try:
-    import MinkowskiEngine as ME
-except ImportError: pass
 
 from lib.data_utils import PCData, pc_data_collate_fn
 from lib.datasets.ModelNet.dataset_config import DatasetConfig
@@ -16,13 +12,10 @@ from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coor
 
 
 class ModelNetDataset(torch.utils.data.Dataset):
-    def __init__(self, cfg: DatasetConfig, is_training, logger, allow_cache=True):
+    def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(ModelNetDataset, self).__init__()
-        # define files list path and cache path
-        filelist_abs_path = os.path.join(cfg.root,
-                                         cfg.train_filelist_path if is_training else cfg.test_filelist_path)
-        self.cache_root = os.path.join(cfg.root, 'cache',
-                                       hashlib.new('md5', cfg.to_yaml().encode('utf-8')).hexdigest())
+        filelist_abs_path = os.path.join(
+            cfg.root, cfg.train_filelist_path if is_training else cfg.test_filelist_path)
 
         # generate files list
         if not os.path.exists(filelist_abs_path):
@@ -51,28 +44,6 @@ class ModelNetDataset(torch.utils.data.Dataset):
                 logger.info('wrong number or format of files.')
                 raise e
 
-        # check existence of cache
-        if self.data_file_format == '.off' and \
-                os.path.isfile(os.path.join(self.cache_root,
-                                            'train_all_cached' if is_training else 'test_all_cached')):
-            logger.info(f'using cache in {self.cache_root}')
-            self.file_list = [_.replace(cfg.root, self.cache_root, 1).replace('.off', '.pt')
-                              for _ in self.file_list]
-            self.use_cache = True
-            self.gen_cache = False
-        elif self.data_file_format == '.off':
-            os.makedirs(self.cache_root, exist_ok=True)
-            # log configuration
-            with open(os.path.join(self.cache_root, 'dataset_config.yaml'), 'w') as f:
-                f.write(cfg.to_yaml())
-            self.use_cache = False
-            self.gen_cache = allow_cache
-            if self.gen_cache is True:
-                logger.info(f'start caching in {self.cache_root}')
-        else:
-            self.use_cache = False
-            self.gen_cache = False
-
         # load classes indices
         if cfg.with_class:
             with open(os.path.join(cfg.root, cfg.classes_names)) as f:
@@ -87,13 +58,6 @@ class ModelNetDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         file_path = self.file_list[index]
 
-        # use cache
-        if self.use_cache is True:
-            if self.cfg.random_rotation: raise NotImplementedError
-            return torch.load(file_path)
-
-        # TODO: normals & augmentation
-
         # for modelnet40_normal_resampled
         if file_path.endswith('.txt'):
             point_cloud = np.loadtxt(file_path, dtype=np.float64, delimiter=',')
@@ -104,11 +68,10 @@ class ModelNetDataset(torch.utils.data.Dataset):
                     point_cloud = point_cloud[uniform_choice]
                 else:
                     raise NotImplementedError
+            xyz = point_cloud[:, :3]
         # for original modelnet dataset
         elif file_path.endswith('.off'):
-            if self.cfg.with_normal_channel: raise NotImplementedError
-            # mesh -> points
-            point_cloud = o3d_coords_sampled_from_triangle_mesh(
+            xyz = o3d_coords_sampled_from_triangle_mesh(
                 file_path,
                 self.cfg.input_points_num,
                 sample_method=self.cfg.mesh_sample_point_method
@@ -116,31 +79,16 @@ class ModelNetDataset(torch.utils.data.Dataset):
         else:
             raise NotImplementedError
 
-        # xyz
-        xyz = point_cloud[:, :3]
-
-        # normals
-        if self.cfg.with_normal_channel:
-            normals = point_cloud[:, 3:]
-        else:
-            normals = None
-
-        # random rotation
-        if not self.gen_cache and self.cfg.random_rotation:
-            if self.cfg.with_normal_channel: raise NotImplementedError
+        if self.cfg.random_rotation:
             xyz = R.random().apply(xyz)
 
-        xyz = normalize_coords(xyz)
+        normalize_coords(xyz)
 
-        # quantize  points: ndarray -> voxel points: torch.Tensor
         if self.cfg.resolution != 0:
             assert self.cfg.resolution > 1
-            xyz *= (self.cfg.resolution - 1)
-            xyz = np.round(xyz)
-            unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
-            xyz = xyz[unique_map]
-            if self.cfg.with_normal_channel:
-                normals = normals[unique_map]
+            xyz *= self.cfg.resolution
+            xyz = xyz.astype(np.int32)
+            xyz = np.unique(xyz, axis=0)
 
         # classes
         if self.cfg.with_class:
@@ -148,23 +96,11 @@ class ModelNetDataset(torch.utils.data.Dataset):
         else:
             cls_idx = None
 
-        # cache and return
-        return_obj = PCData(
+        return PCData(
             xyz=torch.from_numpy(xyz),
-            normal=torch.from_numpy(normals),
             class_idx=cls_idx,
-            file_path=file_path,
-            resolution=self.cfg.resolution
+            file_path=file_path
         )
-
-        if self.gen_cache is True:
-            cache_file_path = file_path.replace(self.cfg.root, self.cache_root, 1).replace('.off', '.pt')
-            os.makedirs(os.path.dirname(cache_file_path), exist_ok=True)
-            if os.path.exists(cache_file_path):
-                raise FileExistsError
-            torch.save(return_obj, cache_file_path)
-
-        return return_obj
 
     def collate_fn(self, batch):
         return pc_data_collate_fn(batch, sparse_collate=self.cfg.resolution != 0)
@@ -174,12 +110,11 @@ if __name__ == '__main__':
     config = DatasetConfig()
     config.input_points_num = 200000
     config.with_class = False
-    config.with_normal_channel = True
     config.resolution = 128
     config.root = 'datasets/modelnet40_manually_aligned'
 
     from loguru import logger
-    dataset = ModelNetDataset(config, True, logger, allow_cache=False)
+    dataset = ModelNetDataset(config, True, logger)
     dataloader = torch.utils.data.DataLoader(dataset, 16, shuffle=False, collate_fn=dataset.collate_fn)
     dataloader = iter(dataloader)
     sample: PCData = next(dataloader)

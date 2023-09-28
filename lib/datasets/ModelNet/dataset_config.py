@@ -5,7 +5,6 @@ from dataclasses import dataclass
 @dataclass
 class DatasetConfig(SimpleConfig):
     # Files list can be generated automatically when using original modelnet dataset.
-    # When using OFF files, caches are generated to accelerate __getitem__.
     root: str = 'datasets/modelnet40_normal_resampled'
     classes_names: str = 'modelnet40_shape_names.txt'
     train_filelist_path: str = 'train_list.txt'
@@ -16,7 +15,6 @@ class DatasetConfig(SimpleConfig):
 
     # works only when using txt file like modelnet40_normal_resampled
     sample_method: str = 'uniform'
-    with_normal_channel: bool = False
 
     # works when using points as model input, this is the amount of input points
     # when using voxels as model input, this is the amount of points before vocalization

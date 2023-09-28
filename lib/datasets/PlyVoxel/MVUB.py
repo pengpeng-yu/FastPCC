@@ -7,6 +7,4 @@ from typing import Tuple, Union
 @dataclass
 class Config(BaseDatasetConfig):
     root: Union[str, Tuple[str, ...]] = 'datasets/MVUB'
-
-    ori_resolution: Union[int, Tuple[int, ...]] = 512
     resolution: Union[int, Tuple[int, ...]] = 512

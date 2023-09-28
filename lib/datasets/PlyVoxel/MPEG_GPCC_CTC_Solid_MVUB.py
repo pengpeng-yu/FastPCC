@@ -14,6 +14,4 @@ class Config(BaseDatasetConfig):
         'Solid_1024.txt', 'Solid_2048.txt', 'Solid_4096.txt',
         'list.txt'
     )
-
-    ori_resolution: Union[int, Tuple[int, ...]] = (1024, 2048, 4096, 512)
     resolution: Union[int, Tuple[int, ...]] = (1024, 2048, 4096, 512)

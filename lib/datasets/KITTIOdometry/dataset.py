@@ -6,7 +6,6 @@ import numpy as np
 import open3d as o3d
 import torch
 import torch.utils.data
-import MinkowskiEngine as ME
 
 from lib.data_utils import PCData, pc_data_collate_fn, write_ply_file
 from lib.datasets.KITTIOdometry.dataset_config import DatasetConfig
@@ -88,22 +87,18 @@ class KITTIOdometry(torch.utils.data.Dataset):
         if self.gen_cache:  # TODO: provide original coords in eval
             xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
             xyz *= self.cfg.coord_scaler
-            xyz = np.round(xyz)
+            xyz = np.round(xyz).astype(np.int32)
             xyz -= xyz.min(0)
-            unique_map = ME.utils.sparse_quantize(xyz, return_maps_only=True).numpy()
-            xyz = xyz[unique_map]
+            xyz = np.unique(xyz, axis=0)
             cache_file_path = self.cached_file_list[index]
             write_ply_file(xyz, cache_file_path, self.cfg.ply_cache_dtype, make_dirs=True)
             return
         else:
             xyz = np.asarray(o3d.io.read_point_cloud(file_path).points)
-            resolution = int(np.ceil((xyz.max(0) - xyz.min(0)).max())) + 1
 
         return PCData(
             xyz=torch.from_numpy(xyz),
-            file_path=file_path,
-            ori_resolution=resolution,
-            resolution=resolution
+            file_path=file_path
         )
 
     def collate_fn(self, batch):

@@ -12,6 +12,4 @@ class Config(BaseDatasetConfig):
     filelist_path: Union[str, Tuple[str, ...]] = (
         'Solid_1024.txt', 'Solid_2048.txt', 'Solid_4096.txt'
     )
-
-    ori_resolution: Union[int, Tuple[int, ...]] = (1024, 2048, 4096)
     resolution: Union[int, Tuple[int, ...]] = (1024, 2048, 4096)
