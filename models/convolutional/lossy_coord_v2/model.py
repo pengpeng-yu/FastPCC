@@ -265,6 +265,7 @@ class PCC(nn.Module):
             compressed_bytes = bs.getvalue()
         return compressed_bytes
 
+    # TODO: move partitions to the origin.
     def compress_partitions(self, sparse_pc_partitions: Generator) -> bytes:
         compressed_bytes_list = []
         for sparse_pc in sparse_pc_partitions:

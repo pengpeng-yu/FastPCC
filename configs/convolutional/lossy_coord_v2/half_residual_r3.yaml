@@ -1,9 +1,0 @@
-# include "configs/convolutional/lossy_coord_v2/half_residual_r1.yaml"
-
-model:
-  skip_encoding_fea: -1
-  encoder_channels: [16, 64, 128]
-  decoder_channels: [64, 16]
-  geo_lossl_if_sample: [1, 1, 1, 1, 1]
-  geo_lossl_channels: [128, 128, 128, 128, 128, 1]
-  bits_loss_factor: 1.0
