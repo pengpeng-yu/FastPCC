@@ -1,6 +1,0 @@
-# include "configs/convolutional/lossy_coord/gpcc_lossl_based.yaml"
-
-model:
-  compressed_channels: 2
-  encoder_channels: [4, 16, 64]
-  decoder_channels: [16, 4]
