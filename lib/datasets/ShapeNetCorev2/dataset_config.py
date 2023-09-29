@@ -24,6 +24,7 @@ class DatasetConfig(SimpleConfig):
     ply_cache_dtype: str = '<u2'
 
     random_rotation: bool = True
+    random_offset: Union[int, Tuple[int, ...]] = 0
     kd_tree_partition_max_points_num: int = 0
 
     resolution: int = 128

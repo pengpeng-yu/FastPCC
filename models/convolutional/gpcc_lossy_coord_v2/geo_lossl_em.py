@@ -59,6 +59,8 @@ class GeoLosslessEntropyModel(nn.Module):
             bs.write(int_to_bytes(-offset, 1))
 
         pmf = np.bincount((target - offset).reshape(-1))
+        if len(pmf) == 1:
+            pmf = np.pad(pmf, (0, 1))  # dirty fix
         self.rans_coder.init_with_pmfs(pmf[None], np.array([offset], dtype=np.int32))
         cdf = self.rans_coder.get_cdfs()[0]
         bs.write(int_to_bytes(len(cdf) - 2, 1))

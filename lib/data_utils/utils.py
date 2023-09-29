@@ -437,7 +437,7 @@ def write_ply_file(
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
     if isinstance(xyz, torch.Tensor):
         xyz = xyz.cpu().numpy()
-    assert xyz.shape[1] == 3 and xyz.dtype in (np.int32, np.int64, np.float32, np.float64)
+    assert xyz.shape[1] == 3
     xyz = xyz.astype(xyz_dtype)
     rgb_dtype = np.uint8
     if isinstance(rgb, torch.Tensor):
