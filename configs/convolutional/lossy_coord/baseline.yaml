@@ -17,10 +17,11 @@ model:
 
 train:
   rundir_name: 'train_convolutional_<autoindex>'
-  amp: False
   more_reproducible: True
+  amp: False
+  find_unused_parameters: False
   batch_size: 8
-  num_workers: 2
+  num_workers: 4
   optimizer: AdamW
   momentum: 0.9
   weight_decay: 0.0001
@@ -33,20 +34,20 @@ train:
   lr_step_size: 12
   lr_step_gamma: 0.3
 
-  ckpt_frequency: 1
   resume_from_ckpt: ''
   resume_items: ['state_dict']
+  ckpt_frequency: 1
   test_frequency: 4
 
   dataset_path: 'lib.datasets.ShapeNetCorev2'
   dataset:
     train_filelist_path: 'train_list_obj.txt'
+    train_divisions: 'train'
     data_format: '.obj'
     mesh_sample_points_num: 2500000
     mesh_sample_point_method: 'uniform'
     mesh_sample_point_resolution: 256
     random_rotation: True
-
 
 test:
   batch_size: 1

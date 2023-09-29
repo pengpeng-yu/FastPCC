@@ -35,7 +35,7 @@ class PCC(nn.Module):
 
     def params_divider(self, s: str) -> int:
         if self.cfg.recurrent_part_enabled:
-            if '.em_lossless_based' in s:
+            if 'em_lossless_based' in s:
                 if 'non_shared_blocks_out_first' in s:
                     return 0
                 elif '.non_shared' in s:
