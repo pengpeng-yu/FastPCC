@@ -1,8 +1,9 @@
 import io
-from typing import List, Union, Tuple, Generator, Optional
+from typing import List, Union, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import MinkowskiEngine as ME
 from MinkowskiEngine.MinkowskiSparseTensor import SparseTensorQuantizationMode
 
@@ -119,16 +120,10 @@ class PCC(nn.Module):
 
     def forward(self, pc_data: PCData):
         if self.training:
-            sparse_pc = self.get_sparse_pc(pc_data.xyz)
-            return self.train_forward(sparse_pc, pc_data.training_step, pc_data.batch_size)
+            return self.train_forward(pc_data.xyz, pc_data.training_step, pc_data.batch_size)
         else:
             assert pc_data.batch_size == 1, 'Only supports batch size == 1 during testing.'
-            if isinstance(pc_data.xyz, torch.Tensor):
-                sparse_pc = self.get_sparse_pc(pc_data.xyz)
-                return self.test_forward(sparse_pc, pc_data)
-            else:
-                sparse_pc_partitions = self.get_sparse_pc_partitions(pc_data.xyz)
-                return self.test_partitions_forward(sparse_pc_partitions, pc_data)
+            return self.test_forward(pc_data)
 
     def set_global_cm(self):
         ME.clear_global_coordinate_manager()
@@ -164,13 +159,8 @@ class PCC(nn.Module):
             )
             return sparse_pc
 
-    def get_sparse_pc_partitions(self, xyz: List[torch.Tensor]) -> Generator:
-        # The first one is supposed to be the original coordinates.
-        for idx in range(1, len(xyz)):
-            yield self.get_sparse_pc(xyz[idx])
-
-    def train_forward(self, sparse_pc: ME.SparseTensor,
-                      training_step: int, batch_size: int):
+    def train_forward(self, batched_coord: torch.Tensor, training_step: int, batch_size: int):
+        sparse_pc = self.get_sparse_pc(batched_coord)
         feature, points_num_list = self.encoder(sparse_pc)
 
         bottleneck_feature, loss_dict = self.em_lossless_based(feature, batch_size)
@@ -207,70 +197,52 @@ class PCC(nn.Module):
                 loss_dict[key] = loss_dict[key].item()
         return loss_dict
 
-    def test_forward(self, sparse_pc: ME.SparseTensor, pc_data: PCData):
+    def test_forward(self, pc_data: PCData):
+        not_part = isinstance(pc_data.xyz, torch.Tensor)
         with Timer() as encoder_t, TorchCudaMaxMemoryAllocated() as encoder_m:
-            compressed_bytes = self.compress(sparse_pc)
-        del sparse_pc
+            compressed_bytes = self.compress(pc_data.xyz) if not_part else \
+                self.compress_partitions(pc_data.xyz)
         ME.clear_global_coordinate_manager()
         torch.cuda.empty_cache()
         with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
-            coord_recon = self.decompress(compressed_bytes)
-        ret = self.evaluator.log_batch(
-            preds=[coord_recon],
-            targets=[pc_data.xyz[:, 1:]],
-            compressed_bytes_list=[compressed_bytes],
-            pc_data=pc_data,
-            extra_info_dicts=[
-                {'encoder_elapsed_time': encoder_t.elapsed_time,
-                 'encoder_max_cuda_memory_allocated': encoder_m.max_memory_allocated,
-                 'decoder_elapsed_time': decoder_t.elapsed_time,
-                 'decoder_max_cuda_memory_allocated': decoder_m.max_memory_allocated}
-            ]
-        )
-        return ret
-
-    def test_partitions_forward(self, sparse_pc_partitions: Generator, pc_data: PCData):
-        with Timer() as encoder_t, TorchCudaMaxMemoryAllocated() as encoder_m:
-            compressed_bytes = self.compress_partitions(sparse_pc_partitions)
-        del sparse_pc_partitions
+            coord_recon = self.decompress(compressed_bytes) if not_part else \
+                self.decompress_partitions(compressed_bytes)
         ME.clear_global_coordinate_manager()
-        torch.cuda.empty_cache()
-        with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
-            coord_recon = self.decompress_partitions(compressed_bytes)
         ret = self.evaluator.log_batch(
             preds=[coord_recon],
-            targets=[pc_data.xyz[0]],
+            targets=[pc_data.xyz[:, 1:] if not_part else pc_data.xyz[0]],
             compressed_bytes_list=[compressed_bytes],
             pc_data=pc_data,
-            extra_info_dicts=[
-                {'encoder_elapsed_time': encoder_t.elapsed_time,
-                 'encoder_max_cuda_memory_allocated': encoder_m.max_memory_allocated,
-                 'decoder_elapsed_time': decoder_t.elapsed_time,
-                 'decoder_max_cuda_memory_allocated': decoder_m.max_memory_allocated}
-            ]
+            extra_info_dicts=[{
+                'encode time': encoder_t.elapsed_time,
+                'encode memory': encoder_m.max_memory_allocated_kb,
+                'decode time': decoder_t.elapsed_time,
+                'decode memory': decoder_m.max_memory_allocated_kb}]
         )
         return ret
 
-    def compress(self, sparse_pc: ME.SparseTensor) -> bytes:
+    def compress(self, batched_coord: torch.Tensor) -> bytes:
+        coord_offset = batched_coord[:, 1:].amin(0)
+        sparse_pc = self.get_sparse_pc(batched_coord - F.pad(coord_offset, (1, 0)))
         feature, points_num_list = self.encoder(sparse_pc)
         em_bytes = self.em_lossless_based.compress(feature, 1)
 
         with io.BytesIO() as bs:
+            for _ in coord_offset.tolist():
+                bs.write(_.to_bytes(2, 'little', signed=False))
             if self.cfg.adaptive_pruning:
                 bs.write(b''.join(
-                    (_[0].to_bytes(3, 'little', signed=False) for _ in
-                     points_num_list)
+                    (_[0].to_bytes(3, 'little', signed=False) for _ in points_num_list)
                 ))
             bs.write(em_bytes)
             compressed_bytes = bs.getvalue()
         return compressed_bytes
 
-    # TODO: move partitions to the origin.
-    def compress_partitions(self, sparse_pc_partitions: Generator) -> bytes:
+    def compress_partitions(self, batched_coord: List[torch.Tensor]) -> bytes:
         compressed_bytes_list = []
-        for sparse_pc in sparse_pc_partitions:
-            compressed_bytes = self.compress(sparse_pc)
-            ME.clear_global_coordinate_manager()
+        for idx in range(1, len(batched_coord)):
+            # The first one is supposed to be the original coordinates.
+            compressed_bytes = self.compress(batched_coord[idx])
             compressed_bytes_list.append(compressed_bytes)
 
         concat_bytes = b''.join((len(s).to_bytes(3, 'little', signed=False) + s
@@ -279,6 +251,9 @@ class PCC(nn.Module):
 
     def decompress(self, compressed_bytes: bytes) -> torch.Tensor:
         with io.BytesIO(compressed_bytes) as bs:
+            coord_offset = []
+            for _ in range(3):
+                coord_offset.append(int.from_bytes(bs.read(2), 'little', signed=False))
             if self.cfg.adaptive_pruning:
                 points_num_list = []
                 for idx in range(len(self.encoder.blocks) - 1):
@@ -287,16 +262,14 @@ class PCC(nn.Module):
                 points_num_list = None
             em_bytes = bs.read()
 
-        fea_recon = self.em_lossless_based.decompress(
-            em_bytes, self.set_global_cm())
+        fea_recon = self.em_lossless_based.decompress(em_bytes, self.set_global_cm())
 
         decoder_fea = self.decoder(fea_recon, points_num_list)
         coord_recon = decoder_fea.C[:, 1:]
-
+        coord_recon += torch.tensor(coord_offset, dtype=torch.int32, device=coord_recon.device)
         return coord_recon
 
-    def decompress_partitions(self, concat_bytes: bytes
-                              ) -> torch.Tensor:
+    def decompress_partitions(self, concat_bytes: bytes) -> torch.Tensor:
         coord_recon_list = []
         concat_bytes_len = len(concat_bytes)
 
@@ -305,7 +278,6 @@ class PCC(nn.Module):
                 length = int.from_bytes(bs.read(3), 'little', signed=False)
                 coord_recon = self.decompress(bs.read(length))
                 coord_recon_list.append(coord_recon)
-                ME.clear_global_coordinate_manager()
 
         coord_recon_concat = torch.cat(coord_recon_list, 0)
         return coord_recon_concat

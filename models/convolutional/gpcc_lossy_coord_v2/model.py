@@ -111,13 +111,11 @@ class PCC(nn.Module):
 
     def forward(self, pc_data: PCData):
         if self.training:
-            sparse_pc = self.get_sparse_pc(pc_data.xyz)
-            return self.train_forward(sparse_pc, pc_data.training_step, pc_data.batch_size)
+            return self.train_forward(pc_data.xyz, pc_data.training_step, pc_data.batch_size)
         else:
             assert pc_data.batch_size == 1, 'Only supports batch size == 1 during testing.'
             if isinstance(pc_data.xyz, torch.Tensor):
-                sparse_pc = self.get_sparse_pc(pc_data.xyz)
-                return self.test_forward(sparse_pc, pc_data)
+                return self.test_forward(pc_data)
             else:
                 raise NotImplementedError
 
@@ -155,8 +153,8 @@ class PCC(nn.Module):
             )
             return sparse_pc
 
-    def train_forward(self, sparse_pc: ME.SparseTensor,
-                      training_step: int, batch_size: int):
+    def train_forward(self, batched_coord: torch.Tensor, training_step: int, batch_size: int):
+        sparse_pc = self.get_sparse_pc(batched_coord)
         feature, points_num_list = self.encoder(sparse_pc)
 
         bottleneck_feature, loss_dict = self.em_lossless_based(feature, batch_size)
@@ -193,8 +191,8 @@ class PCC(nn.Module):
                 loss_dict[key] = loss_dict[key].item()
         return loss_dict
 
-    def test_forward(self, sparse_pc: ME.SparseTensor, pc_data: PCData):
-        feature, points_num_list = self.encoder(sparse_pc)
+    def test_forward(self, pc_data: PCData):
+        feature, points_num_list = self.encoder(self.get_sparse_pc(pc_data.xyz))
         feature_recon, em_bytes = self.em_lossless_based(feature, 1)
         decoder_fea = self.decoder(feature_recon, points_num_list)
         coord_recon = decoder_fea.C[:, 1:]
@@ -202,8 +200,7 @@ class PCC(nn.Module):
         with io.BytesIO() as bs:
             if self.cfg.adaptive_pruning:
                 bs.write(b''.join(
-                    (_[0].to_bytes(3, 'little', signed=False) for _ in
-                     points_num_list)
+                    (_[0].to_bytes(3, 'little', signed=False) for _ in points_num_list)
                 ))
             bs.write(em_bytes)
             compressed_bytes = bs.getvalue()

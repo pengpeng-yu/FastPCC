@@ -442,7 +442,7 @@ class TorchCudaMaxMemoryAllocated:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.max_memory_allocated = torch.cuda.max_memory_allocated(device=None)
+        self.max_memory_allocated_kb = torch.cuda.max_memory_allocated(device=None) / 1024
         return False
 
 
