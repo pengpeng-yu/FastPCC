@@ -369,6 +369,7 @@ class PCC(nn.Module):
             assert bottom_fea_recon.C.shape[0] == 1
             sparse_tensor_coords_stride = bottom_fea_recon.tensor_stride[0]
             sparse_tensor_coords = bottom_fea_recon.C
+            assert torch.all(sparse_tensor_coords == 0)
         else:
             em_bytes_list, coding_batch_shape, fea_recon = self.em.compress(feature)
             assert coding_batch_shape == torch.Size([1])
@@ -376,7 +377,7 @@ class PCC(nn.Module):
             sparse_tensor_coords = feature.C
             sparse_tensor_coords_stride = feature.tensor_stride[0]
 
-        if sparse_tensor_coords.shape[0] != 1:
+        if not self.cfg.recurrent_part_enabled:
             tmp_file_path = f'tmp-{torch.rand(1).item()}'
             write_ply_file(sparse_tensor_coords[:, 1:] // sparse_tensor_coords_stride, f'{tmp_file_path}.ply')
             gpcc_octree_lossless_geom_encode(
@@ -389,11 +390,6 @@ class PCC(nn.Module):
             os.remove(f'{tmp_file_path}.bin')
             em_bytes = len(sparse_tensor_coords_bytes).to_bytes(3, 'little', signed=False) + \
                 sparse_tensor_coords_bytes + em_bytes
-        else:
-            em_bytes = b''.join(
-                [_.to_bytes(1, 'little', signed=False)
-                 for _ in (sparse_tensor_coords[0, 1:] // sparse_tensor_coords_stride).tolist()]
-            ) + em_bytes
         
         with io.BytesIO() as bs:
             for _ in coord_offset.tolist():
@@ -435,9 +431,7 @@ class PCC(nn.Module):
             else:
                 points_num_list = None
             tensor_stride = 2 ** int.from_bytes(bs.read(1), 'little', signed=False)
-            if self.cfg.recurrent_part_enabled:
-                sparse_tensor_coords_bytes = bs.read(3)
-            else:
+            if not self.cfg.recurrent_part_enabled:
                 sparse_tensor_coords_bytes_len = int.from_bytes(bs.read(3), 'little', signed=False)
                 sparse_tensor_coords_bytes = bs.read(sparse_tensor_coords_bytes_len)
                 tmp_file_path = f'tmp-{torch.rand(1).item()}'

@@ -21,7 +21,7 @@ class BytesListUtils:
 
         head_bytes = int(
             '1' + ''.join((format(_ - 1, f'0{head_bits_num}b') for _ in bytes_len_bytes_len_list)), 2
-        ).to_bytes(math.ceil(len(bytes_list) / (8 // head_bits_num) + 0.25), 'little', signed=False)
+        ).to_bytes(math.ceil(len(bytes_list) / (8 // head_bits_num) + 0.25), 'big', signed=False)
         if head_bits_num == 2:
             head_bytes = bytes([head_bytes[0] | 0x80]) + head_bytes[1:]
 
@@ -54,7 +54,7 @@ class BytesListUtils:
         first_byte = bs_io.read(1)[0]
         head_bits_num = 2 if bool(first_byte & 0x80) else 1
         head_bytes_len = math.ceil(bytes_list_len / (8 // head_bits_num) + 0.25)
-        head_bits = f"{int.from_bytes(bytes([first_byte & 0x7f]) + bs_io.read(head_bytes_len - 1), 'little'):b}"[1:]
+        head_bits = f"{int.from_bytes(bytes([first_byte & 0x7f]) + bs_io.read(head_bytes_len - 1), 'big'):b}"[1:]
 
         bytes_len_bytes_len_list = []
         for idx in range(0, bytes_list_len * head_bits_num, head_bits_num):
