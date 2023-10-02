@@ -1,4 +1,4 @@
-import os
+import os.path as osp
 import pathlib
 
 import numpy as np
@@ -15,11 +15,11 @@ from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coor
 class ModelNetDataset(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(ModelNetDataset, self).__init__()
-        filelist_abs_path = os.path.join(
+        filelist_abs_path = osp.join(
             cfg.root, cfg.train_filelist_path if is_training else cfg.test_filelist_path)
 
         # generate files list
-        if not os.path.exists(filelist_abs_path):
+        if not osp.exists(filelist_abs_path):
             logger.info('no filelist is given. Trying to generate...')
             if is_training:
                 file_list = pathlib.Path(cfg.root).glob('*/train/*.off')
@@ -31,14 +31,14 @@ class ModelNetDataset(torch.utils.data.Dataset):
         # load files list
         logger.info(f'using filelist: "{filelist_abs_path}"')
         with open(filelist_abs_path) as f:
-            self.file_list = [os.path.join(cfg.root, f.readline().strip())]
-            self.data_file_format = os.path.splitext(self.file_list[0])[1]
+            self.file_list = [osp.join(cfg.root, f.readline().strip())]
+            self.data_file_format = osp.splitext(self.file_list[0])[1]
             try:
                 assert self.data_file_format in ['.off', '.txt']
                 for line in f:
                     line = line.strip()
-                    assert os.path.splitext(line)[1] == self.data_file_format
-                    self.file_list.append(os.path.join(cfg.root, line))
+                    assert osp.splitext(line)[1] == self.data_file_format
+                    self.file_list.append(osp.join(cfg.root, line))
                 if is_training: assert len(self.file_list) == 9843
                 else: assert len(self.file_list) == 2468
             except AssertionError as e:
@@ -47,7 +47,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
 
         # load classes indices
         if cfg.with_class:
-            with open(os.path.join(cfg.root, cfg.classes_names)) as f:
+            with open(osp.join(cfg.root, cfg.classes_names)) as f:
                 classes_names = f.readlines()
             self.classes_idx = {l.strip(): cls_idx for cls_idx, l in enumerate(classes_names)}
 
@@ -92,7 +92,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
 
         # classes
         if self.cfg.with_class:
-            cls_idx = self.classes_idx[os.path.split(self.file_list[index])[1].rsplit('_', 1)[0]]
+            cls_idx = self.classes_idx[osp.split(self.file_list[index])[1].rsplit('_', 1)[0]]
         else:
             cls_idx = None
 

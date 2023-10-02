@@ -10,7 +10,7 @@ class DatasetConfig(SimpleConfig):
     shapenet_all_csv: str = 'all.csv'
     train_filelist_path: str = 'all_list_obj.txt'
     test_filelist_path: str = 'test_list_obj.txt'
-    train_divisions: Union[str, Tuple[str, ...]] = ('train', 'val', 'test')
+    train_divisions: Union[str, Tuple[str, ...]] = 'all'
     test_divisions: Union[str, Tuple[str, ...]] = 'test'
     generate_cache: bool = True
 

@@ -2,6 +2,7 @@ import json
 from collections import defaultdict
 from typing import List, Union, Dict
 import os
+import os.path as osp
 import multiprocessing as mp
 
 try:
@@ -78,10 +79,10 @@ class PCGCEvaluator(Evaluator):
             bpp = len(compressed_bytes) * 8 / target.shape[0]
 
             if pc_data.results_dir is not None:
-                out_file_path = os.path.join(
-                    pc_data.results_dir, os.path.splitext(file_path)[0]
+                out_file_path = osp.join(
+                    pc_data.results_dir, osp.splitext(file_path)[0]
                 )
-                os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
+                os.makedirs(osp.dirname(out_file_path), exist_ok=True)
                 compressed_path = out_file_path + '.bin'
                 reconstructed_path = out_file_path + '_recon.ply'
                 with open(compressed_path, 'wb') as f:
@@ -105,8 +106,8 @@ class PCGCEvaluator(Evaluator):
                         if if_target_has_normal:
                             normal_file_path = file_path
                         else:
-                            normal_file_path = os.path.splitext(file_path)[0] + '_n.ply'
-                            if not os.path.isfile(normal_file_path):
+                            normal_file_path = osp.splitext(file_path)[0] + '_n.ply'
+                            if not osp.isfile(normal_file_path):
                                 normal_file_path = out_file_path + '.ply'
                                 write_ply_for_orig_pc = True
                     else:
@@ -122,8 +123,8 @@ class PCGCEvaluator(Evaluator):
                         normal_file_path = file_path
                     self.file_path_to_info_run_res[file_path] = self.mpeg_pcc_error_pool.apply_async(
                         mpeg_pc_error,
-                        (os.path.abspath(file_path),
-                         os.path.abspath(reconstructed_path),
+                        (osp.abspath(file_path),
+                         osp.abspath(reconstructed_path),
                          resolution, normal_file_path, False, have_color,
                          1, self.mpeg_pcc_error_command)
                     )
@@ -138,14 +139,14 @@ class PCGCEvaluator(Evaluator):
             mpeg_pc_error_dict = run_res.get()
             assert mpeg_pc_error_dict != {}, \
                 f'Error when calling mpeg pc error software with ' \
-                f'infile1={os.path.abspath(file_path)} '
+                f'infile1={osp.abspath(file_path)} '
             self.file_path_to_info[file_path].update(mpeg_pc_error_dict)
             self.file_path_to_info[file_path]["mse1+mse2 (p2point)"] = \
                 mpeg_pc_error_dict["mse1      (p2point)"] + \
                 mpeg_pc_error_dict["mse2      (p2point)"]
 
         if results_dir is not None:
-            with open(os.path.join(results_dir, 'metric.txt'), 'w') as f:
+            with open(osp.join(results_dir, 'metric.txt'), 'w') as f:
                 f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
 
         mean_dict = defaultdict(float)
@@ -165,7 +166,7 @@ class PCGCEvaluator(Evaluator):
         mean_dict = {k: v for k, v in mean_dict.items() if count_dist[k] == samples_num}
         mean_dict['samples_num'] = samples_num
         if results_dir is not None:
-            with open(os.path.join(results_dir, 'mean_metric.txt'), 'w') as f:
+            with open(osp.join(results_dir, 'mean_metric.txt'), 'w') as f:
                 f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
         return mean_dict
 
@@ -202,8 +203,8 @@ class ImageCompressionEvaluator(Evaluator):
         for idx in range(len(batch_psnr)):
             psnr = batch_psnr[idx].item()
             if results_dir is not None:
-                out_file_path = os.path.join(results_dir, file_paths[idx])
-                os.makedirs(os.path.dirname(out_file_path), exist_ok=True)
+                out_file_path = osp.join(results_dir, file_paths[idx])
+                os.makedirs(osp.dirname(out_file_path), exist_ok=True)
                 cv2.imwrite(out_file_path, batch_im_recon[idx])
             self.file_path_to_info[file_paths[idx]] = \
                 {
@@ -214,7 +215,7 @@ class ImageCompressionEvaluator(Evaluator):
 
     def show(self, results_dir: str) -> Dict[str, Union[int, float]]:
         if results_dir is not None:
-            with open(os.path.join(results_dir, 'test_metric.txt'), 'w') as f:
+            with open(osp.join(results_dir, 'test_metric.txt'), 'w') as f:
                 f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
 
         mean_dict = defaultdict(float)
@@ -225,6 +226,6 @@ class ImageCompressionEvaluator(Evaluator):
         for key in mean_dict:
             mean_dict[key] /= samples_num
         if results_dir is not None:
-            with open(os.path.join(results_dir, 'mean.txt'), 'w') as f:
+            with open(osp.join(results_dir, 'mean.txt'), 'w') as f:
                 f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
         return mean_dict

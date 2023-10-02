@@ -1,4 +1,4 @@
-import os
+import os.path as osp
 import subprocess
 
 
@@ -21,7 +21,7 @@ def gpcc_octree_lossless_geom_encode(in_path, out_path, command='tmc3'):
         cmd_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         shell=True, check=True, text=True
     )
-    if not os.path.isfile(out_path):
+    if not osp.isfile(out_path):
         raise RuntimeError(subp_stdout)
 
 
@@ -35,5 +35,5 @@ def gpcc_decode(in_path, out_path, command='tmc3'):
         cmd_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         shell=True, check=True, text=True
     )
-    if not os.path.isfile(out_path):
+    if not osp.isfile(out_path):
         raise RuntimeError(subp_stdout)

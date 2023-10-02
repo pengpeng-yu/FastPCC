@@ -1,5 +1,6 @@
 import math
 import os
+import os.path as osp
 from collections import defaultdict
 from typing import Tuple, List, Optional, Union, Dict, Callable
 
@@ -26,6 +27,12 @@ class SampleData:
         for key, value in self.__dict__.items():
             if isinstance(value, torch.Tensor):
                 self.__dict__[key] = value.to(device, non_blocking=non_blocking)
+
+    def pin_memory(self):
+        for key, value in self.__dict__.items():
+            if isinstance(value, torch.Tensor):
+                self.__dict__[key] = value.pin_memory()
+        return self
 
 
 class IMData(SampleData):
@@ -104,8 +111,16 @@ class PCData(SampleData):
             if isinstance(value, List):
                 # Ignore the first value of partitions lists.
                 for idx, v in enumerate(value[1:]):
-                    assert isinstance(v, torch.Tensor)
                     value[idx + 1] = v.to(device, non_blocking=non_blocking)
+
+    def pin_memory(self):
+        super(PCData, self).pin_memory()
+        for key in ('xyz', *self.tensor_to_tensor_items):
+            value = self.__dict__[key]
+            if isinstance(value, List):
+                for idx, v in enumerate(value[1:]):
+                    value[idx + 1] = v.pin_memory()
+        return self
 
 
 def pc_data_collate_fn(data_list: List[PCData],
@@ -434,7 +449,7 @@ def write_ply_file(
         make_dirs: bool = False,
         estimate_normals: bool = False) -> None:
     if make_dirs:
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        os.makedirs(osp.dirname(file_path), exist_ok=True)
     if isinstance(xyz, torch.Tensor):
         xyz = xyz.cpu().numpy()
     assert xyz.shape[1] == 3
@@ -523,22 +538,9 @@ def o3d_coords_sampled_from_triangle_mesh(
     return coord, color
 
 
-def normalize_coords(xyz: np.ndarray, random_crop: bool = False, random_crop_ratio: float = 0.5):
+def normalize_coords(xyz: np.ndarray):
     coord_max = xyz.max(axis=0, keepdims=True)
     coord_min = xyz.min(axis=0, keepdims=True)
-    if random_crop is True:
-        assert 0 < random_crop_ratio < 1
-        box_size = (coord_max - coord_min) * random_crop_ratio
-        origin_range = coord_max - box_size - coord_min
-        while True:
-            coord_min = np.random.rand(3) * origin_range + coord_min
-            coord_max = coord_min + box_size
-            valid_mask = ((xyz >= coord_min) & (xyz <= coord_max)).sum(1) == 3
-            if np.any(valid_mask):
-                break
-            else:
-                print('Warning: bad crop')
-        xyz = xyz[valid_mask]
     xyz -= coord_min
     np.divide(xyz, (coord_max - coord_min).max(), out=xyz)
 

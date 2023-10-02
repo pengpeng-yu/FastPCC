@@ -1,4 +1,5 @@
 import os
+import os.path as osp
 import re
 import datetime
 import time
@@ -7,7 +8,7 @@ import numpy as np
 
 
 def make_new_dirs(dir_path, logger):
-    if os.path.exists(dir_path):
+    if osp.exists(dir_path):
         logger.warning('folder "{}" ready exists.'.format(dir_path))
         target_path = autoindex_obj(str(dir_path) + '_bak<autoindex>')
         os.rename(dir_path, target_path)
@@ -17,13 +18,13 @@ def make_new_dirs(dir_path, logger):
 
 
 def autoindex_obj(obj_path: str) -> str:
-    dir_path, obj_name = os.path.split(os.path.abspath(obj_path))
+    dir_path, obj_name = osp.split(osp.abspath(obj_path))
     notations = {
         '<maxindex>': lambda x: max(x + [0]),
         '<minindex>': lambda x: min(x + [0]),
         '<autoindex>': lambda x: max(x + [-1]) + 1,
     }
-    if not os.path.exists(dir_path):
+    if not osp.exists(dir_path):
         for notation in notations:
             obj_path = obj_path.replace(notation, '0')
         return obj_path

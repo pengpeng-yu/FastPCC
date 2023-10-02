@@ -1,4 +1,4 @@
-import os
+import os.path as osp
 import pathlib
 
 import numpy as np
@@ -25,9 +25,9 @@ class ImageFolder(torch.utils.data.Dataset):
 
         # define files list path
         for root, filelist_path, file_path_pattern in zip(roots, filelist_paths, file_path_patterns):
-            filelist_abs_path = os.path.join(root, filelist_path)
+            filelist_abs_path = osp.join(root, filelist_path)
             # generate files list
-            if not os.path.exists(filelist_abs_path):
+            if not osp.exists(filelist_abs_path):
                 logger.info(f'no filelist of {root} is given. Trying to generate using {file_path_pattern}...')
                 file_list = pathlib.Path(root).glob(file_path_pattern)
                 with open(filelist_abs_path, 'w') as f:
@@ -36,12 +36,12 @@ class ImageFolder(torch.utils.data.Dataset):
         # load files list
         self.file_list = []
         for root, filelist_path in zip(roots, filelist_paths):
-            filelist_abs_path = os.path.join(root, filelist_path)
+            filelist_abs_path = osp.join(root, filelist_path)
             logger.info(f'using filelist: "{filelist_abs_path}"')
             with open(filelist_abs_path) as f:
                 for line in f:
                     line = line.strip()
-                    self.file_list.append(os.path.join(root, line))
+                    self.file_list.append(osp.join(root, line))
 
         self.cfg = cfg
 

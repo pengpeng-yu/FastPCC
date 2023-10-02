@@ -1,4 +1,5 @@
 import os
+import os.path as osp
 from typing import List
 
 import numpy as np
@@ -29,14 +30,14 @@ def _bin_test(BinCoder):
 
 
 def _load_and_test():
-    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    current_file_dir = osp.dirname(osp.abspath(__file__))
     print(current_file_dir)
-    build_directory = os.path.join(current_file_dir, 'build')
+    build_directory = osp.join(current_file_dir, 'build')
     os.makedirs(build_directory, exist_ok=True)
     rans_ext_cpp = load(
         name='rans_ext_cpp',
         extra_include_paths=[current_file_dir],
-        sources=[os.path.join(
+        sources=[osp.join(
             current_file_dir, 'rans_coder_wrapper.cpp'
         )],
         extra_cflags=['-fopenmp', '-Wall', '-Wextra', '-Wconversion', '-O3'],

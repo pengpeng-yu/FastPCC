@@ -1,4 +1,5 @@
 import os
+import os.path as osp
 import sys
 import pathlib
 import importlib
@@ -21,7 +22,7 @@ def main():
     cfg.check()
 
     os.makedirs('runs', exist_ok=True)
-    run_dir = pathlib.Path(autoindex_obj(os.path.join('runs', cfg.test.rundir_name)))
+    run_dir = pathlib.Path(autoindex_obj(osp.join('runs', cfg.test.rundir_name)))
     os.makedirs(run_dir, exist_ok=False)
     with open(run_dir / 'config.yaml', 'w') as f:
         f.write(cfg.to_yaml())
@@ -45,7 +46,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
     except Exception as e:
         raise ImportError(*e.args)
 
-    results_dir = os.path.join(run_dir, 'results') if cfg.test.save_results else None
+    results_dir = osp.join(run_dir, 'results') if cfg.test.save_results else None
     if results_dir is not None:
         os.makedirs(results_dir, exist_ok=True)
 
@@ -59,7 +60,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         )
         for _ in tqdm(datacache_loader):
             pass
-        with open(os.path.join(dataset.cache_root, 'test_all_cached'), 'w') as f:
+        with open(osp.join(dataset.cache_root, 'test_all_cached'), 'w') as f:
             pass
         logger.info('finish caching')
         # rebuild dataset to use cache

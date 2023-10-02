@@ -1,4 +1,5 @@
 import os
+import os.path as osp
 import shutil
 import sys
 import importlib
@@ -51,7 +52,7 @@ def main():
                         ' <level>{message}</level>'
         logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
         os.makedirs('runs', exist_ok=True)
-        run_dir = pathlib.Path(autoindex_obj(os.path.join('runs', cfg.train.rundir_name)))
+        run_dir = pathlib.Path(autoindex_obj(osp.join('runs', cfg.train.rundir_name)))
         ckpts_dir = run_dir / 'ckpts'
         make_new_dirs(run_dir, logger)
         make_new_dirs(ckpts_dir, logger)
@@ -82,7 +83,7 @@ def main():
                 if port_available: break
                 tb_port += 1
             tb_proc = subprocess.Popen(
-                [os.path.join(os.path.split(sys.executable)[0], 'tensorboard'),
+                [osp.join(osp.split(sys.executable)[0], 'tensorboard'),
                  f'--port={tb_port}', '--logdir', str(tb_logdir)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -208,7 +209,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             pass
         if isinstance(model, DDP):
             dist.barrier()
-        with open(os.path.join(dataset.cache_root, 'train_all_cached'), 'w') as f:
+        with open(osp.join(dataset.cache_root, 'train_all_cached'), 'w') as f:
             pass
         logger.info('finish caching')
         # rebuild dataset to use cache

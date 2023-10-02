@@ -1,4 +1,6 @@
 import os
+import os.path as osp
+from glob import glob
 import hashlib
 
 import numpy as np
@@ -32,34 +34,39 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         # define files list path and cache path
         if is_training:
-            filelist_abs_path = os.path.join(cfg.root, cfg.train_filelist_path)
+            filelist_abs_path = osp.join(cfg.root, cfg.train_filelist_path)
             official_divisions = cfg.train_divisions
         else:
-            filelist_abs_path = os.path.join(cfg.root, cfg.test_filelist_path)
+            filelist_abs_path = osp.join(cfg.root, cfg.test_filelist_path)
             official_divisions = cfg.test_divisions
         if isinstance(official_divisions, str):
             official_divisions = (official_divisions,)
 
         # generate files list
-        if not os.path.exists(filelist_abs_path):
+        if not osp.exists(filelist_abs_path):
             logger.info('no filelist is given. Trying to generate...')
-            file_list = []
-            with open(os.path.join(cfg.root, cfg.shapenet_all_csv)) as f:
-                f.readline()
-                for line in f:
-                    _, synset_id, _, model_id, split = line.strip().split(',')
-                    file_paths = [
-                        os.path.join(synset_id, model_id, 'models', 'model_normalized' + d_format)
-                        for d_format in data_format
-                        if model_id != '7edb40d76dff7455c2ff7551a4114669'
-                        # 7edb40d76dff7455c2ff7551a4114669 seems to be problematic
-                    ]
-                    for file_path in file_paths:
-                        if os.path.exists(os.path.join(cfg.root, file_path)):
-                            if split in official_divisions:
-                                file_list.append(file_path)
+            if 'all' not in official_divisions:
+                file_list = []
+                with open(osp.join(cfg.root, cfg.shapenet_all_csv)) as f:
+                    f.readline()
+                    for line in f:
+                        _, synset_id, _, model_id, split = line.strip().split(',')
+                        file_paths = [
+                            osp.join(synset_id, model_id, 'models', 'model_normalized' + d_format)
+                            for d_format in data_format]
+                        for file_path in file_paths:
+                            if osp.exists(osp.join(cfg.root, file_path)):
+                                if split in official_divisions:
+                                    file_list.append(file_path)
+            else:
+                file_list = (_[len(cfg.root)+1:] for _ in glob(f'{cfg.root}/*/*/*/*.obj'))
             with open(filelist_abs_path, 'w') as f:
-                f.writelines((_ + '\n' for _ in file_list))
+                for _ in file_list:
+                    # 7edb40d76dff7455c2ff7551a4114669 seems to be problematic
+                    if osp.split(osp.split(_)[0])[0].endswith('7edb40d76dff7455c2ff7551a4114669'):
+                        continue
+                    f.write(_)
+                    f.write('\n')
 
         # load files list
         self.file_list = []
@@ -67,11 +74,11 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         with open(filelist_abs_path) as f:
             for line in f:
                 line = line.strip()
-                ext_name = '.' + '.'.join(os.path.split(line)[1].rsplit('.', 2)[1:])
+                ext_name = '.' + '.'.join(osp.split(line)[1].rsplit('.', 2)[1:])
                 assert ext_name == cfg.data_format or ext_name in cfg.data_format, \
                     f'"{line}" in "{filelist_abs_path}" is inconsistent with ' \
                     f'data format "{cfg.data_format}" in config'
-                self.file_list.append(os.path.join(cfg.root, line))
+                self.file_list.append(osp.join(cfg.root, line))
 
         try:
             if cfg.data_format == '.surface.binvox':
@@ -90,7 +97,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             raise e
 
         if cfg.data_format == '.obj' and cfg.generate_cache:
-            self.cache_root = os.path.join(
+            self.cache_root = osp.join(
                 cfg.root, 'cache',
                 hashlib.new(
                     'md5',
@@ -104,7 +111,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             self.cached_file_list = [
                 _.replace(cfg.root, self.cache_root, 1).replace('.obj', '.ply', 1)
                 for _ in self.file_list]
-            if os.path.isfile(os.path.join(
+            if osp.isfile(osp.join(
                 self.cache_root,
                 'train_all_cached' if is_training else 'test_all_cached'
             )):
@@ -115,7 +122,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 self.gen_cache = False
             else:
                 os.makedirs(self.cache_root, exist_ok=True)
-                with open(os.path.join(self.cache_root, 'dataset_config.yaml'), 'w') as f:
+                with open(osp.join(self.cache_root, 'dataset_config.yaml'), 'w') as f:
                     f.write(cfg.to_yaml())
                 self.use_cache = False
                 self.gen_cache = True

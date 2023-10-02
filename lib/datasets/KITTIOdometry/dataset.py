@@ -1,4 +1,5 @@
 import os
+import os.path as osp
 from glob import glob
 import hashlib
 
@@ -20,16 +21,16 @@ class KITTIOdometry(torch.utils.data.Dataset):
         self.logger = logger
 
         if is_training:
-            filelist_abs_path = os.path.join(cfg.root, cfg.train_filelist_path)
+            filelist_abs_path = osp.join(cfg.root, cfg.train_filelist_path)
         else:
-            filelist_abs_path = os.path.join(cfg.root, cfg.test_filelist_path)
+            filelist_abs_path = osp.join(cfg.root, cfg.test_filelist_path)
 
-        if not os.path.exists(filelist_abs_path):
+        if not osp.exists(filelist_abs_path):
             self.file_list = self.gen_filelist(filelist_abs_path)
         else:
             self.file_list = self.load_filelist(filelist_abs_path)
 
-        self.cache_root = os.path.join(
+        self.cache_root = osp.join(
             cfg.root, 'cache',
             hashlib.new(
                 'md5',
@@ -41,7 +42,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
             _.replace(cfg.root, self.cache_root, 1).replace('.bin', '.ply', 1)
             for _ in self.file_list]
 
-        if os.path.isfile(os.path.join(
+        if osp.isfile(osp.join(
             self.cache_root,
             'train_all_cached' if is_training else 'test_all_cached'
         )):
@@ -52,7 +53,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
             self.gen_cache = False
         else:
             os.makedirs(self.cache_root, exist_ok=True)
-            with open(os.path.join(self.cache_root, 'dataset_config.yaml'), 'w') as f:
+            with open(osp.join(self.cache_root, 'dataset_config.yaml'), 'w') as f:
                 f.write(cfg.to_yaml())
             self.use_cache = False
             self.gen_cache = True
@@ -78,7 +79,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
 
     @staticmethod
     def get_subset(root, index):
-        return glob(os.path.join(root, f'{index:02d}/velodyne/*.bin'))
+        return glob(osp.join(root, f'{index:02d}/velodyne/*.bin'))
 
     def __len__(self):
         return len(self.file_list)
@@ -88,7 +89,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
         if self.gen_cache:  # TODO: provide original coords in eval
             xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
             xyz *= self.cfg.coord_scaler
-            xyz = np.round(xyz)
+            xyz.round(out=xyz)
             xyz -= xyz.min(0)
             xyz = ME.utils.sparse_quantize(xyz).numpy()
             cache_file_path = self.cached_file_list[index]

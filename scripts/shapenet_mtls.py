@@ -1,4 +1,5 @@
 import os
+import os.path as osp
 import pathlib
 import imghdr
 from tqdm import tqdm
@@ -17,7 +18,7 @@ def rename():
 def recover():
     mtl_paths = shapenet_root.glob('*/*/models/model_normalized.mtl.bak')
     for mtl_path in tqdm(mtl_paths):
-        assert os.path.isfile(mtl_path)
+        assert osp.isfile(mtl_path)
         ori_mtl_path = str(mtl_path)[:-4]
         os.remove(ori_mtl_path)
         os.rename(mtl_path, str(mtl_path)[:-4])
@@ -27,7 +28,7 @@ def fix_ext():
     img_paths = shapenet_root.glob('*/*/images/*.*')
     for img_path in tqdm(img_paths):
         img_format = imghdr.what(img_path)
-        img_base_path, img_ext = os.path.splitext(img_path)
+        img_base_path, img_ext = osp.splitext(img_path)
         img_ext = img_ext[1:]
         if img_ext == 'jpg': img_ext = 'jpeg'
         if not img_ext == img_format:
