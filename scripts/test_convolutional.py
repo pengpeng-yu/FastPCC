@@ -1,7 +1,6 @@
 import shutil
 import os
 import os.path as osp
-from typing import Tuple, Dict, Callable, Union
 from glob import glob
 import subprocess
 import json
@@ -11,41 +10,22 @@ from scripts.shared_config import conda_prefix, metric_dict_filename, environ_CX
 
 
 os.environ['CXX'] = environ_CXX
-conda_env_name = 'py37torch110'
-glob_weights_paths = [
-    'weights/convolutional/lossl_based_2x/*.pt',
-    'weights/convolutional/lossl_based/*.pt',
-    'weights/convolutional/gpcc_lossl_based_2x/*.pt',
-    'weights/convolutional/gpcc_lossl_based/*.pt',
-    'weights/convolutional/baseline/*.pt',
-    'weights/convolutional/baseline_4x/*.pt'
-]
+conda_env_name = 'py39torch111'
+
+weight_prefix = 'weights/convolutional'
+config_prefix = 'configs/convolutional'
+output_prefix = 'runs/tests/convolutional'
 config_paths = [
-    'configs/train/convolutional/lossl_based_2x',
-    'configs/train/convolutional/lossl_based',
-    'configs/train/convolutional/gpcc_lossl_based_2x',
-    'configs/train/convolutional/gpcc_lossl_based',
-    'configs/train/convolutional/baseline',
-    'configs/train/convolutional/baseline_4x'
+    'lossy_coord_v2/baseline_r*.yaml',
+    'lossy_coord_v2/baseline_part6e5_r*.yaml',
+    'lossy_coord_v2/gpcc_based_r*.yaml',
+    'lossy_coord_v2/wo_residual_r*.yaml',
+    'lossy_coord/baseline.yaml',
+    'lossy_coord_v2/baseline_sample5e5_r*.yaml',
+    'lossy_coord_lossy_color/baseline_r*.yaml'
 ]
-
-
-def rename_dict_key(d: Dict, mappings: Dict[str, Tuple[str, Union[None, Callable]]]):
-    for key, (new_key, map_fn) in mappings.items():
-        if key in d:
-            assert new_key not in d
-            if map_fn is not None:
-                d[key] = map_fn(d[key])
-            d[new_key] = d[key]
-            del d[key]
-    return d
-
-
-key_mappings = {
-    "encoder_elapsed_time": ('encode time', None),
-    "encoder_max_cuda_memory_allocated": ('encode memory', lambda v: v / 1024),  # B -> KB
-    "decoder_elapsed_time": ('decode time', None),
-    "decoder_max_cuda_memory_allocated": ('decode memory', lambda v: v / 1024)
+sub_config_to_weight_path_maps = {
+    1: lambda _: _.replace('_part6e5', '', 1)
 }
 
 
@@ -55,32 +35,39 @@ def test():
     else:
         python_pre_command = ';'
 
-    for run_dirname, par_num in (
-        ('convolutional/no_par', 0),
-        ('convolutional/par6e5', 600000),
-        ('convolutional/par15e4', 150000),
-    ):
-        run_dir = osp.join('runs', 'tests', run_dirname)
-        for config_path, glob_weights_path in zip(config_paths, glob_weights_paths):
+    for glob_idx, glob_config_path in enumerate(config_paths):
+        glob_config_path = osp.join(config_prefix, glob_config_path)
+        sub_config_paths = sorted(glob(glob_config_path))
+        for config_path in sub_config_paths:
+            config_name = config_path[len(config_prefix)+1: -5]
+            sub_run_dir = osp.join(output_prefix, config_name)
             all_file_metric_dict = {}
-            config_name = osp.split(config_path)[1]
-            sub_run_dir = osp.join(run_dir, config_name)
-            for weight_path in glob(glob_weights_path):
-                print(f'\nTest config: "{config_path}", par num {par_num}, weight "{weight_path}"\n')
-                sub_sub_run_dir = osp.join(
-                    sub_run_dir,
-                    osp.splitext(osp.split(weight_path)[1])[0]
-                )
+
+            glob_weight_path = osp.join(
+                weight_prefix,
+                sub_config_to_weight_path_maps.get(glob_idx, lambda _: _)(config_name) + '.pt'
+            )
+            weights_paths = sorted(glob(glob_weight_path))
+            if len(weights_paths) == 0:
+                weights_paths = sorted(glob(glob_weight_path[:-3] + '/*.pt'))
+            if len(weights_paths) == 0:
+                raise RuntimeError(glob_weight_path)
+
+            for weight_path in sorted(weights_paths):
+                print(f'\nTest config: "{config_path}", weight "{weight_path}"\n')
+                if len(weights_paths) != 1:
+                    sub_sub_run_dir = osp.join(
+                        sub_run_dir,
+                        osp.splitext(osp.split(weight_path)[1])[0]
+                    )
+                else: sub_sub_run_dir = sub_run_dir
                 if osp.exists(sub_sub_run_dir):
                     shutil.rmtree(sub_sub_run_dir)
                 subprocess.run(
                     f'{python_pre_command}'
                     f'python test.py {config_path}'
-                    f' model.mpeg_pcc_error_processes=32'
                     f' test.weights_from_ckpt={weight_path}'
                     f' test.rundir_name={sub_sub_run_dir.replace("runs/", "", 1)}'
-                    f' test.dataset_path=lib.datasets.PlyVoxel.MVUB_MPEG_GPCC_CTC_Solid'
-                    f' test.dataset.kd_tree_partition_max_points_num={par_num}'
                     f' test.device={cuda_device}',
                     shell=True, check=True, executable=shutil.which('bash')
                 )
@@ -90,10 +77,10 @@ def test():
                 for key in sub_metric_dict:
                     all_file_metric_dict[key] = concat_values_for_dict(
                         all_file_metric_dict[key] if key in all_file_metric_dict else {},
-                        rename_dict_key(sub_metric_dict[key], key_mappings)
+                        sub_metric_dict[key]
                     )
 
-            print(f'config "{config_path}", par num {par_num} Done')
+            print(f'config "{config_path}" Done')
             with open(osp.join(sub_run_dir, metric_dict_filename), 'w') as f:
                 f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
     print('All Done')

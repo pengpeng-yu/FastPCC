@@ -10,7 +10,7 @@ model:
   adaptive_pruning_scaler_test: 1.00
   geo_lossl_if_sample: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
   geo_lossl_channels: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
-  bits_loss_factor: 1.0
+  bits_loss_factor: 2.0
   coord_recon_loss_factor: 0.4
   color_recon_loss_factor: 0.2
   warmup_fea_loss_steps: 5000
