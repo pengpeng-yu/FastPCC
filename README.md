@@ -17,11 +17,11 @@
 ### Train:
 
 ```shell
-python train.py configs/convolutional/lossy_coord_v2/baseline_r1.yaml
+python train.py config/convolutional/lossy_coord_v2/baseline_r1.yaml
 ```
 or 
 ```shell
-python -m torch.distributed.launch --nproc_per_node 2 train.py configs/convolutional/lossy_coord_v2/baseline_r1.yaml
+python -m torch.distributed.launch --nproc_per_node 2 train.py config/convolutional/lossy_coord_v2/baseline_r1.yaml
 ```
 
 The definition of training and testing configurations: lib/config.py

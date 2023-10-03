@@ -10,7 +10,7 @@ from scripts.shared_config import metric_dict_filename, cuda_device
 
 
 weight_prefix = 'weights/convolutional'
-config_prefix = 'configs/convolutional'
+config_prefix = 'config/convolutional'
 output_prefix = 'runs/tests/convolutional'
 config_paths = [
     'lossy_coord_v2/baseline_r*.yaml',

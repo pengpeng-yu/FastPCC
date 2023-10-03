@@ -180,8 +180,8 @@ class SimpleConfig:
     def merge_with_yaml(self, yaml_path):
         """
         # A yaml string:
-        # include "path/to/configs/base_config_1.yaml"
-        # include "path/to/configs/base_config_2"
+        # include "path/to/config/base_config_1.yaml"
+        # include "path/to/config/base_config_2"
         a: 2
         b:
             a: "string",

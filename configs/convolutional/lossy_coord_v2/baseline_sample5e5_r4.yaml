@@ -1,5 +1,0 @@
-# include "configs/convolutional/lossy_coord_v2/baseline_r4.yaml"
-
-train:
-  dataset:
-    mesh_sample_points_num: 500000

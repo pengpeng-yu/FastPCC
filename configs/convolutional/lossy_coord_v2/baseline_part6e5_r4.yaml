@@ -1,5 +1,0 @@
-# include "configs/convolutional/lossy_coord_v2/baseline_r4.yaml"
-
-test:
-  dataset:
-    kd_tree_partition_max_points_num: 600000
