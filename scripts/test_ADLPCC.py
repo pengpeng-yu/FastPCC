@@ -3,17 +3,17 @@ This script is based on commit cac62382472adbbf23fb11ec70c43636c7622e48 of ADLPC
 """
 import os
 import shutil
+import sys
 from glob import glob
 import subprocess
 import json
 
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
-from scripts.shared_config import pc_error_path, conda_prefix, metric_dict_filename, cuda_device
+from scripts.shared_config import pc_error_path, metric_dict_filename, cuda_device
 
 
 adl_pcc_dir = '../ADLPCC'
-conda_env_name = 'PCC_GEO_v2'
 
 file_lists = (
     "datasets/MVUB/list.txt",
@@ -59,11 +59,7 @@ def test():
     if osp.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)
-    if conda_prefix and conda_env_name:
-        python_pre_command = f'. {osp.join(conda_prefix, "bin", "activate")} {conda_env_name};'
-    else:
-        python_pre_command = ';'
-    python_pre_command += f'export TF_FORCE_GPU_ALLOW_GROWTH=true;export CUDA_VISIBLE_DEVICES={cuda_device};'
+    python_pre_command = f'export TF_FORCE_GPU_ALLOW_GROWTH=true;export CUDA_VISIBLE_DEVICES={cuda_device};'
     all_file_metric_dict: all_file_metric_dict_type = {}
 
     for resolution, file_list in zip(resolutions, file_lists):
@@ -77,7 +73,7 @@ def test():
                 command_enc = \
                     f'cd {osp.join(adl_pcc_dir, "src")};' \
                     f'{python_pre_command}' \
-                    f'python ADLPCC.py compress' \
+                    f'{sys.executable} ADLPCC.py compress' \
                     f' "{osp.abspath(file_path)}"' \
                     f' "../models/{rate_flag}/*"'
                 subp_enc = subprocess.run(

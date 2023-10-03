@@ -1,16 +1,13 @@
 import shutil
-import os
+import sys
 import os.path as osp
 from glob import glob
 import subprocess
 import json
 
 from scripts.log_extract_utils import concat_values_for_dict
-from scripts.shared_config import conda_prefix, metric_dict_filename, environ_CXX, cuda_device
+from scripts.shared_config import metric_dict_filename, cuda_device
 
-
-os.environ['CXX'] = environ_CXX
-conda_env_name = 'py39torch111'
 
 weight_prefix = 'weights/convolutional'
 config_prefix = 'configs/convolutional'
@@ -30,11 +27,6 @@ sub_config_to_weight_path_maps = {
 
 
 def test():
-    if conda_prefix and conda_env_name:
-        python_pre_command = f'. {osp.join(conda_prefix, "bin", "activate")} {conda_env_name};'
-    else:
-        python_pre_command = ';'
-
     for glob_idx, glob_config_path in enumerate(config_paths):
         glob_config_path = osp.join(config_prefix, glob_config_path)
         sub_config_paths = sorted(glob(glob_config_path))
@@ -64,8 +56,7 @@ def test():
                 if osp.exists(sub_sub_run_dir):
                     shutil.rmtree(sub_sub_run_dir)
                 subprocess.run(
-                    f'{python_pre_command}'
-                    f'python test.py {config_path}'
+                    f'{sys.executable} test.py {config_path}'
                     f' test.weights_from_ckpt={weight_path}'
                     f' test.rundir_name={sub_sub_run_dir.replace("runs/", "", 1)}'
                     f' test.device={cuda_device}',
