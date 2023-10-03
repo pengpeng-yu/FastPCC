@@ -10,7 +10,7 @@ from MinkowskiEngine.MinkowskiSparseTensor import SparseTensorQuantizationMode
 from lib.utils import Timer
 from lib.torch_utils import TorchCudaMaxMemoryAllocated, concat_loss_dicts
 from lib.data_utils import PCData
-from lib.evaluators import PCGCEvaluator
+from lib.evaluators import PCCEvaluator
 
 from ..lossy_coord_lossy_color.geo_lossl_em import GeoLosslessEntropyModel
 from .layers import Encoder, Decoder, \
@@ -36,9 +36,7 @@ class PCC(nn.Module):
         self.cfg = cfg
         ME.set_sparse_tensor_operation_mode(ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
         self.minkowski_algorithm = getattr(ME.MinkowskiAlgorithm, cfg.minkowski_algorithm)
-        self.evaluator = PCGCEvaluator(
-            cfg.mpeg_pcc_error_command, 16
-        )
+        self.evaluator = PCCEvaluator()
         assert len(cfg.compressed_channels) == len(cfg.geo_lossl_channels)
         assert len(cfg.geo_lossl_if_sample) == len(cfg.geo_lossl_channels) - 1
         assert cfg.compressed_channels[-1] == cfg.geo_lossl_channels[-1]

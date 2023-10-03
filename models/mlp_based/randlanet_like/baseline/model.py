@@ -8,7 +8,7 @@ from lib.data_utils import PCData
 from lib.entropy_models.continuous_batched import NoisyDeepFactorizedEntropyModel
 from lib.entropy_models.continuous_indexed import ContinuousNoisyDeepFactorizedIndexedEntropyModel
 from lib.loss_functions import chamfer_loss
-from lib.evaluators import PCGCEvaluator
+from lib.evaluators import PCCEvaluator
 from lib.points_layers import PointLayerMessage, TransitionDown, RandLANeighborFea, \
     LocalFeatureAggregation as LFA
 from lib.torch_utils import MLPBlock, concat_loss_dicts
@@ -160,10 +160,7 @@ class PCC(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super().__init__()
         self.cfg = cfg
-        self.evaluator = PCGCEvaluator(
-            cfg.mpeg_pcc_error_command,
-            cfg.mpeg_pcc_error_processes
-        )
+        self.evaluator = PCCEvaluator()
         neighbor_fea_generator = RandLANeighborFea(cfg.neighbor_num)
         blocks_num = len(cfg.channels) - 1
 

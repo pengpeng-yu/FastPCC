@@ -2,6 +2,8 @@ import subprocess
 from typing import Dict, Callable, Union, Tuple
 import os.path as osp
 
+from scripts.shared_config import pc_error_path
+
 
 _DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A->B).',
              '2. Use infile2 (B) as reference, loop over B, use normals on A. (B->A).',
@@ -11,9 +13,10 @@ _DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A
 
 def mpeg_pc_error(
         infile1: str, infile2: str, resolution: int, normal_file: str = '',
-        hausdorff: bool = False, color: bool = False, threads: int = 1, command='pc_error_d',
+        hausdorff: bool = False, color: bool = False, threads: int = 1, command='',
         hooks: Tuple[Callable[[str], Tuple[str, Union[None, int, float, str]]]] = ()
 ) -> Dict[str, float]:
+    if command == '': command = pc_error_path
     cmd_args = f'{command}' \
                f' -a {infile1}' \
                f' -b {infile2}' \

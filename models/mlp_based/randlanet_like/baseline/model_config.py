@@ -16,7 +16,3 @@ class ModelConfig(SimpleConfig):
 
     reconstruct_loss_factor: float = 1e5
     bpp_loss_factor: float = 1.
-
-    # only for test phase:
-    mpeg_pcc_error_command: str = 'pc_error_d'
-    mpeg_pcc_error_processes: int = 16

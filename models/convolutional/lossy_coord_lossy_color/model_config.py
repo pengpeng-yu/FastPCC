@@ -40,8 +40,6 @@ class ModelConfig(SimpleConfig):
     warmup_color_loss_factor: float = 1.0
     linear_warmup: bool = False
 
-    mpeg_pcc_error_command: str = 'pc_error_d'
-
     def check_local_value(self):
         if len(self.compressed_channels) == 1:
             self.compressed_channels *= len(self.geo_lossl_channels)

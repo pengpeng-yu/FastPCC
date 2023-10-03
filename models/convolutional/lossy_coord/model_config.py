@@ -28,7 +28,6 @@ class ModelConfig(SimpleConfig):
     # Normal part of network
     encoder_channels: Tuple[int, ...] = (16, 32, 64, 32)
     decoder_channels: Tuple[int, ...] = (64, 32, 16)
-    mpeg_gpcc_command: str = 'tmc3'
 
     hyperprior: str = 'None'
     hyper_compressed_channels: int = 8
@@ -57,7 +56,3 @@ class ModelConfig(SimpleConfig):
     warmup_steps: int = 0
     warmup_bpp_loss_factor: float = 0.2
     linear_warmup: bool = False
-
-    # Only for test phase:
-    mpeg_pcc_error_command: str = 'pc_error_d'
-    mpeg_pcc_error_processes: int = 16

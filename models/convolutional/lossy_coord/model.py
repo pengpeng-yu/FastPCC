@@ -15,7 +15,7 @@ from lib.utils import Timer
 from lib.mpeg_gpcc_utils import gpcc_octree_lossless_geom_encode, gpcc_decode
 from lib.torch_utils import MLPBlock, TorchCudaMaxMemoryAllocated
 from lib.data_utils import PCData, write_ply_file
-from lib.evaluators import PCGCEvaluator
+from lib.evaluators import PCCEvaluator
 from lib.entropy_models.continuous_batched import \
     NoisyDeepFactorizedEntropyModel as PriorEM
 from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
@@ -52,10 +52,7 @@ class PCC(nn.Module):
         self.cfg = cfg
         ME.set_sparse_tensor_operation_mode(ME.SparseTensorOperationMode.SHARE_COORDINATE_MANAGER)
         self.minkowski_algorithm = getattr(ME.MinkowskiAlgorithm, cfg.minkowski_algorithm)
-        self.evaluator = PCGCEvaluator(
-            cfg.mpeg_pcc_error_command,
-            cfg.mpeg_pcc_error_processes
-        )
+        self.evaluator = PCCEvaluator()
         self.basic_block_args = (
             cfg.basic_block_type,
             cfg.conv_region_type,
@@ -381,8 +378,7 @@ class PCC(nn.Module):
             tmp_file_path = f'tmp-{torch.rand(1).item()}'
             write_ply_file(sparse_tensor_coords[:, 1:] // sparse_tensor_coords_stride, f'{tmp_file_path}.ply')
             gpcc_octree_lossless_geom_encode(
-                f'{tmp_file_path}.ply', f'{tmp_file_path}.bin',
-                command=self.cfg.mpeg_gpcc_command
+                f'{tmp_file_path}.ply', f'{tmp_file_path}.bin'
             )
             with open(f'{tmp_file_path}.bin', 'rb') as f:
                 sparse_tensor_coords_bytes = f.read()

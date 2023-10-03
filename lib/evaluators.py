@@ -29,13 +29,13 @@ class Evaluator:
         raise NotImplementedError
 
 
-class PCGCEvaluator(Evaluator):
+class PCCEvaluator(Evaluator):
     def __init__(self,
-                 mpeg_pcc_error_command: str,
-                 mpeg_pcc_error_processes: int):
-        super(PCGCEvaluator, self).__init__()
-        self.mpeg_pcc_error_command = mpeg_pcc_error_command
-        self.mpeg_pcc_error_pool = mp.Pool(mpeg_pcc_error_processes)
+                 cal_mpeg_pc_error: bool = True,
+                 mpeg_pc_error_processes: int = 16):
+        super(PCCEvaluator, self).__init__()
+        self.cal_mpeg_pc_error = cal_mpeg_pc_error
+        self.mpeg_pc_error_pool = mp.Pool(mpeg_pc_error_processes)
 
     def reset(self):
         self.file_path_to_info: Dict[str, Dict[str, Union[int, float]]] = {}
@@ -99,7 +99,7 @@ class PCGCEvaluator(Evaluator):
                     file_info_dict.update(extra_info_dicts[idx])
                 write_ply_file(pred, reconstructed_path, rgb=preds_color[idx] if have_color else None)
 
-                if self.mpeg_pcc_error_command != '':
+                if self.cal_mpeg_pc_error:
                     write_ply_for_orig_pc = False
                     if file_path.endswith('.ply'):
                         if_target_has_normal = if_ply_has_vertex_normal(file_path)
@@ -121,12 +121,11 @@ class PCGCEvaluator(Evaluator):
                         )
                         print(f'Wrote Ply file to {file_path} with normals estimation')
                         normal_file_path = file_path
-                    self.file_path_to_info_run_res[file_path] = self.mpeg_pcc_error_pool.apply_async(
+                    self.file_path_to_info_run_res[file_path] = self.mpeg_pc_error_pool.apply_async(
                         mpeg_pc_error,
                         (osp.abspath(file_path),
                          osp.abspath(reconstructed_path),
-                         resolution, normal_file_path, False, have_color,
-                         1, self.mpeg_pcc_error_command)
+                         resolution, normal_file_path, False, have_color)
                     )
             if file_path in self.file_path_to_info:
                 print(f'Warning: Duplicated test sample {file_path}')
