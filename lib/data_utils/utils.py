@@ -132,8 +132,8 @@ def pc_data_collate_fn(data_list: List[PCData],
     Else, PCData.xyz will be stacked as a torch.float32 tensor.
     """
     if kd_tree_partition_max_points_num > 0:
-        use_kd_tree_partition = True
         assert len(data_list) == 1, 'Only supports kd-tree partition when batch size == 1.'
+        use_kd_tree_partition = data_list[0].xyz.shape[0] > kd_tree_partition_max_points_num
     else:
         use_kd_tree_partition = False
 

@@ -187,10 +187,9 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
         command_dec = \
             f'{tmc3_path}' \
             f' --mode=1' \
-            f' --outputBinaryPly={0 if "MVUB" in file_list else 1}' \
+            f' --outputBinaryPly=0' \
             f' --compressedStreamPath={osp.join(sub_output_dir, f"{rate_flag}.bin")}' \
             f' --reconstructedDataPath={osp.join(sub_output_dir, f"{rate_flag}_recon.ply")}'
-        # There seem to be some errors with the binary ply of MVUB
         subp_dec = subprocess.run(
             command_dec, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             shell=True, check=True, text=True

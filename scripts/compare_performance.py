@@ -1,5 +1,4 @@
 import json
-import re
 import os
 import os.path as osp
 import shutil
@@ -12,9 +11,6 @@ from matplotlib.pyplot import MultipleLocator
 from scripts.log_extract_utils import all_file_metric_dict_type, concat_values_for_dict, concat_values_for_dict_2
 from scripts.shared_config import metric_dict_filename
 from lib.metrics.bjontegaard import bdrate, bdsnr
-
-
-figure_title_re_pattern = re.compile('[a-z,_]+_')  # basketball_player_vox11_00000200 -> basketball_player
 
 
 def sort_key_func(bpp_psnr): return bpp_psnr[0]
@@ -36,10 +32,7 @@ def compute_bd(info_dicts_a: all_file_metric_dict_type,
             except KeyError:
                 bd_rate_results[key] = -1
             else:
-                bd_rate_results[key] = bd_fn(
-                    sorted(bpp_psnr_a, key=sort_key_func),
-                    sorted(bpp_psnr_b, key=sort_key_func)
-                )
+                bd_rate_results[key] = bd_fn(bpp_psnr_a, bpp_psnr_b)
     return bd_rate_results
 
 
@@ -88,20 +81,15 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
         fig.set_xlabel('bpp')
         fig.set_ylabel(y_label)
         fig.set_title(osp.splitext(osp.split(sample_name)[1])[0])
-        #     re.match(
-        #         figure_title_re_pattern,
-        #         osp.split(sample_name)[1]
-        #     ).group()[:-1].replace('_', ' ')
-        # )
         for method_name, method_json in method_to_json.items():
             if sample_name not in method_json: continue
             tmp_x_axis = method_json[sample_name]['bpp']
-            try:
-                tmp_y_axis = method_json[sample_name][distortion_key]
-            except KeyError:
-                continue
-            xy_tuple = zip(tmp_x_axis, tmp_y_axis)
-            tmp_x_axis, tmp_y_axis = zip(*sorted(xy_tuple, key=sort_key_func))
+            if distortion_key not in method_json[sample_name]:
+                print(f'Plot "{y_label}" Skipped Due to missing of '
+                      f'{method_name}: {sample_name}: {distortion_key}')
+                shutil.rmtree(output_dir)
+                return
+            tmp_y_axis = method_json[sample_name][distortion_key]
             if hook is not None:
                 tmp_x_axis, tmp_y_axis = hook(tmp_x_axis, tmp_y_axis, method_name)
             if len(tmp_x_axis) and len(tmp_y_axis):
@@ -117,24 +105,38 @@ def list_mean(ls: List):
     return sum(ls) / len(ls)
 
 
+def remove_low_psnr_point(method_name, sorted_indices):
+    if method_name == 'G-PCC octree':
+        slice_val = (1, -1)
+        sorted_indices = sorted_indices[1:-1]
+    elif method_name == 'G-PCC trisoup':
+        slice_val = (1, None)
+    elif method_name == 'ADLPCC':
+        slice_val = (None, -2)
+    elif method_name == 'SparsePCGC':
+        slice_val = (1, None)
+    else:
+        slice_val = (None, None)
+    return sorted_indices[slice_val[0]: slice_val[1]]
+
+
 def compute_multiple_bdrate():
-    anchor_name = 'Ours color'
+    anchor_name = 'Ours'
     anchor_secondly = True
-    draw_anchor = True
     method_to_json_path: Dict[str, Union[str, List[str]]] = {
         'Ours': 'convolutional/lossy_coord_v2/baseline_r*',
-        # 'Ours part6e5': 'convolutional/lossy_coord_v2/baseline_part6e5_r*',
         # 'Ours w/o integrated lossless\n geometry compression':
         #     'convolutional/lossy_coord_v2/gpcc_based_r*',
         # 'Ours w/o residual compression':
         #     'convolutional/lossy_coord_v2/wo_residual_r*',
+        # 'Ours part6e5': 'convolutional/lossy_coord_v2/baseline_part6e5_r*',
         # 'Ours sample5e5': 'convolutional/lossy_coord_v2/baseline_sample5e5_r*',
         # 'Ours color': 'convolutional/lossy_coord_lossy_color/baseline_r*',
 
         'PCGCv2': 'convolutional/lossy_coord/baseline',
         'SparsePCGC': 'SparsePCGC',
         'V-PCC': 'tmc2_geo',
-        'ADLPCC': 'ADLPCC',
+        # 'ADLPCC': 'ADLPCC',
         'G-PCC octree': 'tmc3_geo/octree',
         'G-PCC trisoup': 'tmc3_geo/trisoup',
         # 'G-PCC octree-raht': 'tmc3/octree-raht',
@@ -165,18 +167,23 @@ def compute_multiple_bdrate():
         for jp in json_path[1:]:
             with open(jp, 'rb') as f:
                 concat_values_for_dict_2(method_to_json[method_name], json.load(f))
+        for sample_name, metric_dict in method_to_json[method_name].items():
+            sorted_indices = sorted(range(len(metric_dict['bpp'])), key=lambda _: metric_dict['bpp'][_])
+            sorted_indices = remove_low_psnr_point(method_name, sorted_indices)
+            for k, v in metric_dict.items():
+                metric_dict[k] = [v[_] for _ in sorted_indices]
 
     method_names_to_compare = [key for key in method_to_json if key != anchor_name]
     sample_names = list(method_to_json[anchor_name].keys())
-    sample_wise_metric_type = Dict[str, List[float]]
-    sample_wise_bdrate_d1: sample_wise_metric_type = {}
-    sample_wise_bdrate_d2: sample_wise_metric_type = {}
-    sample_wise_bdpsnr_d1: sample_wise_metric_type = {}
-    sample_wise_bdpsnr_d2: sample_wise_metric_type = {}
-    sample_wise_bdrate_y: sample_wise_metric_type = {}
-    sample_wise_bdpsnr_y: sample_wise_metric_type = {}
-    sample_wise_time_complexity: sample_wise_metric_type = {}
-    sample_wise_mem_complexity: sample_wise_metric_type = {}
+    metric_dict_t = Dict[str, List[float]]
+    sample_wise_bdrate_d1: metric_dict_t = {}
+    sample_wise_bdrate_d2: metric_dict_t = {}
+    sample_wise_bdpsnr_d1: metric_dict_t = {}
+    sample_wise_bdpsnr_d2: metric_dict_t = {}
+    sample_wise_bdrate_y: metric_dict_t = {}
+    sample_wise_bdpsnr_y: metric_dict_t = {}
+    sample_wise_time_complexity: metric_dict_t = {}
+    sample_wise_mem_complexity: metric_dict_t = {}
 
     for method_name, method_json in method_to_json.items():
         single_sample_time_complexity = {}
@@ -199,30 +206,24 @@ def compute_multiple_bdrate():
         if method_name != anchor_name:
             comparison_tuple = (method_to_json[anchor_name], method_json)
             if anchor_secondly: comparison_tuple = comparison_tuple[::-1]
-            sample_wise_bdrate_d1 = concat_values_for_dict(
+            concat_values_for_dict(
                 sample_wise_bdrate_d1,
-                compute_bd(*comparison_tuple)
-            )
-            sample_wise_bdrate_d2 = concat_values_for_dict(
+                compute_bd(*comparison_tuple))
+            concat_values_for_dict(
                 sample_wise_bdrate_d2,
-                compute_bd(*comparison_tuple, d1=False)
-            )
-            sample_wise_bdpsnr_d1 = concat_values_for_dict(
+                compute_bd(*comparison_tuple, d1=False))
+            concat_values_for_dict(
                 sample_wise_bdpsnr_d1,
-                compute_bd(*comparison_tuple, rate=False)
-            )
-            sample_wise_bdpsnr_d2 = concat_values_for_dict(
+                compute_bd(*comparison_tuple, rate=False))
+            concat_values_for_dict(
                 sample_wise_bdpsnr_d2,
-                compute_bd(*comparison_tuple, rate=False, d1=False)
-            )
-            sample_wise_bdrate_y = concat_values_for_dict(
+                compute_bd(*comparison_tuple, rate=False, d1=False))
+            concat_values_for_dict(
                 sample_wise_bdrate_y,
-                compute_bd(*comparison_tuple, c=0)
-            )
-            sample_wise_bdpsnr_y = concat_values_for_dict(
+                compute_bd(*comparison_tuple, c=0))
+            concat_values_for_dict(
                 sample_wise_bdpsnr_y,
-                compute_bd(*comparison_tuple, rate=False, c=0)
-            )
+                compute_bd(*comparison_tuple, rate=False, c=0))
 
     write_metric_to_csv(
         (list(method_to_json.keys()), ('Enc', 'Dec')),
@@ -257,21 +258,8 @@ def compute_multiple_bdrate():
         sample_wise_bd_metric, osp.join(output_dir, bd_filename)
     )
 
-    def remove_low_psnr_for_vis(tmp_x_axis, tmp_y_axis, method_name):
-        if method_name == 'G-PCC octree':
-            tmp_x_axis, tmp_y_axis = tmp_x_axis[1:-1], tmp_y_axis[1:-1]
-        elif method_name == 'G-PCC trisoup':
-            tmp_x_axis, tmp_y_axis = tmp_x_axis[1:], tmp_y_axis[1:]
-        elif method_name == 'ADLPCC':
-            tmp_x_axis, tmp_y_axis = tmp_x_axis[:-2], tmp_y_axis[:-2]
-        elif method_name == 'SparsePCGC':
-            tmp_x_axis, tmp_y_axis = tmp_x_axis[1:], tmp_y_axis[1:]
-        elif not draw_anchor and method_name == anchor_name:
-            tmp_x_axis, tmp_y_axis = (), ()
-        return tmp_x_axis, tmp_y_axis
-
-    plot_bpp_psnr(method_to_json, output_dir, hook=remove_low_psnr_for_vis)
-    plot_bpp_psnr(method_to_json, output_dir, d1=False, hook=remove_low_psnr_for_vis)
+    plot_bpp_psnr(method_to_json, output_dir)
+    plot_bpp_psnr(method_to_json, output_dir, d1=False)
     plot_bpp_psnr(method_to_json, output_dir, c=0)
     plot_bpp_psnr(method_to_json, output_dir, c=1)
     plot_bpp_psnr(method_to_json, output_dir, c=2)
