@@ -2,12 +2,14 @@
 This script is based on commit cac62382472adbbf23fb11ec70c43636c7622e48 of ADLPCC.
 """
 import os
+import os.path as osp
 import shutil
 import sys
 from glob import glob
 import subprocess
 import json
 
+sys.path.append(osp.dirname(osp.dirname(__file__)))
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
 from scripts.shared_config import pc_error_path, metric_dict_filename, cuda_device

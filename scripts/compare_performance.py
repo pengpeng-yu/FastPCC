@@ -1,4 +1,5 @@
 import json
+import sys
 import os
 import os.path as osp
 import shutil
@@ -8,12 +9,10 @@ from typing import Dict, List, Union, Tuple
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import MultipleLocator
 
+sys.path.append(osp.dirname(osp.dirname(__file__)))
 from scripts.log_extract_utils import all_file_metric_dict_type, concat_values_for_dict, concat_values_for_dict_2
 from scripts.shared_config import metric_dict_filename
 from lib.metrics.bjontegaard import bdrate, bdsnr
-
-
-def sort_key_func(bpp_psnr): return bpp_psnr[0]
 
 
 def compute_bd(info_dicts_a: all_file_metric_dict_type,
@@ -105,10 +104,9 @@ def list_mean(ls: List):
     return sum(ls) / len(ls)
 
 
-def remove_low_psnr_point(method_name, sorted_indices):
+def remove_low_psnr_point(method_name, sample_name, sorted_indices):
     if method_name == 'G-PCC octree':
         slice_val = (1, -1)
-        sorted_indices = sorted_indices[1:-1]
     elif method_name == 'G-PCC trisoup':
         slice_val = (1, None)
     elif method_name == 'ADLPCC':
@@ -169,7 +167,7 @@ def compute_multiple_bdrate():
                 concat_values_for_dict_2(method_to_json[method_name], json.load(f))
         for sample_name, metric_dict in method_to_json[method_name].items():
             sorted_indices = sorted(range(len(metric_dict['bpp'])), key=lambda _: metric_dict['bpp'][_])
-            sorted_indices = remove_low_psnr_point(method_name, sorted_indices)
+            sorted_indices = remove_low_psnr_point(method_name, sample_name, sorted_indices)
             for k, v in metric_dict.items():
                 metric_dict[k] = [v[_] for _ in sorted_indices]
 
@@ -207,23 +205,17 @@ def compute_multiple_bdrate():
             comparison_tuple = (method_to_json[anchor_name], method_json)
             if anchor_secondly: comparison_tuple = comparison_tuple[::-1]
             concat_values_for_dict(
-                sample_wise_bdrate_d1,
-                compute_bd(*comparison_tuple))
+                sample_wise_bdrate_d1, compute_bd(*comparison_tuple))
             concat_values_for_dict(
-                sample_wise_bdrate_d2,
-                compute_bd(*comparison_tuple, d1=False))
+                sample_wise_bdrate_d2, compute_bd(*comparison_tuple, d1=False))
             concat_values_for_dict(
-                sample_wise_bdpsnr_d1,
-                compute_bd(*comparison_tuple, rate=False))
+                sample_wise_bdpsnr_d1, compute_bd(*comparison_tuple, rate=False))
             concat_values_for_dict(
-                sample_wise_bdpsnr_d2,
-                compute_bd(*comparison_tuple, rate=False, d1=False))
+                sample_wise_bdpsnr_d2, compute_bd(*comparison_tuple, rate=False, d1=False))
             concat_values_for_dict(
-                sample_wise_bdrate_y,
-                compute_bd(*comparison_tuple, c=0))
+                sample_wise_bdrate_y, compute_bd(*comparison_tuple, c=0))
             concat_values_for_dict(
-                sample_wise_bdpsnr_y,
-                compute_bd(*comparison_tuple, rate=False, c=0))
+                sample_wise_bdpsnr_y, compute_bd(*comparison_tuple, rate=False, c=0))
 
     write_metric_to_csv(
         (list(method_to_json.keys()), ('Enc', 'Dec')),

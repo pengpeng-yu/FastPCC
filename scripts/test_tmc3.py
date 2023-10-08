@@ -3,14 +3,18 @@ This script is based on commit c3c9798a0f63970bd17ce191900ded478a8aa0f6 of mpeg-
 """
 import math
 from glob import glob
+import sys
 import os
+import os.path as osp
 import subprocess
 import json
 import multiprocessing as mp
 
+sys.path.append(osp.dirname(osp.dirname(__file__)))
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
 from scripts.shared_config import pc_error_path, metric_dict_filename
+
 
 geo_only = True
 single_frame_only = True

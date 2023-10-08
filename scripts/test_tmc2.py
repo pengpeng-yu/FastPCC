@@ -2,15 +2,18 @@
 This script is based on commit 1fc928244bc778c73bed0d36f1c22d95ed6b0fe2 of mpeg-pcc-tmc2.
 """
 
+import sys
 import os
+import os.path as osp
 import subprocess
 import json
 import multiprocessing as mp
 
-
+sys.path.append(osp.dirname(osp.dirname(__file__)))
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
 from scripts.shared_config import pc_error_path, metric_dict_filename
+
 
 geo_only = True
 single_frame_only = True
