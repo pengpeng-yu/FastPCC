@@ -113,6 +113,10 @@ def remove_low_psnr_point(method_name, sample_name, sorted_indices):
         slice_val = (None, -2)
     elif method_name == 'SparsePCGC':
         slice_val = (1, None)
+    elif method_name == 'G-PCC octree-raht':
+        slice_val = (1, -1)
+    elif method_name == 'G-PCC octree-predlift':
+        slice_val = (1, -1)
     else:
         slice_val = (None, None)
     return sorted_indices[slice_val[0]: slice_val[1]]
@@ -123,9 +127,9 @@ def compute_multiple_bdrate():
     anchor_secondly = True
     method_to_json_path: Dict[str, Union[str, List[str]]] = {
         'Ours': 'convolutional/lossy_coord_v2/baseline_r*',
-        # 'Ours w/o integrated lossless\n geometry compression':
+        # 'Ours w/o multi-scale\n lossless geometry':
         #     'convolutional/lossy_coord_v2/gpcc_based_r*',
-        # 'Ours w/o residual compression':
+        # 'Ours w/o hierarchical residuals':
         #     'convolutional/lossy_coord_v2/wo_residual_r*',
         # 'Ours part6e5': 'convolutional/lossy_coord_v2/baseline_part6e5_r*',
         # 'Ours sample5e5': 'convolutional/lossy_coord_v2/baseline_sample5e5_r*',
