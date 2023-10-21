@@ -5,6 +5,7 @@ from glob import glob
 import subprocess
 import json
 
+sys.path.append(osp.dirname(osp.dirname(__file__)))
 from scripts.log_extract_utils import concat_values_for_dict
 from scripts.shared_config import metric_dict_filename, cuda_device
 

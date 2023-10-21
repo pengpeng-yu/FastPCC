@@ -120,8 +120,8 @@ class DistributionQuantizedCDFTable(nn.Module):
         pmf = pmf.T.cpu().contiguous().numpy()
         minima = minima.cpu().contiguous().numpy()
         self.range_coder.init_with_pmfs(pmf, minima)
-        self.cdf_offset_list = minima
         self.cdf_list = self.range_coder.get_cdfs()
+        self.cdf_offset_list = self.range_coder.get_offset_array()
         self.requires_updating_cdf_table = False
 
     def get_extra_state(self):

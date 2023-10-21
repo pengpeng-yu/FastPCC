@@ -35,6 +35,7 @@ public:
         VecVecUint32 &quantized_cdfs, PyArrayInt32 &offset_array
     );
     VecVecUint32 get_cdfs();
+    PyArrayInt32 get_offset_array();
 
     template <bool OVERFLOW_CODING, bool WITH_INDEXES>
     std::vector<py::bytes> _encode_with_indexes(

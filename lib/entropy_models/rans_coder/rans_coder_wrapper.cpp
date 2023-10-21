@@ -78,6 +78,11 @@ VecVecUint32 IndexedRansCoder::get_cdfs()
     return this->cdfs;
 }
 
+PyArrayInt32 IndexedRansCoder::get_offset_array()
+{
+    return this->offset_array;
+}
+
 template <bool OVERFLOW_CODING, bool WITH_INDEXES>
 std::vector<py::bytes> IndexedRansCoder::_encode_with_indexes(
     const PyArrayInt32 &symbol_array,
@@ -430,6 +435,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
         .def("init_with_pmfs", &IndexedRansCoder::init_with_pmfs)
         .def("init_with_quantized_cdfs", &IndexedRansCoder::init_with_quantized_cdfs)
         .def("get_cdfs", &IndexedRansCoder::get_cdfs)
+        .def("get_offset_array", &IndexedRansCoder::get_offset_array)
         .def("encode", &IndexedRansCoder::encode)
         .def("decode", &IndexedRansCoder::decode)
         .def("encode_with_indexes", &IndexedRansCoder::encode_with_indexes)
