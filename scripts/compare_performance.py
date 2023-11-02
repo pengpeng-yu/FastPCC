@@ -127,9 +127,9 @@ def compute_multiple_bdrate():
     anchor_secondly = True
     method_to_json_path: Dict[str, Union[str, List[str]]] = {
         'Ours': 'convolutional/lossy_coord_v2/baseline_r*',
-        # 'Ours w/o multi-scale\n lossless geometry':
+        # 'Ours w/o geometry residual':
         #     'convolutional/lossy_coord_v2/gpcc_based_r*',
-        # 'Ours w/o hierarchical residuals':
+        # 'Ours w/o feature residual':
         #     'convolutional/lossy_coord_v2/wo_residual_r*',
         # 'Ours part6e5': 'convolutional/lossy_coord_v2/baseline_part6e5_r*',
         # 'Ours sample5e5': 'convolutional/lossy_coord_v2/baseline_sample5e5_r*',
