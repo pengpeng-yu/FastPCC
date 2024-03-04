@@ -56,9 +56,6 @@ class ImageFolder(torch.utils.data.Dataset):
             print(f'Error when loading {file_path}')
             raise e
 
-        if self.cfg.normalization_scaler > 0:
-            im = im / self.cfg.normalization_scaler
-
         if self.cfg.channels_order == 'RGB':
             im = im[:, :, ::-1]
         elif self.cfg.channels_order != 'BGR':

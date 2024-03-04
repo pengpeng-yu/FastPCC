@@ -20,8 +20,6 @@ train:
   lr_step_gamma: 0.3
 
   ckpt_frequency: 1
-  resume_from_ckpt: ''
-  resume_items: ['state_dict']
   test_frequency: 4
 
   dataset_path: 'lib.datasets.ShapeNetCorev2'
