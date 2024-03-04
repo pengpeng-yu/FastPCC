@@ -8,6 +8,7 @@ import multiprocessing as mp
 try:
     import cv2
 except ImportError: cv2 = None
+import numpy as np
 import torch
 
 from lib.data_utils import PCData, write_ply_file, if_ply_has_vertex_normal
@@ -20,6 +21,9 @@ class Evaluator:
         self.reset()
 
     def reset(self):
+        raise NotImplementedError
+
+    def log(self, *args, **kwargs):
         raise NotImplementedError
 
     def log_batch(self, *args, **kwargs):
@@ -177,39 +181,21 @@ class ImageCompressionEvaluator(Evaluator):
     def reset(self):
         self.file_path_to_info = {}
 
-    def log_batch(self,
-                  batch_im_recon,
-                  batch_im,
-                  compressed_bytes_list,
-                  file_paths,
-                  valid_ranges,
-                  results_dir):
-        if not batch_im_recon.shape[0] == 1:
-            raise NotImplementedError
-        assert len(batch_im_recon) == len(compressed_bytes_list) == len(file_paths)
+    def log(self, im_recon, im, compressed_bytes, file_path, results_dir):
+        im = im.cpu().numpy()
+        im_recon = im_recon.cpu().numpy()
+        psnr = (np.log10(255 / np.linalg.norm(im.astype(np.double) - im_recon) * np.sqrt(im.size)) * 10).item()
+        pixels_num = im_recon.shape[1] * im_recon.shape[2]
 
-        valid_range = valid_ranges[0]
-        batch_psnr = batch_image_psnr(
-            batch_im_recon[:, :, valid_range[0][0]: valid_range[0][1],
-                           valid_range[1][0]: valid_range[1][1]],
-            batch_im[:, :, valid_range[0][0]: valid_range[0][1],
-                     valid_range[1][0]: valid_range[1][1]],
-            max_val=255
-        )
-        batch_im_recon = batch_im_recon.to(torch.uint8).cpu().permute(0, 2, 3, 1).numpy()
-        pixels_num = batch_im_recon.shape[1] * batch_im_recon.shape[2]
-
-        for idx in range(len(batch_psnr)):
-            psnr = batch_psnr[idx].item()
-            if results_dir is not None:
-                out_file_path = osp.join(results_dir, file_paths[idx])
-                os.makedirs(osp.dirname(out_file_path), exist_ok=True)
-                cv2.imwrite(out_file_path, batch_im_recon[idx])
-            self.file_path_to_info[file_paths[idx]] = \
-                {
-                    'psnr': psnr,
-                    'bpp': len(compressed_bytes_list[idx]) * 8 / pixels_num
-                }
+        if results_dir is not None:
+            out_file_path = osp.join(results_dir, file_path)
+            os.makedirs(osp.dirname(out_file_path), exist_ok=True)
+            cv2.imwrite(out_file_path, im_recon.astype(np.uint8).transpose(1, 2, 0))
+        self.file_path_to_info[file_path] = \
+            {
+                'psnr': psnr,
+                'bpp': len(compressed_bytes) * 8 / pixels_num
+            }
         return True
 
     def show(self, results_dir: str) -> Dict[str, Union[int, float]]:
