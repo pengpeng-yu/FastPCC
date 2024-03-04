@@ -255,11 +255,11 @@ class DeepRotationInvariantDistFea(RotationInvariantDistFea):  # deprecated
 
         self.mlp_intra_dist = MLPBlock(
             self.intra_anchor_dists_chnls, extra_intra_anchor_dists_chnls,
-            bn='nn.bn1d', act='leaky_relu(0.2)', skip_connection='concat'
+            bn=True, act='leaky_relu(0.2)', skip_connection='concat'
         )
         self.mlp_relative_fea = MLPBlock(
             mlp_relative_fea_in_chnls, extra_relative_fea_chnls,
-            bn='nn.bn1d', act='leaky_relu(0.2)', skip_connection='concat'
+            bn=True, act='leaky_relu(0.2)', skip_connection='concat'
         )
 
         # assert extra_intra_anchor_dists_chnls >= self.intra_anchor_dists_chnls
@@ -396,15 +396,15 @@ class TransitionDownWithDistFea(TransitionDown):
         self.mlp_anchor_transition_fea = nn.Sequential(
             MLPBlock(self.neighbor_fea_generator.channels,
                      self.transition_fea_chnls,
-                     bn='nn.bn1d', act='leaky_relu(0.2)'),
+                     bn=True, act='leaky_relu(0.2)'),
             MLPBlock(self.transition_fea_chnls,
                      self.transition_fea_chnls,
-                     bn='nn.bn1d', act='leaky_relu(0.2)')
+                     bn=True, act='leaky_relu(0.2)')
         )
         self.mlp_out = nn.Sequential(
             MLPBlock(self.in_channels + self.transition_fea_chnls,
                      self.out_channels,
-                     bn='nn.bn1d', act='leaky_relu(0.2)')
+                     bn=True, act='leaky_relu(0.2)')
         )
 
     def forward(self, msg: PointLayerMessage):
@@ -517,11 +517,11 @@ class LocalFeatureAggregation(nn.Module):
         self.mlp_raw_neighbor_fea = MLPBlock(
             neighbor_feature_generator.channels,
             raw_neighbor_fea_out_chnls,
-            bn='nn.bn1d', act='leaky_relu(0.2)'
+            bn=True, act='leaky_relu(0.2)'
         )
         self.mlp_neighbor_fea = MLPBlock(
             self.neighbor_fea_chnls, self.neighbor_fea_chnls,
-            bn='nn.bn1d', act='leaky_relu(0.2)'
+            bn=True, act='leaky_relu(0.2)'
         )
         self.mlp_attn = nn.Linear(
             self.neighbor_fea_chnls,
@@ -529,11 +529,11 @@ class LocalFeatureAggregation(nn.Module):
         )
         self.mlp_out = MLPBlock(
             self.neighbor_fea_chnls, out_channels,
-            bn='nn.bn1d', act=None
+            bn=True, act=None
         )
         self.mlp_shortcut = MLPBlock(
             in_channels, out_channels,
-            'nn.bn1d', None
+            True, None
         ) if in_channels != 0 and use_shortcut is True else None
         self.neighbor_feature_generator = neighbor_feature_generator
         self.in_channels = in_channels

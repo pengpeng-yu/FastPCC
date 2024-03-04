@@ -40,14 +40,14 @@ class Decoder(nn.Module):
         ])
         self.mlp_pred_coord_list = nn.ModuleList([
             MLPBlock(
-                channels[idx], 3, bn='nn.bn1d', act=None
+                channels[idx], 3, bn=True, act=None
             ) for idx in range(self.blocks_num)
         ])
         self.mlp_pred_fea_list = nn.ModuleList([
             MLPBlock(
                 channels[idx],
                 channels[idx + 1] * len(res_em_index_ranges),
-                bn='nn.bn1d', act=None
+                bn=True, act=None
             ) for idx in range(self.blocks_num - 1)
         ])
 
@@ -183,7 +183,7 @@ class PCC(nn.Module):
         )
         self.encoder_out_mlp = MLPBlock(
             cfg.channels[-1], cfg.compressed_channels,
-            bn='nn.bn1d', act=None
+            bn=True, act=None
         )
 
         self.em = NoisyDeepFactorizedEntropyModel(
@@ -195,7 +195,7 @@ class PCC(nn.Module):
 
         self.decoder_in_mlp = MLPBlock(
             cfg.compressed_channels, cfg.channels[-1],
-            bn='nn.bn1d', act='leaky_relu(0.2)'
+            bn=True, act='leaky_relu(0.2)'
         )
         self.decoder = Decoder(
             cfg.channels[::-1],

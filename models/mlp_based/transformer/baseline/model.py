@@ -28,7 +28,7 @@ class PCC(nn.Module):
 
         self.encoder_out_mlp = MLPBlock(
             cfg.compressed_channels, cfg.compressed_channels,
-            bn='nn.bn1d', act=None)
+            bn=True, act=None)
 
         self.em = NoisyDeepFactorizedEntropyModel(
             batch_shape=torch.Size([cfg.compressed_channels]),
@@ -46,7 +46,7 @@ class PCC(nn.Module):
 
         self.decoder_out_mlp = MLPBlock(
             cfg.decoder_channels[-1], cfg.decoder_channels[-1],
-            bn='nn.bn1d', act=None)
+            bn=True, act=None)
 
         self.cfg = cfg
         self.init_weights()

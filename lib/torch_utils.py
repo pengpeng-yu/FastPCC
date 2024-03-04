@@ -77,25 +77,16 @@ class MLPBlock(nn.Module):
     def __init__(self,
                  in_channels: int,
                  out_channels: int,
-                 bn: Optional[str] = 'nn.bn1d',
+                 bn: bool = True,
                  act: Optional[str] = 'leaky_relu(0.2)',
                  version: str = 'linear',
                  skip_connection: Optional[str] = None):
         super(MLPBlock, self).__init__()
         assert version in ['linear', 'conv']
         assert act is None or act.split('(', 1)[0] in ['relu', 'leaky_relu', 'prelu']
-        assert bn in ['nn.bn1d', 'custom', None]
         assert skip_connection in ['sum', 'concat', None]
 
-        if bn == 'nn.bn1d':
-            self.bn = nn.BatchNorm1d(out_channels)
-        elif bn == 'custom':
-            assert version == 'linear'
-            self.bn = BatchNorm1dChnlLast(out_channels)
-        elif bn is None:
-            self.bn = None
-        else: raise NotImplementedError
-
+        self.bn = nn.BatchNorm1d(out_channels) if bn is True else None
         if version == 'linear':
             self.mlp = nn.Linear(in_channels, out_channels, bias=self.bn is None)
         elif version == 'conv':
@@ -133,7 +124,6 @@ class MLPBlock(nn.Module):
                 x = x.permute(0, 2, 1)
                 x = self.bn(x)
                 x = x.permute(0, 2, 1)
-            elif self.bn is not None: x = self.bn(x)
             if self.act is not None: x = self.act(x)
             if len(ori_shape) != 3:
                 x = x.view(*ori_shape[:-1], self.out_channels)
@@ -163,66 +153,15 @@ class MLPBlock(nn.Module):
 
     def __repr__(self):
         info = f'MLPBlock(in_ch={self.in_channels}, out_ch={self.out_channels}, ' \
-               f'act={repr(self.act).replace("inplace=True", "")}, ' \
-               f'bn={self.bn}'
+               f'act={repr(self.act).replace("inplace=True", "")}'
+        if self.bn is not None:
+            info += f', bn={self.bn}'
         if self.version != 'linear':
             info += f', version={self.version}'
         if self.skip_connection is not None:
             info += f', skip={self.skip_connection}'
         info += ')'
         return info
-
-
-class BatchNorm1dChnlLast(nn.Module):
-    # very slow
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
-        super(BatchNorm1dChnlLast, self).__init__()
-        self.num_features = num_features
-        self.eps = eps
-        self.momentum = momentum
-        self.affine = affine
-        self.track_running_stats = track_running_stats
-        if self.affine:
-            self.weight = nn.Parameter(torch.Tensor(num_features))
-            self.bias = nn.Parameter(torch.Tensor(num_features))
-        else:
-            self.register_parameter('weight', None)
-            self.register_parameter('bias', None)
-        if self.track_running_stats:
-            self.register_buffer('running_mean', torch.zeros(num_features))
-            self.register_buffer('running_var', torch.ones(num_features))
-        else:
-            self.register_parameter('running_mean', None)
-            self.register_parameter('running_var', None)
-        self.reset_parameters()
-
-    def reset_running_stats(self) -> None:
-        if self.track_running_stats:
-            self.running_mean.zero_()
-            self.running_var.fill_(1)
-
-    def reset_parameters(self) -> None:
-        self.reset_running_stats()
-        if self.affine:
-            nn.init.ones_(self.weight)
-            nn.init.zeros_(self.bias)
-
-    def forward(self, x):
-        if self.training:
-            var, mean = torch.var_mean(x, dim=[0, 1], keepdim=True, unbiased=False)
-            x = (x - mean) / torch.sqrt(var + self.eps)
-            if self.track_running_stats:
-                self.running_mean = self.running_mean * (1 - self.momentum) + mean * self.momentum
-                self.running_var = self.running_var * (1 - self.momentum) + var * self.momentum
-        else:
-            if self.track_running_stats:
-                x = (x - self.running_mean) / torch.sqrt(self.running_var + self.eps)
-            else:
-                var, mean = torch.var_mean(x, dim=[0, 1], keepdim=True, unbiased=False)
-                x = (x - mean) / torch.sqrt(var + self.eps)
-        if self.affine:
-            x = self.weight * x + self.bias
-        return x
 
 
 def concat_loss_dicts(loss_dict_a: Dict[str, torch.Tensor],
@@ -421,11 +360,11 @@ class GumbelSigmoidMLPBlock(MLPBlock):
         input: (N, C_in, L_1, ..., L_n,)
         output: (N, C_out, L_1, ..., L_n)
     """
-    def __init__(self, in_channels, batchnorm='nn.bn1d', version='linear',
+    def __init__(self, in_channels, bn=True, version='linear',
                  skip_connection=None, tau=1, hard=False):
         super(GumbelSigmoidMLPBlock, self).__init__(
-            in_channels=in_channels, out_channels=1, bn=batchnorm, act=None,
-            version=version, skip_connection=skip_connection
+            in_channels=in_channels, out_channels=1, bn=bn, act=None,
+            version='linear', skip_connection=skip_connection
         )
         self.tau = tau
         self.hard = hard

@@ -72,12 +72,12 @@ class PCC(nn.Module):
             ret = [
                 *(MLPBlock(
                     in_channels, in_channels,
-                    bn='nn.bn1d' if cfg.use_batch_norm else None,
+                    bn=cfg.use_batch_norm,
                     act=cfg.activation
                 ) for _ in range(cfg.parameter_fns_mlp_num - 2)),
                 MLPBlock(
                     in_channels, out_channels,
-                    bn='nn.bn1d' if cfg.use_batch_norm else None,
+                    bn=cfg.use_batch_norm,
                     act=cfg.activation
                 ),
                 nn.Linear(out_channels, out_channels, bias=True)

@@ -63,6 +63,9 @@ def im_data_collate_fn(data_list: List[IMData],
                     im, valid_range = im_pad(value, target_shape=target_shape)
                 elif resize_strategy == 'Adapt':
                     im, valid_range = im_pad(value, base_length=target_shape)
+                elif resize_strategy == 'None':
+                    im = value
+                    valid_range = None
                 else:
                     raise NotImplementedError
                 data_dict[key].append(im)
@@ -226,7 +229,7 @@ def im_resize_with_crop(
     im = im[origin[0]: origin[0] + target_shape[0],
             origin[1]: origin[1] + target_shape[1]]
     valid_range = np.array([[0, im.shape[0]],
-                            [0, im.shape[1]]], dtype=np.int)
+                            [0, im.shape[1]]], dtype=np.int32)
     return im, valid_range
 
 
@@ -247,7 +250,7 @@ def im_resize_with_pad(
     valid_range = np.array(
         [[origin[0], origin[0] + im.shape[0]],
          [origin[1], origin[1] + im.shape[1]]],
-        dtype=np.int
+        dtype=np.int32
     )
     holder[valid_range[0][0]: valid_range[0][1],
            valid_range[1][0]: valid_range[1][1]] = im
@@ -271,7 +274,7 @@ def im_pad(
     holder = np.zeros_like(im, shape=(*target_shape, 3))
     holder[: im.shape[0], : im.shape[1]] = im
     valid_range = np.array([[0, im.shape[0]],
-                            [0, im.shape[1]]], dtype=np.int)
+                            [0, im.shape[1]]], dtype=np.int32)
     return holder, valid_range
 
 
