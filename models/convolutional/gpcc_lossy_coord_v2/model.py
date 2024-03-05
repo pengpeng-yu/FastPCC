@@ -129,27 +129,20 @@ class PCC(nn.Module):
         ME.set_global_coordinate_manager(global_coord_mg)
         return global_coord_mg
 
-    def get_sparse_pc(self, xyz: torch.Tensor,
-                      tensor_stride: int = 1,
-                      only_return_coords: bool = False)\
-            -> Union[ME.SparseTensor, Tuple[ME.CoordinateMapKey, ME.CoordinateManager]]:
+    def get_sparse_pc(self, xyz: torch.Tensor) -> ME.SparseTensor:
         global_coord_mg = self.set_global_cm()
-        if only_return_coords:
-            pc_coord_key = global_coord_mg.insert_and_map(xyz, [tensor_stride] * 3)[0]
-            return pc_coord_key, global_coord_mg
-        else:
-            sparse_pc_feature = torch.full(
-                (xyz.shape[0], 1), fill_value=1,
-                dtype=torch.float, device=xyz.device
-            )
-            sparse_pc = ME.SparseTensor(
-                features=sparse_pc_feature,
-                coordinates=xyz,
-                tensor_stride=[tensor_stride] * 3,
-                coordinate_manager=global_coord_mg,
-                quantization_mode=SparseTensorQuantizationMode.UNWEIGHTED_AVERAGE,
-            )
-            return sparse_pc
+        sparse_pc_feature = torch.full(
+            (xyz.shape[0], 1), fill_value=1,
+            dtype=torch.float, device=xyz.device
+        )
+        sparse_pc = ME.SparseTensor(
+            features=sparse_pc_feature,
+            coordinates=xyz,
+            tensor_stride=[1] * 3,
+            coordinate_manager=global_coord_mg,
+            quantization_mode=SparseTensorQuantizationMode.UNWEIGHTED_AVERAGE,
+        )
+        return sparse_pc
 
     def train_forward(self, batched_coord: torch.Tensor, training_step: int, batch_size: int):
         sparse_pc = self.get_sparse_pc(batched_coord)

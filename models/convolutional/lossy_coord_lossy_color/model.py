@@ -1,5 +1,5 @@
 import io
-from typing import List, Union, Tuple, Optional
+from typing import List, Union, Tuple
 
 import torch
 import torch.nn as nn
@@ -124,7 +124,7 @@ class PCC(nn.Module):
 
     def forward(self, pc_data: PCData):
         if self.training:
-            return self.train_forward(pc_data.xyz, pc_data.training_step, pc_data.batch_size)
+            return self.train_forward(pc_data.xyz, pc_data.color, pc_data.training_step, pc_data.batch_size)
         else:
             assert pc_data.batch_size == 1, 'Only supports batch size == 1 during testing.'
             return self.test_forward(pc_data)
@@ -141,33 +141,27 @@ class PCC(nn.Module):
         ME.set_global_coordinate_manager(global_coord_mg)
         return global_coord_mg
 
-    def get_sparse_pc(self, xyz: torch.Tensor, color: Optional[torch.Tensor] = None,
-                      tensor_stride: int = 1,
-                      only_return_coords: bool = False)\
-            -> Union[ME.SparseTensor, Tuple[ME.CoordinateMapKey, ME.CoordinateManager]]:
+    def get_sparse_pc(self, xyz: torch.Tensor, color: torch.Tensor) -> ME.SparseTensor:
         global_coord_mg = self.set_global_cm()
-        if only_return_coords:
-            pc_coord_key = global_coord_mg.insert_and_map(xyz, [tensor_stride] * 3)[0]
-            return pc_coord_key, global_coord_mg
-        else:
-            sparse_pc_feature = torch.cat((
-                torch.div(color, 255),
-                torch.full(
-                    (color.shape[0], 1), fill_value=2,
-                    dtype=torch.float,
-                    device=color.device
-                )), 1)
-            sparse_pc = ME.SparseTensor(
-                features=sparse_pc_feature,
-                coordinates=xyz,
-                tensor_stride=[tensor_stride] * 3,
-                coordinate_manager=global_coord_mg,
-                quantization_mode=SparseTensorQuantizationMode.UNWEIGHTED_AVERAGE,
-            )
-            return sparse_pc
+        sparse_pc_feature = torch.cat((
+            torch.div(color, 255),
+            torch.full(
+                (color.shape[0], 1), fill_value=2,
+                dtype=torch.float,
+                device=color.device
+            )), 1)
+        sparse_pc = ME.SparseTensor(
+            features=sparse_pc_feature,
+            coordinates=xyz,
+            tensor_stride=[1] * 3,
+            coordinate_manager=global_coord_mg,
+            quantization_mode=SparseTensorQuantizationMode.UNWEIGHTED_AVERAGE,
+        )
+        return sparse_pc
 
-    def train_forward(self, batched_coord: torch.Tensor, training_step: int, batch_size: int):
-        sparse_pc = self.get_sparse_pc(batched_coord)
+    def train_forward(self, batched_coord: torch.Tensor, batched_color: torch.Tensor,
+                      training_step: int, batch_size: int):
+        sparse_pc = self.get_sparse_pc(batched_coord, batched_color)
         feature, points_num_list = self.encoder(sparse_pc)
 
         bottleneck_feature, loss_dict = self.em_lossless_based(feature, batch_size)
