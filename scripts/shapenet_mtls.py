@@ -1,7 +1,6 @@
 import os
 import os.path as osp
 import pathlib
-import imghdr
 from tqdm import tqdm
 
 shapenet_root = pathlib.Path('datasets/ShapeNet/ShapeNetCore.v2')
@@ -24,19 +23,6 @@ def recover():
         os.rename(mtl_path, str(mtl_path)[:-4])
 
 
-def fix_ext():
-    img_paths = shapenet_root.glob('*/*/images/*.*')
-    for img_path in tqdm(img_paths):
-        img_format = imghdr.what(img_path)
-        img_base_path, img_ext = osp.splitext(img_path)
-        img_ext = img_ext[1:]
-        if img_ext == 'jpg': img_ext = 'jpeg'
-        if not img_ext == img_format:
-            img_new_path = f'{img_base_path}.{img_format}'
-            print(f'{img_path} -> {img_new_path}')
-            os.rename(img_path, img_new_path)
-
-
 if __name__ == '__main__':
-    fix_ext()
+    rename()
     print('Done')
