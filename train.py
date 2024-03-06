@@ -12,6 +12,7 @@ from typing import Dict, Union, List, Callable
 import subprocess
 import socket
 import traceback
+import signal
 
 import numpy as np
 import torch
@@ -98,6 +99,11 @@ def main():
             else:
                 raise Exception
             tb_proc.stdout.close()
+
+            def handle_sigterm(signal, frame):
+                tb_proc.terminate()
+                sys.exit(0)
+            signal.signal(signal.SIGTERM, handle_sigterm)
         except Exception as e:
             logger.warning(f'fail to launch Tensorboard')
             tb_proc = None
