@@ -1,9 +1,12 @@
 This project contains an implementation of our ICME 2023 paper "Sparse Representation based Deep Residual Geometry Compression Network for Large-scale Point Clouds" [1], 
-tested on Ubuntu 20.04.
+tested on Ubuntu 20.04. This project is still under development. 
 
-## Contents
-- `config/convolutional/lossy_coord_v2` and `config/convolutional/lossy_coord_lossy_color`: coming soon. 
+## Models
+- `config/convolutional/lossy_coord_v2` and `config/convolutional/lossy_coord_lossy_color`: coming, but not soon. 
 - `config/convolutional/lossy_coord` contains the yaml files of the main model and its variants in this paper [1].
+
+
+## Other content
 - `lib/simple_config.py` is a simple configuration system supports separate configuration definitions, inheritance of yaml files, basic checks of argument types, and mixed use of yaml files and command line arguments.
 - `lib/entropy_models` is a minor PyTorch-based re-implementation of the continuous indexed entropy models in tensorflow_compression.
 - `lib/entropy_models/rans_coder` is a minor wrapper of RANS coder for simple python calls.
@@ -16,23 +19,23 @@ tested on Ubuntu 20.04.
 - open3d
 - plyfile
 - pytorch >= 1.7
-- [pytorch3d](https://github.com/facebookresearch/pytorch3d) (for knn_points)
+- [pytorch3d](https://github.com/facebookresearch/pytorch3d) (for knn_points. Conda installation suggested: conda install pytorch3d -c pytorch3d)
 - [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine) ≈ 0.5.4
 
 
 ## Requirements
-- [Binary pc_error and tmc3 (compiled on Ubuntu 20.04). And a dataset folder example](https://drive.google.com/file/d/1RC62ddx_YTp0ZtwUhIXknM614sESg0ca/view?usp=sharing)
+- [Binary pc_error and tmc3 compiled on Ubuntu 20.04. And an example of dataset folder](https://drive.google.com/file/d/1RC62ddx_YTp0ZtwUhIXknM614sESg0ca/view?usp=sharing)
 - [Test set](https://drive.google.com/file/d/1GT3L33ye70uku-HXI1pqU7diuiL3sRGo/view?usp=sharing)
 - [Trained model weights](https://drive.google.com/file/d/1ivYoBtZszP8R-hO5trlulRVwZ5vO9sM9/view?usp=sharing)
-- [ShapeNet (for training)](https://shapenet.org/download/shapenetcore)
-- [8iVFBv2 (for training)](https://plenodb.jpeg.org/pc/8ilabs)
+- [ShapeNetCorev2 OBJ format](https://huggingface.co/datasets/ShapeNet/ShapeNetCore/tree/main) (for training)
+- [8iVFBv2](https://plenodb.jpeg.org/pc/8ilabs) (for training. Optional)
 
 
 ## Train / Test
 Training:
 ```shell
 python train.py config/convolutional/lossy_coord/baseline.yaml \
-  train.device='0'
+  train.device='0' train.rundir_name='lossy_coord/baseline'
 ```
 Test:
 ```shell
@@ -44,7 +47,7 @@ DDP training:
 ```shell
 python -m torch.distributed.launch --nproc_per_node 2 \
   train.py config/convolutional/lossy_coord/baseline.yaml \
-  train.device='0,1'
+  train.device='0,1' train.rundir_name='lossy_coord/baseline'
 ```
 Resume training from "runs/lossy_coord/baseline_bak0" to "runs/lossy_coord/baseline":
 ```shell
@@ -58,6 +61,11 @@ python train.py config/convolutional/lossy_coord/baseline.yaml \
 The definition of training and testing configurations is lib/config.py
 
 
+## Known issues
+- For your first training on ShapeNetCorev2, the meshes in the dataset will be loaded and cached using Open3d. However, Open3d may complain about the loading of textures. This issue can be safely ignored for geometry compression, and won't appear next time. Besides, you can manually remove the cache of ShapeNetCorev2 in `datasets/ShapeNet/ShapeNetCore.v2/cache`. 
+- There are some experimental code snippets in this project. Only the models we mentioned above are recommended for use. 
+
+
 ## Citation
 If this work is helpful to your research, please consider citing:
 ````
@@ -69,3 +77,6 @@ If this work is helpful to your research, please consider citing:
   pages={2555-2560}
 }
 ````
+
+## Contact
+me for any reproduction issue. <yupp5@mail2.sysu.edu.cn>
