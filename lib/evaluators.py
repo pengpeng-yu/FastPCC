@@ -184,7 +184,7 @@ class ImageCompressionEvaluator(Evaluator):
     def log(self, im_recon, im, compressed_bytes, file_path, results_dir):
         im = im.cpu().numpy()
         im_recon = im_recon.cpu().numpy()
-        psnr = (np.log10(255 / np.linalg.norm(im.astype(np.double) - im_recon) * np.sqrt(im.size)) * 10).item()
+        psnr = (np.log10(255 / np.linalg.norm(im.astype(np.double) - im_recon) * np.sqrt(im.size)) * 20).item()
         pixels_num = im_recon.shape[1] * im_recon.shape[2]
 
         if results_dir is not None:
@@ -200,7 +200,7 @@ class ImageCompressionEvaluator(Evaluator):
 
     def show(self, results_dir: str) -> Dict[str, Union[int, float]]:
         if results_dir is not None:
-            with open(osp.join(results_dir, 'test_metric.txt'), 'w') as f:
+            with open(osp.join(results_dir, 'metric.txt'), 'w') as f:
                 f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
 
         mean_dict = defaultdict(float)
@@ -211,6 +211,6 @@ class ImageCompressionEvaluator(Evaluator):
         for key in mean_dict:
             mean_dict[key] /= samples_num
         if results_dir is not None:
-            with open(osp.join(results_dir, 'mean.txt'), 'w') as f:
+            with open(osp.join(results_dir, 'mean_metric.txt'), 'w') as f:
                 f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
         return mean_dict
