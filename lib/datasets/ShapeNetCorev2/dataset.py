@@ -8,7 +8,6 @@ from scipy.spatial.transform import Rotation as R
 import open3d as o3d
 import torch
 import torch.utils.data
-import MinkowskiEngine as ME
 
 from lib.data_utils import PCData, pc_data_collate_fn, \
     binvox_rw, write_ply_file, kd_tree_partition_randomly
@@ -154,12 +153,12 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                     file_path,
                     self.cfg.mesh_sample_points_num,
                     sample_method=self.cfg.mesh_sample_point_method,
-                )[0]
+                )
                 normalize_coords(xyz)
                 xyz *= self.cfg.mesh_sample_point_resolution
                 if self.gen_cache:
                     xyz = xyz.astype(self.cfg.ply_cache_dtype)
-                    xyz = xyz[ME.utils.sparse_quantize(xyz, return_maps_only=True)]
+                    xyz = np.unique(xyz, axis=0)
                     cache_file_path = self.cached_file_list[index]
                     write_ply_file(xyz, cache_file_path, self.cfg.ply_cache_dtype, make_dirs=True)
                     return
@@ -171,7 +170,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         if self.cfg.resolution != resolution:
             xyz *= self.cfg.resolution / resolution
-        xyz = ME.utils.sparse_quantize(xyz).numpy()  # floor to int32
+        xyz = np.unique(xyz.astype(np.int32), axis=0)
 
         par_num = self.cfg.kd_tree_partition_max_points_num
         if par_num != 0 and xyz.shape[0] > par_num:

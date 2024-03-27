@@ -12,7 +12,6 @@ import numpy as np
 import torch
 
 from lib.data_utils import PCData, write_ply_file, if_ply_has_vertex_normal
-from lib.metrics.misc import batch_image_psnr
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 
 

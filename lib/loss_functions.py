@@ -39,8 +39,3 @@ def chamfer_loss(points1: torch.Tensor, points2: torch.Tensor,
     loss = dist1.sum() * ((2 - loss_factor) / (points1.shape[0] * points1.shape[1])) + \
            dist2.sum() * (loss_factor / (points2.shape[0] * points2.shape[1]))
     return loss
-
-
-# TODO: emd
-def emd_loss():
-    pass

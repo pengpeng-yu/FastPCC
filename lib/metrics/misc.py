@@ -14,12 +14,6 @@ def precision_recall(pred, tgt):
             'total': len(tgt)}
 
 
-def batch_image_psnr(a: torch.Tensor, b: torch.Tensor, max_val):
-    assert a.shape == b.shape
-    return 10 * (torch.log10(torch.tensor([max_val ** 2], device=a.device, dtype=torch.float)) -
-                 torch.log10(F.mse_loss(a, b, reduction='none').mean(dim=[*range(1, a.ndim)])))
-
-
 def rgb_to_yuvbt709(rgb: torch.Tensor):
     assert rgb.dtype == torch.float32
     assert rgb.ndim == 2 and rgb.shape[1] == 3

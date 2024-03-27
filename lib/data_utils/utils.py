@@ -278,28 +278,6 @@ def im_pad(
     return holder, valid_range
 
 
-class KDNode:
-    def __init__(self, point: np.ndarray):
-        super(KDNode, self).__init__()
-        self.point = point
-        self.left: Union[np.ndarray, KDNode, None] = None
-        self.right: Union[np.ndarray, KDNode, None] = None
-
-
-def create_kd_tree(data: np.ndarray, max_num: int = 1) -> Union[KDNode, np.ndarray]:
-    if len(data) <= max_num:
-        return data
-
-    dim_index = np.argmax(np.var(data, dim=0)).item()
-    split_point = len(data) // 2
-    data_sorted = data[np.argpartition(data[:, dim_index], split_point)]
-
-    kd_node = KDNode(data_sorted[split_point])
-    kd_node.left = create_kd_tree(data_sorted[:split_point], max_num)
-    kd_node.right = create_kd_tree(data_sorted[split_point:], max_num)
-    return kd_node
-
-
 def kd_tree_partition(data: Union[np.ndarray, torch.Tensor], max_num: int,
                       extras: Union[List[np.ndarray], List[torch.Tensor]] = None)\
         -> Union[List[np.ndarray], List[torch.Tensor],
@@ -371,40 +349,6 @@ def kd_tree_partition_extended(data: np.ndarray, max_num: int, extras: List[np.n
             left_extra_partitions[idx].extend(p)
 
         return left_partitions, left_extra_partitions
-
-
-def kd_tree_partition_randomly_old(
-        data: np.ndarray, target_num: int, extras: Tuple[Optional[np.ndarray], ...] = (),
-        choice_fn: Callable[[np.ndarray], int] = lambda d: np.argmax(np.var(d, 0)).item()
-) -> Union[np.ndarray, Tuple[np.ndarray, Tuple[Optional[np.ndarray], ...]]]:
-    len_data = len(data)
-    if len_data <= target_num:
-        if len(extras) != 0:
-            return data, extras
-        else:
-            return data
-
-    dim_index = choice_fn(data)
-    is_left = np.random.rand() < 0.5
-
-    if len_data // 2 >= target_num:
-        split_point = len_data // 2
-        arg_sorted = np.argpartition(data[:, dim_index], split_point)
-        if is_left:
-            arg_sorted = arg_sorted[:split_point]
-        else:
-            arg_sorted = arg_sorted[split_point:]
-    else:
-        if is_left:
-            arg_sorted = np.argpartition(data[:, dim_index], target_num)[:target_num]
-        else:
-            arg_sorted = np.argpartition(data[:, dim_index], -target_num)[-target_num:]
-
-    return kd_tree_partition_randomly_old(
-        data[arg_sorted], target_num,
-        tuple(extra[arg_sorted] if isinstance(extra, np.ndarray) else extra for extra in extras),
-        choice_fn
-    )
 
 
 def kd_tree_partition_randomly(
@@ -517,28 +461,18 @@ def if_ply_has_vertex_normal(file_path: str):
 def o3d_coords_sampled_from_triangle_mesh(
         triangle_mesh_path: str, points_num: int,
         rotation_matrix: np.ndarray = None,
-        sample_method: str = 'uniform',
-        with_color: bool = False
-) -> Tuple[np.ndarray, np.ndarray]:
+        sample_method: str = 'uniform'
+) -> np.ndarray:
     mesh_object = o3d.io.read_triangle_mesh(triangle_mesh_path)
     if rotation_matrix is not None:
         mesh_object.rotate(rotation_matrix)
-    if sample_method == 'barycentric':
-        assert with_color is False
-        coord = resample_mesh_by_faces(
-            mesh_object,
-            density=points_num / len(mesh_object.triangles))
-        color = None
+    if sample_method == 'poisson_disk':
+        point_cloud = mesh_object.sample_points_poisson_disk(points_num)
+    elif sample_method == 'uniform':
+        point_cloud = mesh_object.sample_points_uniformly(points_num)
     else:
-        if sample_method == 'poisson_disk':
-            point_cloud = mesh_object.sample_points_poisson_disk(points_num)
-        elif sample_method == 'uniform':
-            point_cloud = mesh_object.sample_points_uniformly(points_num)
-        else:
-            raise NotImplementedError
-        coord = np.asarray(point_cloud.points)
-        color = np.asarray(point_cloud.colors)
-    return coord, color
+        raise NotImplementedError
+    return np.asarray(point_cloud.points)
 
 
 def normalize_coords(xyz: np.ndarray):
@@ -546,65 +480,3 @@ def normalize_coords(xyz: np.ndarray):
     coord_min = xyz.min(axis=0, keepdims=True)
     xyz -= coord_min
     np.divide(xyz, (coord_max - coord_min).max(), out=xyz)
-
-
-def resample_mesh_by_faces(mesh_cad, density=1.0):
-    """
-    https://chrischoy.github.io/research/barycentric-coordinate-for-mesh-sampling/
-    Samples point cloud on the surface of the model defined as vectices and
-    faces. This function uses vectorized operations so fast at the cost of some
-    memory.
-
-    param mesh_cad: low-polygon triangle mesh in o3d.geometry.TriangleMesh
-    param density: density of the point cloud per unit area
-    param return_numpy: return numpy format or open3d pointcloud format
-    return resampled point cloud
-
-    Reference :
-      [1] Barycentric coordinate system
-      \begin{align}
-        P = (1 - \sqrt{r_1})A + \sqrt{r_1} (1 - r_2) B + \sqrt{r_1} r_2 C
-      \end{align}
-    """
-    faces = np.array(mesh_cad.triangles).astype(int)
-    vertices = np.array(mesh_cad.vertices)
-
-    vec_cross = np.cross(
-        vertices[faces[:, 0], :] - vertices[faces[:, 2], :],
-        vertices[faces[:, 1], :] - vertices[faces[:, 2], :],
-    )
-    face_areas = np.sqrt(np.sum(vec_cross ** 2, 1))
-
-    n_samples = (np.sum(face_areas) * density).astype(int)
-    # face_areas = face_areas / np.sum(face_areas)
-
-    # Sample exactly n_samples. First, oversample points and remove redundant
-    # Bug fix by Yangyan (yangyan.lee@gmail.com)
-    n_samples_per_face = np.ceil(density * face_areas).astype(int)
-    floor_num = np.sum(n_samples_per_face) - n_samples
-    if floor_num > 0:
-        indices = np.where(n_samples_per_face > 0)[0]
-        floor_indices = np.random.choice(indices, floor_num, replace=True)
-        n_samples_per_face[floor_indices] -= 1
-
-    n_samples = np.sum(n_samples_per_face)
-
-    # Create a vector that contains the face indices
-    sample_face_idx = np.zeros((n_samples,), dtype=int)
-    acc = 0
-    for face_idx, _n_sample in enumerate(n_samples_per_face):
-        sample_face_idx[acc: acc + _n_sample] = face_idx
-        acc += _n_sample
-
-    r = np.random.rand(n_samples, 2)
-    A = vertices[faces[sample_face_idx, 0], :]
-    B = vertices[faces[sample_face_idx, 1], :]
-    C = vertices[faces[sample_face_idx, 2], :]
-
-    P = (
-        (1 - np.sqrt(r[:, 0:1])) * A
-        + np.sqrt(r[:, 0:1]) * (1 - r[:, 1:]) * B
-        + np.sqrt(r[:, 0:1]) * r[:, 1:] * C
-    )
-
-    return P

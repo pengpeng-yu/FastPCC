@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import torch.utils.data
 from scipy.spatial.transform import Rotation as R
-import MinkowskiEngine as ME
 
 from lib.data_utils import PCData, pc_data_collate_fn
 from lib.datasets.ModelNet.dataset_config import DatasetConfig
@@ -76,7 +75,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
                 file_path,
                 self.cfg.input_points_num,
                 sample_method=self.cfg.mesh_sample_point_method
-            )[0]
+            )
         else:
             raise NotImplementedError
 
@@ -88,7 +87,7 @@ class ModelNetDataset(torch.utils.data.Dataset):
         if self.cfg.resolution != 0:
             assert self.cfg.resolution > 1
             xyz *= self.cfg.resolution
-            xyz = ME.utils.sparse_quantize(xyz).numpy()
+            xyz = np.unique(xyz.astype(np.int32), axis=0)
 
         # classes
         if self.cfg.with_class:

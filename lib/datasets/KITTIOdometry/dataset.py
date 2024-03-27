@@ -7,7 +7,6 @@ import numpy as np
 import open3d as o3d
 import torch
 import torch.utils.data
-import MinkowskiEngine as ME
 
 from lib.data_utils import PCData, pc_data_collate_fn, write_ply_file
 from lib.datasets.KITTIOdometry.dataset_config import DatasetConfig
@@ -91,7 +90,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
             xyz *= self.cfg.coord_scaler
             xyz.round(out=xyz)
             xyz -= xyz.min(0)
-            xyz = ME.utils.sparse_quantize(xyz).numpy()
+            xyz = np.unique(xyz.astype(np.int32), axis=0)
             cache_file_path = self.cached_file_list[index]
             write_ply_file(xyz, cache_file_path, self.cfg.ply_cache_dtype, make_dirs=True)
             return

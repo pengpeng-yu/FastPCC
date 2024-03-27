@@ -19,8 +19,8 @@ tested on Ubuntu 20.04. This project is still under development.
 - open3d
 - plyfile
 - pytorch >= 1.7
-- [pytorch3d](https://github.com/facebookresearch/pytorch3d) (for knn_points. Conda installation suggested: conda install pytorch3d -c pytorch3d)
-- [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine) ≈ 0.5.4
+- [pytorch3d](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) (for knn_points. Conda installation suggested: conda install -c fvcore -c iopath -c conda-forge fvcore iopath; conda install pytorch3d -c pytorch3d)
+- [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#pip) ≈ 0.5.4
 
 
 ## Requirements
