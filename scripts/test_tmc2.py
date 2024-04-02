@@ -30,7 +30,7 @@ if single_frame_only:
     results_dir = "tests"
 else:  # all intra
     file_lists = (
-        'datasets/Owlii/list_basketball_player_dancer_all.txt',
+        'datasets/Owlii/list_basketball_player_dancer.txt',
         'datasets/8iVFBv2/list_all.txt'
     )
     resolutions = (2048, 1024)

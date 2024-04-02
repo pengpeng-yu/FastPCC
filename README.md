@@ -62,7 +62,7 @@ The definition of training and testing configurations is lib/config.py
 
 
 ## Known issues
-- For your first training on ShapeNetCorev2, the meshes in the dataset will be loaded and cached using Open3d. However, Open3d may complain about the loading of textures. This issue can be safely ignored for geometry compression, and won't appear next time. Besides, you can manually remove the cache of ShapeNetCorev2 in `datasets/ShapeNet/ShapeNetCore.v2/cache`. 
+- For your first training on ShapeNetCorev2, the meshes in the dataset will be loaded and cached using Open3D. However, Open3D may complain about the loading of textures. This issue can be safely ignored for geometry compression, and won't appear next time. Besides, you can manually remove the cache of ShapeNetCorev2 in `datasets/ShapeNet/ShapeNetCore.v2/cache`. 
 - There are some experimental code snippets in this project. Only the models we mentioned above are recommended for use. 
 
 

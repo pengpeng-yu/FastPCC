@@ -45,7 +45,7 @@ train:
 
   dataset_path: 'lib.datasets.PlyVoxel.8iVFBv2'
   dataset:
-    filelist_path: 'list_longdress_soldier_all.txt'
+    filelist_path: 'list_longdress_soldier.txt'
     kd_tree_partition_max_points_num: 120000
     with_color: True
     random_rotation: False
@@ -61,5 +61,5 @@ test:
   dataset_path:
     'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_Solid'
   dataset:
-    kd_tree_partition_max_points_num: 600000
+    kd_tree_partition_max_points_num: 0
     with_color: True
