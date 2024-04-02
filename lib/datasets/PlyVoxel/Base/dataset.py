@@ -70,9 +70,11 @@ class PlyVoxel(torch.utils.data.Dataset):
         xyz = xyz.astype(np.int32)
 
         if self.cfg.with_color:
-            color = np.asarray(point_cloud.colors).astype(np.float32)
+            color = np.asarray(point_cloud.colors)
             assert color.size != 0
             color *= 255
+            np.round(color, out=color)
+            color = color.astype(np.float32)
         else:
             color = None
 

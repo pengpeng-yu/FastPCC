@@ -1,9 +1,15 @@
+from typing import Union
+
 import numpy as np
+import torch
 
 
 def _split_by_3(a: np.ndarray):
-    x = np.full(a.shape, fill_value=0x1fffff, dtype=np.uint64)
-    x &= a
+    if isinstance(a, np.ndarray):  # assert np.all(0 <= a <= 0x1fffff)
+        x = a.astype(np.uint64)
+    else:
+        assert isinstance(a, torch.Tensor)
+        x = a.to(torch.int64, copy=True)
     x |= x << 32
     x &= 0x1f00000000ffff
     x |= x << 16
@@ -17,8 +23,7 @@ def _split_by_3(a: np.ndarray):
     return x
 
 
-def morton_encode_magicbits(xyz: np.ndarray) -> np.ndarray:
-    assert xyz.dtype == np.uint32
+def morton_encode_magicbits(xyz: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
     assert xyz.ndim == 2 and xyz.shape[1] == 3
     a = _split_by_3(xyz)
     a[:, 1] <<= 1

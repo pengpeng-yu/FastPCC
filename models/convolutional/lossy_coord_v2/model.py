@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import MinkowskiEngine as ME
 from MinkowskiEngine.MinkowskiSparseTensor import SparseTensorQuantizationMode
 
+from lib.morton_code import morton_encode_magicbits
 from lib.utils import Timer
 from lib.torch_utils import TorchCudaMaxMemoryAllocated, concat_loss_dicts
 from lib.data_utils import PCData
@@ -137,6 +138,9 @@ class PCC(nn.Module):
 
     def get_sparse_pc(self, xyz: torch.Tensor) -> ME.SparseTensor:
         global_coord_mg = self.set_global_cm()
+        if not self.training:
+            # Use morton order to keep order consistency between the encoder and the decoder.
+            xyz = xyz[torch.argsort(morton_encode_magicbits(xyz[:, 1:]))]
         sparse_pc_feature = torch.full(
             (xyz.shape[0], 1), fill_value=1,
             dtype=torch.float, device=xyz.device

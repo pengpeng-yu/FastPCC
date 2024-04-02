@@ -190,27 +190,12 @@ class GeoLosslessEntropyModel(nn.Module):
                 )
                 coord_bytes = self.binary_encode(coord_mask_pred.F, coord_mask)
                 coord_bytes_list.append(coord_bytes)
-                coord_recon_key = cm.insert_and_map(
-                    coord_mask_pred.C[coord_mask],
-                    coord_mask_pred.tensor_stride,
-                    coord_mask_pred.coordinate_map_key.get_key()[1] + 'pruned'
-                )[0]
+                coord_recon_key = coord_target_key
                 del coord_mask, coord_mask_pred
             else:
                 assert sub_hyper_decoder_coord is None
 
-            permutation_kernel_map = cm.kernel_map(
-                coord_target_key,
-                coord_recon_key,
-                kernel_size=1)[0][0].to(torch.long)
-            fea = ME.SparseTensor(
-                features=fea.F[permutation_kernel_map],
-                coordinate_map_key=coord_recon_key,
-                coordinate_manager=cm
-            )
-            del permutation_kernel_map, coord_target_key
-
-            fea_pred = sub_hyper_decoder_fea(lower_fea_recon, coord_recon_key)
+            fea_pred = sub_hyper_decoder_fea(lower_fea_recon, coord_target_key)
             if idx > self.skip_encoding_fea:
                 fea_res = sub_residual_block(fea, fea_pred).F
                 del fea
