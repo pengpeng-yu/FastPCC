@@ -6,14 +6,17 @@ from typing import List, Optional
 class BytesListUtils:
     @staticmethod
     def concat_bytes_list(bytes_list: List[bytes], bs_io: io.BytesIO = None) -> Optional[bytes]:
+        """
+        assert 0 <= bytes_list[i] <= 16777216 and len(bytes_list) > 1
+        """
         assert len(bytes_list) > 1
 
-        head_bits_num = -1
+        head_bits_num = 1
         bytes_len_bytes_list = []
         bytes_len_bytes_len_list = []
         for _ in bytes_list:
             bytes_len = len(_)
-            bytes_len_bytes_len = math.ceil(bytes_len.bit_length() / 8)
+            bytes_len_bytes_len = math.ceil(bytes_len.bit_length() / 8) or 1
             head_bits_num = max(head_bits_num, (bytes_len_bytes_len - 1).bit_length())
             bytes_len_bytes_list.append(bytes_len.to_bytes(bytes_len_bytes_len, 'little', signed=False))
             bytes_len_bytes_len_list.append(bytes_len_bytes_len)

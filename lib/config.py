@@ -1,5 +1,5 @@
 from lib.simple_config import SimpleConfig
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple, Union
 
 int_or_seq = Union[int, Tuple[int, ...]]
@@ -104,7 +104,7 @@ class TestConfig(SimpleConfig):
     # you can keep this empty to use the same dataloader class with the one in training during testing
     # this feature is defined in test.py
     dataset_path: str = ''
-    dataset: SimpleConfig = SimpleConfig()
+    dataset: SimpleConfig = field(default_factory=SimpleConfig)
 
     def __post_init__(self):
         if self.dataset_path != '':
@@ -115,8 +115,8 @@ class TestConfig(SimpleConfig):
 class Config(SimpleConfig):
     model_path: str = 'models.convolutional.lossy_coord'  # model_path.Config and model_path.Model are required
     model: SimpleConfig = None
-    train: TrainConfig = TrainConfig()
-    test: TestConfig = TestConfig()
+    train: TrainConfig = field(default_factory=TrainConfig)
+    test: TestConfig = field(default_factory=TestConfig)
 
     def __post_init__(self):
         self.local_auto_import()

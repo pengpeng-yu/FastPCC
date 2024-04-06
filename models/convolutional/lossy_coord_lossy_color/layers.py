@@ -4,7 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import MinkowskiEngine as ME
-from pytorch3d.ops import knn_points
+try:
+    from pytorch3d.ops import knn_points
+except Exception:
+    knn_points = None
 
 from lib.metrics.misc import gen_rgb_to_yuvbt709_param
 from lib.sparse_conv_layers import \

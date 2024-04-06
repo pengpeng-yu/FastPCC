@@ -33,12 +33,15 @@ from lib.data_utils import SampleData
 def main():
     # DDP arg
     for arg_idx, arg in enumerate(sys.argv):
-        if '--local_rank' in arg:
+        if '--local_rank' in arg or '--local-rank' in arg:
             local_rank = int(arg[len('--local_rank='):])
             sys.argv.pop(arg_idx)
             break
     else:
-        local_rank = -1
+        try:
+            local_rank = int(os.environ['LOCAL_RANK'])
+        except KeyError:
+            local_rank = -1
 
     # Initialize config, run dir, logger
     cfg = Config()
