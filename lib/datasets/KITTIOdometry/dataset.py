@@ -1,14 +1,11 @@
-import os
 import os.path as osp
 from glob import glob
-import hashlib
 
 import numpy as np
-import open3d as o3d
 import torch
 import torch.utils.data
 
-from lib.data_utils import PCData, pc_data_collate_fn, write_ply_file
+from lib.data_utils import PCData, pc_data_collate_fn, normalize_coords, write_ply_file
 from lib.datasets.KITTIOdometry.dataset_config import DatasetConfig
 
 
@@ -28,34 +25,6 @@ class KITTIOdometry(torch.utils.data.Dataset):
             self.file_list = self.gen_filelist(filelist_abs_path)
         else:
             self.file_list = self.load_filelist(filelist_abs_path)
-
-        self.cache_root = osp.join(
-            cfg.root, 'cache',
-            hashlib.new(
-                'md5',
-                f'{filelist_abs_path}'
-                f'{cfg.coord_scaler}'.encode('utf-8')
-            ).hexdigest()
-        )
-        self.cached_file_list = [
-            _.replace(cfg.root, self.cache_root, 1).replace('.bin', '.ply', 1)
-            for _ in self.file_list]
-
-        if osp.isfile(osp.join(
-            self.cache_root,
-            'train_all_cached' if is_training else 'test_all_cached'
-        )):
-            logger.info(f'using cache : {self.cache_root}')
-            self.file_list = self.cached_file_list
-            self.cached_file_list = None
-            self.use_cache = True
-            self.gen_cache = False
-        else:
-            os.makedirs(self.cache_root, exist_ok=True)
-            with open(osp.join(self.cache_root, 'dataset_config.yaml'), 'w') as f:
-                f.write(cfg.to_yaml())
-            self.use_cache = False
-            self.gen_cache = True
 
     def gen_filelist(self, filelist_abs_path):
         self.logger.info('no filelist is given. Trying to generate...')
@@ -78,28 +47,35 @@ class KITTIOdometry(torch.utils.data.Dataset):
 
     @staticmethod
     def get_subset(root, index):
-        return glob(osp.join(root, f'{index:02d}/velodyne/*.bin'))
+        return sorted(glob(osp.join(root, f'{index:02d}/velodyne/*.bin')))
 
     def __len__(self):
         return len(self.file_list)
 
     def __getitem__(self, index):
         file_path = self.file_list[index]
-        if self.gen_cache:  # TODO: provide original coords in eval
-            xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
-            xyz *= self.cfg.coord_scaler
-            xyz.round(out=xyz)
-            xyz -= xyz.min(0)
-            xyz = np.unique(xyz.astype(np.int32), axis=0)
-            cache_file_path = self.cached_file_list[index]
-            write_ply_file(xyz, cache_file_path, self.cfg.ply_cache_dtype, make_dirs=True)
-            return
-        else:
-            xyz = np.asarray(o3d.io.read_point_cloud(file_path).points)
+        xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
+        org_xyz = xyz.copy()
+
+        # For calculating distortion metrics
+        if not self.is_training:
+            p, n = osp.split(file_path)
+            cache_path = osp.join(p, n.replace('.bin', '_cached_xyz.ply'))
+            if not osp.isfile(cache_path):
+                write_ply_file(xyz, cache_path, estimate_normals=True)
+
+        org_point, scale = normalize_coords(xyz, np.float32)
+        xyz *= self.cfg.resolution
+        scale /= self.cfg.resolution
+        xyz.round(out=xyz)
+        xyz = np.unique(xyz.astype(np.int32), axis=0)
 
         return PCData(
             xyz=torch.from_numpy(xyz),
-            file_path=file_path
+            file_path=cache_path if not self.is_training else file_path,
+            org_xyz=(torch.from_numpy(org_xyz)),
+            resolution=128,
+            inv_transform=torch.from_numpy(np.concatenate((org_point.reshape(-1), scale[None]), 0, dtype=np.float32))
         )
 
     def collate_fn(self, batch):

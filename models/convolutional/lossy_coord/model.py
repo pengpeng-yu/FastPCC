@@ -342,16 +342,18 @@ class PCC(nn.Module):
             coord_recon = self.decompress(compressed_bytes, sparse_tensor_coords) if not_part else \
                 self.decompress_partitions(compressed_bytes, sparse_tensor_coords)
         ME.clear_global_coordinate_manager()
-        ret = self.evaluator.log_batch(
-            preds=[coord_recon],
-            targets=[pc_data.xyz[:, 1:] if not_part else pc_data.xyz[0]],
-            compressed_bytes_list=[compressed_bytes],
-            pc_data=pc_data,
-            extra_info_dicts=[{
+        ret = self.evaluator.log(
+            pred=coord_recon,
+            target=pc_data.xyz[:, 1:] if not_part else pc_data.xyz[0],
+            compressed_bytes=compressed_bytes,
+            file_path=pc_data.file_path[0],
+            resolution=pc_data.resolution[0],
+            results_dir=pc_data.results_dir,
+            extra_info_dict={
                 'encode time': encoder_t.elapsed_time,
                 'encode memory': encoder_m.max_memory_allocated_kb,
                 'decode time': decoder_t.elapsed_time,
-                'decode memory': decoder_m.max_memory_allocated_kb}]
+                'decode memory': decoder_m.max_memory_allocated_kb}
         )
         return ret
 

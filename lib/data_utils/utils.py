@@ -97,7 +97,9 @@ class PCData(SampleData):
                  class_idx: Union[int, torch.Tensor] = None,
                  resolution: Union[int, List[int]] = None,
                  file_path: Union[str, List[str]] = None,
-                 batch_size: int = 0):
+                 batch_size: int = 0,
+                 org_xyz: Union[torch.Tensor, List[torch.Tensor]] = None,
+                 inv_transform: Union[torch.Tensor, List[torch.Tensor]] = None):
         super(PCData, self).__init__()
         self.xyz = xyz
         self.color = color
@@ -106,6 +108,8 @@ class PCData(SampleData):
         self.resolution = resolution
         self.file_path = file_path
         self.batch_size = batch_size
+        self.org_xyz = org_xyz
+        self.inv_transform = inv_transform
 
     def to(self, device, non_blocking=False):
         super(PCData, self).to(device, non_blocking)
@@ -475,8 +479,13 @@ def o3d_coords_sampled_from_triangle_mesh(
     return np.asarray(point_cloud.points)
 
 
-def normalize_coords(xyz: np.ndarray):
+def normalize_coords(xyz: np.ndarray, dtype=np.float64) -> Tuple[np.ndarray, np.ndarray]:
     coord_max = xyz.max(axis=0, keepdims=True)
     coord_min = xyz.min(axis=0, keepdims=True)
+    scale = (coord_max - coord_min).max()
+    if dtype != np.float64:
+        coord_min = coord_min.astype(dtype)
+        scale = scale.astype(dtype)
     xyz -= coord_min
-    np.divide(xyz, (coord_max - coord_min).max(), out=xyz)
+    np.divide(xyz, scale, out=xyz)
+    return coord_min, scale

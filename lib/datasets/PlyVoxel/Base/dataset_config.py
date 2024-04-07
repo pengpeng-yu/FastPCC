@@ -11,8 +11,6 @@ class DatasetConfig(SimpleConfig):
     file_path_pattern: Union[str, Tuple[str, ...]] = '**/*.ply'  # works if filelist does not exist
 
     kd_tree_partition_max_points_num: int = 0
-    hard_partition_max_len: int = 0
-    hard_partition_min_points_num: int = 0
 
     with_color: bool = False
     random_rotation: bool = False

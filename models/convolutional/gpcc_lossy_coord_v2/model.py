@@ -196,11 +196,13 @@ class PCC(nn.Module):
             bs.write(em_bytes)
             compressed_bytes = bs.getvalue()
 
-        ret = self.evaluator.log_batch(
-            preds=[coord_recon],
-            targets=[pc_data.xyz[:, 1:]],
-            compressed_bytes_list=[compressed_bytes],
-            pc_data=pc_data
+        ret = self.evaluator.log(
+            pred=coord_recon,
+            target=pc_data.xyz[:, 1:],
+            compressed_bytes=compressed_bytes,
+            file_path=pc_data.file_path[0],
+            resolution=pc_data.resolution[0],
+            results_dir=pc_data.results_dir
         )
         return ret
 

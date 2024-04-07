@@ -288,11 +288,13 @@ class PCC(nn.Module):
                         bs.write(len(bytes_string).to_bytes(4, 'little', signed=False))
                         bs.write(bytes_string)
                     concat_bytes = bs.getvalue()
-                ret = self.evaluator.log_batch(
-                    preds=(pc_recon * pc_data.resolution[0]).round().to('cpu', torch.int32),
-                    targets=[pc_data.xyz[0]],
-                    compressed_bytes_list=[concat_bytes],
-                    pc_data=pc_data
+                ret = self.evaluator.log(
+                    pred=(pc_recon * pc_data.resolution[0]).round().to('cpu', torch.int32),
+                    target=pc_data.xyz[0],
+                    compressed_bytes=concat_bytes,
+                    file_path=pc_data.file_path[0],
+                    resolution=pc_data.resolution[0],
+                    results_dir=pc_data.results_dir
                 )
                 return ret
 

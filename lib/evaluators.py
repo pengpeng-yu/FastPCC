@@ -11,8 +11,9 @@ except ImportError: cv2 = None
 import numpy as np
 import torch
 
-from lib.data_utils import PCData, write_ply_file, if_ply_has_vertex_normal
+from lib.data_utils import write_ply_file, if_ply_has_vertex_normal
 from lib.metrics.pc_error_wapper import mpeg_pc_error
+from lib.loss_functions import chamfer_loss
 
 
 class Evaluator:
@@ -45,94 +46,83 @@ class PCCEvaluator(Evaluator):
         self.file_path_to_info_run_res: Dict[str, mp.pool.AsyncResult] = {}
 
     @torch.no_grad()
-    def log_batch(self,
-                  preds: Union[List[torch.Tensor], torch.Tensor],
-                  targets: Union[List[torch.Tensor], torch.Tensor],
-                  compressed_bytes_list: List[bytes],
-                  pc_data: PCData,
-                  preds_color: Union[List[torch.Tensor], torch.Tensor] = None,
-                  targets_color: Union[List[torch.Tensor], torch.Tensor] = None,
-                  extra_info_dicts: List[Dict[str, Union[str, int, float]]] = None):
+    def log(self,
+            pred: torch.Tensor,
+            target: torch.Tensor,
+            compressed_bytes: bytes,
+            file_path: str,
+            resolution: int,
+            results_dir: str = None,
+            pred_color: torch.Tensor = None,
+            target_color: torch.Tensor = None,
+            extra_info_dict: Dict[str, Union[str, int, float]] = None):
         """
-        "preds" and "targets" are supposed to be lists contain unnormalized
-        coordinates with resolution specified in pc_data.resolution (GPU or CPU torch.int32).
-        "color" are supposed to be unnormalized RGBs (GPU or CPU torch.float32).
+        "pred" and "target" are coordinates with a specified resolution.
+        "pred_color" and "target_color" are RGB colors. (0 ~ 255).
         """
-        batch_size = len(preds)
-        assert batch_size == len(targets) == len(compressed_bytes_list)
-        if pc_data.results_dir is not None:
-            assert batch_size == len(pc_data.resolution) == len(pc_data.file_path)
-        if preds_color is not None or targets_color is not None:
-            have_color = True
-            assert batch_size == len(preds_color) == len(targets_color)
-        else:
-            have_color = False
+        have_color = pred_color is not None and target_color is not None
+        assert pred.ndim == target.ndim == 2
+        assert pred.shape[1] == target.shape[1] == 3
 
-        for idx in range(batch_size):
-            file_info_dict = {}
+        file_info_dict = {
+            'input_points_num': target.shape[0],
+            'output_points_num': pred.shape[0],
+            'compressed_bytes': len(compressed_bytes),
+            'bpp': len(compressed_bytes) * 8 / target.shape[0]
+        }
+        if target.dtype.is_floating_point:  # For LiDAR datasets.
+            try:
+                file_info_dict['chamfer'] = chamfer_loss(
+                    pred[None].to(target.dtype),
+                    target[None].to(pred.device)).item()
+            except Exception as e:
+                print(e)
+        if extra_info_dict is not None:
+            file_info_dict.update(extra_info_dict)
 
-            file_path = pc_data.file_path[idx]
-            pred = preds[idx]
-            target = targets[idx]
-            assert pred.ndim == target.ndim == 2
-            assert pred.shape[1] == target.shape[1] == 3
-            compressed_bytes = compressed_bytes_list[idx]
-            resolution = pc_data.resolution[idx]
+        if results_dir is not None:
+            out_file_path = osp.join(
+                results_dir, osp.splitext(file_path)[0]
+            )
+            os.makedirs(osp.dirname(out_file_path), exist_ok=True)
+            compressed_path = out_file_path + '.bin'
+            reconstructed_path = out_file_path + '_recon.ply'
+            with open(compressed_path, 'wb') as f:
+                f.write(compressed_bytes)
+            write_ply_file(pred, reconstructed_path, rgb=pred_color if have_color else None)
 
-            bpp = len(compressed_bytes) * 8 / target.shape[0]
-
-            if pc_data.results_dir is not None:
-                out_file_path = osp.join(
-                    pc_data.results_dir, osp.splitext(file_path)[0]
-                )
-                os.makedirs(osp.dirname(out_file_path), exist_ok=True)
-                compressed_path = out_file_path + '.bin'
-                reconstructed_path = out_file_path + '_recon.ply'
-                with open(compressed_path, 'wb') as f:
-                    f.write(compressed_bytes)
-                file_info_dict.update(
-                    {
-                        'input_points_num': target.shape[0],
-                        'output_points_num': pred.shape[0],
-                        'compressed_bytes': len(compressed_bytes),
-                        'bpp': bpp
-                    }
-                )
-                if extra_info_dicts is not None:
-                    file_info_dict.update(extra_info_dicts[idx])
-                write_ply_file(pred, reconstructed_path, rgb=preds_color[idx] if have_color else None)
-
-                if self.cal_mpeg_pc_error:
-                    write_ply_for_orig_pc = False
-                    if file_path.endswith('.ply'):
-                        if_target_has_normal = if_ply_has_vertex_normal(file_path)
-                        if if_target_has_normal:
-                            normal_file_path = file_path
-                        else:
-                            normal_file_path = osp.splitext(file_path)[0] + '_n.ply'
-                            if not osp.isfile(normal_file_path):
-                                normal_file_path = out_file_path + '.ply'
-                                write_ply_for_orig_pc = True
-                    else:
-                        normal_file_path = out_file_path + '.ply'
-                        write_ply_for_orig_pc = True
-                    if write_ply_for_orig_pc:
-                        file_path = out_file_path + '.ply'
-                        write_ply_file(
-                            target, file_path, rgb=targets_color[idx] if have_color else None,
-                            estimate_normals=True
-                        )
-                        print(f'Wrote Ply file to {file_path} with normals estimation')
+            if self.cal_mpeg_pc_error:
+                write_ply_for_orig_pc = False
+                if file_path.endswith('.ply'):
+                    if_target_has_normal = if_ply_has_vertex_normal(file_path)
+                    if if_target_has_normal:
                         normal_file_path = file_path
-                    self.file_path_to_info_run_res[file_path] = self.mpeg_pc_error_pool.apply_async(
-                        mpeg_pc_error,
-                        (osp.abspath(file_path),
-                         osp.abspath(reconstructed_path),
-                         resolution, normal_file_path, False, have_color)
+                    else:
+                        normal_file_path = osp.splitext(file_path)[0] + '_n.ply'
+                        if not osp.isfile(normal_file_path):
+                            normal_file_path = out_file_path + '.ply'
+                            write_ply_for_orig_pc = True
+                else:
+                    normal_file_path = out_file_path + '.ply'
+                    write_ply_for_orig_pc = True
+                if write_ply_for_orig_pc:
+                    file_path = out_file_path + '.ply'
+                    write_ply_file(
+                        target, file_path, rgb=target_color if have_color else None,
+                        estimate_normals=True
                     )
-            if file_path in self.file_path_to_info:
-                print(f'Warning: Duplicated test sample {file_path}')
-            self.file_path_to_info[file_path] = file_info_dict
+                    print(f'Wrote Ply file to {file_path} with normals estimation')
+                    normal_file_path = file_path
+                self.file_path_to_info_run_res[file_path] = self.mpeg_pc_error_pool.apply_async(
+                    mpeg_pc_error,
+                    (osp.abspath(file_path),
+                     osp.abspath(reconstructed_path),
+                     resolution, normal_file_path, False, have_color)
+                )
+
+        if file_path in self.file_path_to_info:
+            print(f'Warning: Duplicated test sample {file_path}')
+        self.file_path_to_info[file_path] = file_info_dict
 
         return True
 

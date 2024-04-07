@@ -122,6 +122,8 @@ class PCC(nn.Module):
             return self.train_forward(pc_data.xyz, pc_data.training_step, pc_data.batch_size)
         else:
             assert pc_data.batch_size == 1, 'Only supports batch size == 1 during testing.'
+            assert pc_data.xyz.is_cuda, 'MinkowskiEngine appears to generate morton-order coordinates ' \
+                                        'only when using CUDA.'
             return self.test_forward(pc_data)
 
     def set_global_cm(self):
@@ -203,16 +205,30 @@ class PCC(nn.Module):
             coord_recon = self.decompress(compressed_bytes) if not_part else \
                 self.decompress_partitions(compressed_bytes)
         ME.clear_global_coordinate_manager()
-        ret = self.evaluator.log_batch(
-            preds=[coord_recon],
-            targets=[pc_data.xyz[:, 1:] if not_part else pc_data.xyz[0]],
-            compressed_bytes_list=[compressed_bytes],
-            pc_data=pc_data,
-            extra_info_dicts=[{
+        # A quick fix for LiDAR datasets.
+        if pc_data.inv_transform is not None:
+            inv_trans = pc_data.inv_transform[0].to(coord_recon.device)
+            pred_xyz = coord_recon * inv_trans[3]
+            pred_xyz += inv_trans[None, :3]
+            compressed_bytes = pc_data.inv_transform[0].numpy().astype('<f4').tobytes() + compressed_bytes
+        else:
+            pred_xyz = coord_recon
+        if pc_data.org_xyz is not None:
+            target_xyz = pc_data.org_xyz[0]
+        else:
+            target_xyz = (pc_data.xyz[:, 1:] if not_part else pc_data.xyz[0])
+        ret = self.evaluator.log(
+            pred=pred_xyz,
+            target=target_xyz,
+            compressed_bytes=compressed_bytes,
+            file_path=pc_data.file_path[0],
+            resolution=pc_data.resolution[0],
+            results_dir=pc_data.results_dir,
+            extra_info_dict={
                 'encode time': encoder_t.elapsed_time,
                 'encode memory': encoder_m.max_memory_allocated_kb,
                 'decode time': decoder_t.elapsed_time,
-                'decode memory': decoder_m.max_memory_allocated_kb}]
+                'decode memory': decoder_m.max_memory_allocated_kb}
         )
         return ret
 
