@@ -51,7 +51,7 @@ class PCCEvaluator(Evaluator):
             target: torch.Tensor,
             compressed_bytes: bytes,
             file_path: str,
-            resolution: int,
+            resolution: float,
             results_dir: str = None,
             pred_color: torch.Tensor = None,
             target_color: torch.Tensor = None,

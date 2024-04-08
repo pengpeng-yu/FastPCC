@@ -74,7 +74,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
             xyz=torch.from_numpy(xyz),
             file_path=cache_path if not self.is_training else file_path,
             org_xyz=(torch.from_numpy(org_xyz)),
-            resolution=128,
+            resolution=59.70 + 1,  # For the peak value in pc_error
             inv_transform=torch.from_numpy(np.concatenate((org_point.reshape(-1), scale[None]), 0, dtype=np.float32))
         )
 

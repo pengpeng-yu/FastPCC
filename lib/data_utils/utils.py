@@ -95,7 +95,7 @@ class PCData(SampleData):
                  color: Union[torch.Tensor, List[torch.Tensor]] = None,
                  normal: Union[torch.Tensor, List[torch.Tensor]] = None,
                  class_idx: Union[int, torch.Tensor] = None,
-                 resolution: Union[int, List[int]] = None,
+                 resolution: Union[float, List[float]] = None,
                  file_path: Union[str, List[str]] = None,
                  batch_size: int = 0,
                  org_xyz: Union[torch.Tensor, List[torch.Tensor]] = None,
