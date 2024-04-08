@@ -13,7 +13,6 @@ import torch
 
 from lib.data_utils import write_ply_file, if_ply_has_vertex_normal
 from lib.metrics.pc_error_wapper import mpeg_pc_error
-from lib.loss_functions import chamfer_loss
 
 
 class Evaluator:
@@ -70,13 +69,6 @@ class PCCEvaluator(Evaluator):
             'compressed_bytes': len(compressed_bytes),
             'bpp': len(compressed_bytes) * 8 / target.shape[0]
         }
-        if target.dtype.is_floating_point:  # For LiDAR datasets.
-            try:
-                file_info_dict['chamfer'] = chamfer_loss(
-                    pred[None].to(target.dtype),
-                    target[None].to(pred.device)).item()
-            except Exception as e:
-                print(e)
         if extra_info_dict is not None:
             file_info_dict.update(extra_info_dict)
 
