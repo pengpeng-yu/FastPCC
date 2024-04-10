@@ -122,8 +122,8 @@ class PCC(nn.Module):
             return self.train_forward(pc_data.xyz, pc_data.training_step, pc_data.batch_size)
         else:
             assert pc_data.batch_size == 1, 'Only supports batch size == 1 during testing.'
-            assert pc_data.xyz.is_cuda, 'MinkowskiEngine appears to generate morton-order coordinates ' \
-                                        'only when using CUDA.'
+            assert pc_data.xyz[-1].is_cuda, 'MinkowskiEngine appears to generate morton-order coordinates ' \
+                                            'only when using CUDA.'
             return self.test_forward(pc_data)
 
     def set_global_cm(self):
