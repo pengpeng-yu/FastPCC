@@ -133,7 +133,6 @@ def compute_multiple_bdrate():
         # 'Ours w/o feature residual':
         #     'convolutional/lossy_coord_v2/wo_residual_r*',
         # 'Ours part6e5': 'convolutional/lossy_coord_v2/baseline_part6e5_r*',
-        # 'Ours sample5e5': 'convolutional/lossy_coord_v2/baseline_sample5e5_r*',
         # 'Ours color': 'convolutional/lossy_coord_lossy_color/baseline_r*',
 
         'PCGCv2': 'convolutional/lossy_coord/baseline',

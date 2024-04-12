@@ -19,7 +19,6 @@ config_paths = [
     'lossy_coord_v2/gpcc_based_r*.yaml',
     'lossy_coord_v2/wo_residual_r*.yaml',
     'lossy_coord/baseline.yaml',
-    'lossy_coord_v2/baseline_sample5e5_r*.yaml',
     'lossy_coord_lossy_color/baseline_r*.yaml'
 ]
 sub_config_to_weight_path_maps = {
