@@ -64,9 +64,10 @@ class KITTIOdometry(torch.utils.data.Dataset):
             if not osp.isfile(cache_path):
                 write_ply_file(xyz, cache_path, estimate_normals=True)
 
-        org_point, scale = normalize_coords(xyz, np.float32)
-        xyz *= self.cfg.resolution
-        scale /= self.cfg.resolution
+        org_point = xyz.min(0)
+        xyz -= org_point
+        scale = 400 / (self.cfg.resolution - 1)
+        xyz /= scale
         xyz.round(out=xyz)
         xyz = np.unique(xyz.astype(np.int32), axis=0)
 
@@ -75,7 +76,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
             file_path=cache_path if not self.is_training else file_path,
             org_xyz=(torch.from_numpy(org_xyz)),
             resolution=59.70 + 1,  # For the peak value in pc_error
-            inv_transform=torch.from_numpy(np.concatenate((org_point.reshape(-1), scale[None]), 0, dtype=np.float32))
+            inv_transform=torch.from_numpy(np.concatenate((org_point.reshape(-1), (scale,)), 0, dtype=np.float32))
         )
 
     def collate_fn(self, batch):

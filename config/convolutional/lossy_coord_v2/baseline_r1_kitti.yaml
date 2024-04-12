@@ -8,14 +8,16 @@ model:
 
 train:
   batch_size: 4
+  epochs: 30
+  lr_step_size: 10
   grad_acc_steps: 2
   test_frequency: 0
   dataset_path: 'lib.datasets.KITTIOdometry'
   dataset:
-    resolution: 4096
+    resolution: 8192
 
 
 test:
   dataset_path: 'lib.datasets.KITTIOdometry'
   dataset:
-    resolution: 4096
+    resolution: 8192
