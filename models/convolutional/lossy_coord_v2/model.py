@@ -292,11 +292,3 @@ class PCC(nn.Module):
 
         coord_recon_concat = torch.cat(coord_recon_list, 0)
         return coord_recon_concat
-
-    def train(self, mode: bool = True):
-        """
-        Use model.train() to reset evaluator.
-        """
-        if mode is True:
-            self.evaluator.reset()
-        return super(PCC, self).train(mode=mode)

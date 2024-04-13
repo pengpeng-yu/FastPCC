@@ -265,14 +265,6 @@ class Model(nn.Module):
         ).to(dtype=dtype, device=next(self.parameters()).device)
         return target, cdf
 
-    def train(self, mode: bool = True):
-        """
-        Use model.train() to reset evaluator.
-        """
-        if mode is True:
-            self.evaluator.reset()
-        return super(Model, self).train(mode=mode)
-
 
 def int_to_bytes(x, length, byteorder='little', signed=False):
     assert isinstance(x, int)

@@ -313,14 +313,6 @@ class PCC(nn.Module):
     def decompress(self):
         pass
 
-    def train(self, mode: bool = True):
-        """
-        Use model.train() to reset evaluator.
-        """
-        if mode is True:
-            self.evaluator.reset()
-        return super(PCC, self).train(mode=mode)
-
 
 def main_t():
     cfg = ModelConfig()

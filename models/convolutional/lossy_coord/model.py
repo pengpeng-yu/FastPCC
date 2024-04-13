@@ -517,11 +517,3 @@ class PCC(nn.Module):
         if factor != 1:
             recon_loss *= factor
         return recon_loss
-
-    def train(self, mode: bool = True):
-        """
-        Use model.train() to reset evaluator.
-        """
-        if mode is True:
-            self.evaluator.reset()
-        return super(PCC, self).train(mode=mode)

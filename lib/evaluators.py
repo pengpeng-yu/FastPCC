@@ -38,7 +38,8 @@ class PCCEvaluator(Evaluator):
                  mpeg_pc_error_processes: int = 16):
         super(PCCEvaluator, self).__init__()
         self.cal_mpeg_pc_error = cal_mpeg_pc_error
-        self.mpeg_pc_error_pool = mp.Pool(mpeg_pc_error_processes)
+        self.mpeg_pc_error_processes = mpeg_pc_error_processes
+        self.working = False
 
     def reset(self):
         self.file_path_to_info: Dict[str, Dict[str, Union[int, float]]] = {}
@@ -59,6 +60,11 @@ class PCCEvaluator(Evaluator):
         "pred" and "target" are coordinates with a specified resolution.
         "pred_color" and "target_color" are RGB colors. (0 ~ 255).
         """
+        if not self.working:
+            self.reset()
+            self.mpeg_pc_error_pool = mp.Pool(self.mpeg_pc_error_processes)
+            self.working = True
+
         have_color = pred_color is not None and target_color is not None
         assert pred.ndim == target.ndim == 2
         assert pred.shape[1] == target.shape[1] == 3
@@ -152,17 +158,27 @@ class PCCEvaluator(Evaluator):
         if results_dir is not None:
             with open(osp.join(results_dir, 'mean_metric.txt'), 'w') as f:
                 f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
+
+        self.reset()
+        self.mpeg_pc_error_pool.close()
+        self.mpeg_pc_error_pool.join()
+        self.working = False
         return mean_dict
 
 
 class ImageCompressionEvaluator(Evaluator):
     def __init__(self):
         super(ImageCompressionEvaluator, self).__init__()
+        self.working = False
 
     def reset(self):
         self.file_path_to_info = {}
 
     def log(self, im_recon, im, compressed_bytes, file_path, results_dir):
+        if not self.working:
+            self.reset()
+            self.working = True
+
         im = im.cpu().numpy()
         im_recon = im_recon.cpu().numpy()
         psnr = (np.log10(255 / np.linalg.norm(im.astype(np.double) - im_recon) * np.sqrt(im.size)) * 20).item()
@@ -194,4 +210,7 @@ class ImageCompressionEvaluator(Evaluator):
         if results_dir is not None:
             with open(osp.join(results_dir, 'mean_metric.txt'), 'w') as f:
                 f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
+
+        self.reset()
+        self.working = False
         return mean_dict

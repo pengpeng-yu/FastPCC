@@ -205,11 +205,3 @@ class PCC(nn.Module):
             results_dir=pc_data.results_dir
         )
         return ret
-
-    def train(self, mode: bool = True):
-        """
-        Use model.train() to reset evaluator.
-        """
-        if mode is True:
-            self.evaluator.reset()
-        return super(PCC, self).train(mode=mode)
