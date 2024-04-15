@@ -5,12 +5,11 @@ import hashlib
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-import open3d as o3d
 import torch
 import torch.utils.data
 
 from lib.data_utils import PCData, pc_data_collate_fn, \
-    binvox_rw, write_ply_file, kd_tree_partition_randomly
+    binvox_rw, kd_tree_partition_randomly
 from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
 from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coords
 
@@ -108,7 +107,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 ).hexdigest()
             )
             self.cached_file_list = [
-                _.replace(cfg.root, self.cache_root, 1).replace('.obj', '.ply', 1)
+                _.replace(cfg.root, self.cache_root, 1).replace('.obj', '.npz', 1)
                 for _ in self.file_list]
             if osp.isfile(osp.join(
                 self.cache_root,
@@ -147,7 +146,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
             resolution = 128
         else:
             if self.use_cache:
-                xyz = np.asarray(o3d.io.read_point_cloud(file_path).points)
+                xyz = np.load(file_path)['xyz'].astype(np.float64)
             else:
                 xyz = o3d_coords_sampled_from_triangle_mesh(
                     file_path,
@@ -160,7 +159,8 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                     xyz = xyz.astype(self.cfg.ply_cache_dtype)
                     xyz = np.unique(xyz, axis=0)
                     cache_file_path = self.cached_file_list[index]
-                    write_ply_file(xyz, cache_file_path, self.cfg.ply_cache_dtype, make_dirs=True)
+                    os.makedirs(osp.dirname(cache_file_path), exist_ok=True)
+                    np.savez_compressed(xyz=xyz.astype(self.cfg.ply_cache_dtype))
                     return
             resolution = self.cfg.mesh_sample_point_resolution
 
@@ -170,7 +170,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         if self.cfg.resolution != resolution:
             xyz *= self.cfg.resolution / resolution
-        xyz = np.unique(xyz.astype(np.int32), axis=0)
+        # xyz = np.unique(xyz.astype(np.int32), axis=0)
 
         par_num = self.cfg.kd_tree_partition_max_points_num
         if par_num != 0 and xyz.shape[0] > par_num:
