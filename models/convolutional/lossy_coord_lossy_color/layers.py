@@ -58,7 +58,7 @@ class Encoder(nn.Module):
                     region_type='HYPER_CUBE', act=act
                 ),
                 ConvBlock(
-                    ch, ch if idx != len(intra_channels) - 2 else out_channels * 2, 3, 1,
+                    ch, ch if idx != len(intra_channels) - 2 else out_channels, 3, 1,
                     region_type=region_type, act=act
                 )
             ))
@@ -138,14 +138,16 @@ class Decoder(nn.Module):
 
     def train_forward(self, fea, points_num_list, target_key, target_rgb):
         loss_dict = {}
+        inv_num_list = [1 / sum(_) for _ in points_num_list] if points_num_list is not None else None
         for idx, (upsample_block, classify_block) in \
                 enumerate(zip(self.upsample_blocks, self.classify_blocks)):
+            inv_idx = len(self.upsample_blocks) - idx - 1
             fea = upsample_block(fea)
             pred = classify_block(fea)
             keep = self.get_keep(pred, points_num_list, [2 ** len(self.classify_blocks)] * 3)
             keep_target = self.get_target(pred, target_key)
             keep |= keep_target
-            loss_dict[f'coord_{idx}_recon_loss'] = self.get_coord_recon_loss(pred, keep_target)
+            loss_dict[f'coord_{inv_idx}_recon_loss'] = self.get_coord_recon_loss(pred, keep_target)
             if idx != len(self.upsample_blocks) - 1:
                 fea = self.pruning(fea, keep)
         fea = ME.cat(
@@ -159,6 +161,10 @@ class Decoder(nn.Module):
             pred, fea.F, keep, target_key, target_rgb,
         )
         loss_dict['color_recon_loss'] = rgb_loss
+        if inv_num_list is not None and len(inv_num_list) != 1:
+            tmp_sum = sum(inv_num_list)
+            for idx in range(len(self.upsample_blocks)):
+                loss_dict[f'coord_{idx}_recon_loss'] *= inv_num_list[idx] / tmp_sum * len(inv_num_list)
         return loss_dict
 
     def test_forward(self, fea, points_num_list):
@@ -504,8 +510,7 @@ class EncoderGeoLossl(nn.Module):
         assert len(in_channels) + 1 == len(out_channels)
 
         def make_block(down, in_ch, out_ch):
-            intra_out_ch = max(in_ch, out_ch) * 2
-            in_ch *= 2
+            intra_out_ch = max(in_ch, out_ch)
             args = (2, 2) if down else (3, 1)
             return nn.Sequential(
                 ConvBlock(in_ch, in_ch, *args,
@@ -517,7 +522,7 @@ class EncoderGeoLossl(nn.Module):
             )
 
         self.blocks_out_first = MEMLPBlock(
-            in_channels[0] * 2, out_channels[0], act=act
+            in_channels[0], out_channels[0], act=act
         ) if skip_encoding_fea < 0 else None
         self.blocks = nn.ModuleList()
         self.blocks_out = nn.ModuleList()

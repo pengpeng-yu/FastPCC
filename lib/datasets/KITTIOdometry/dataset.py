@@ -2,10 +2,11 @@ import os.path as osp
 from glob import glob
 
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 import torch
 import torch.utils.data
 
-from lib.data_utils import PCData, pc_data_collate_fn, normalize_coords, write_ply_file
+from lib.data_utils import PCData, pc_data_collate_fn, write_ply_file
 from lib.datasets.KITTIOdometry.dataset_config import DatasetConfig
 
 
@@ -64,12 +65,21 @@ class KITTIOdometry(torch.utils.data.Dataset):
             if not osp.isfile(cache_path):
                 write_ply_file(xyz, cache_path, estimate_normals=True)
 
+        if self.cfg.random_rotation:
+            xyz = R.from_euler('z', np.random.uniform(0, 2 * np.pi)).apply(xyz).astype(np.float32)
+
         org_point = xyz.min(0)
         xyz -= org_point
         scale = 400 / (self.cfg.resolution - 1)
         xyz /= scale
         xyz.round(out=xyz)
         xyz = np.unique(xyz.astype(np.int32), axis=0)
+
+        if self.cfg.random_flip:
+            if np.random.rand() > 0.5:
+                xyz[:, 0] = -xyz[:, 0] + xyz[:, 0].max()
+            if np.random.rand() > 0.5:
+                xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max()
 
         return PCData(
             xyz=torch.from_numpy(xyz),

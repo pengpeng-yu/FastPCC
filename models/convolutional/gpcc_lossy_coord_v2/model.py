@@ -21,11 +21,8 @@ class PCC(nn.Module):
 
     @staticmethod
     def params_divider(s: str) -> int:
-        if 'em_lossless_based' in s:
-            if 'bottom_fea_entropy_model' in s:
-                return 2
-            else:
-                return 1
+        if 'bottom_fea_entropy_model' in s:
+            return 1
         else:
             return 0
 
@@ -185,8 +182,7 @@ class PCC(nn.Module):
     def test_forward(self, pc_data: PCData):
         feature, points_num_list = self.encoder(self.get_sparse_pc(pc_data.xyz))
         feature_recon, em_bytes = self.em_lossless_based(feature, 1)
-        decoder_fea = self.decoder(feature_recon, points_num_list)
-        coord_recon = decoder_fea.C[:, 1:]
+        coord_recon = self.decoder(feature_recon, points_num_list)
 
         with io.BytesIO() as bs:
             if self.cfg.adaptive_pruning:

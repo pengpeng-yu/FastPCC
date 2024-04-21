@@ -24,11 +24,8 @@ class PCC(nn.Module):
 
     @staticmethod
     def params_divider(s: str) -> int:
-        if 'em_lossless_based' in s:
-            if 'bottom_fea_entropy_model' in s:
-                return 2
-            else:
-                return 1
+        if 'bottom_fea_entropy_model' in s:
+            return 1
         else:
             return 0
 

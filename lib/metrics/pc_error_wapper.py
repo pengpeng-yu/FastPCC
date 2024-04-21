@@ -50,4 +50,9 @@ def mpeg_pc_error(
 
     if metric_dict == {}:
         raise RuntimeError(subp_stdout)
+    metric_dict["mse1+mse2 (p2point)"] = metric_dict["mse1      (p2point)"] + metric_dict["mse2      (p2point)"]
+    metric_dict["mse1+mse2/2(p2point)"] = metric_dict["mse1+mse2 (p2point)"] / 2
+    if color:
+        metric_dict["c[3],PSNRF"] = metric_dict["c[0],PSNRF"] * 0.75 + \
+            metric_dict["c[1],PSNRF"] / 8 + metric_dict["c[2],PSNRF"] / 8
     return metric_dict

@@ -1,0 +1,4 @@
+# include "config/convolutional/lossy_coord_v2/gpcc_based_r5.yaml"
+
+model:
+  bits_loss_factor: 3.0

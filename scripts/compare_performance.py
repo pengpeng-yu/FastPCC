@@ -63,10 +63,10 @@ def write_metric_to_csv(titles: Tuple[Union[List[str], Tuple[str, ...]], ...],
 def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
                   output_dir, d1=True, c=-1, hook=None):
     distortion_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
-    y_label = 'D1 PSNR' if d1 else 'D2 PSNR'
+    y_label = 'D1 PSNR (dB)' if d1 else 'D2 PSNR (dB)'
     if c != -1:
         distortion_key = f'c[{c}],PSNRF'
-        y_label = 'Y PSNR' if c == 0 else 'U PSNR' if c == 1 else 'V PSNR'
+        y_label = 'Y PSNR (dB)' if c == 0 else 'U PSNR (dB)' if c == 1 else 'V PSNR (dB)' if c == 2 else 'YUV PSNR (dB)'
     output_dir = osp.join(output_dir, f'sample-wise {y_label}')
     if osp.exists(output_dir):
         shutil.rmtree(output_dir)
@@ -85,7 +85,7 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
             if sample_name not in method_json: continue
             tmp_x_axis = method_json[sample_name]['bpp']
             if distortion_key not in method_json[sample_name]:
-                print(f'Plot "{y_label}" Skipped Due to missing of '
+                print(f'Skip plotting "{y_label}" due to the missing of '
                       f'{method_name}: {sample_name}: {distortion_key}')
                 shutil.rmtree(output_dir)
                 return

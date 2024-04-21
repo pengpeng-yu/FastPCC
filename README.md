@@ -26,7 +26,7 @@ tested on Ubuntu 20.04. This project is still under development.
 ## Requirements
 - [Binary pc_error and tmc3 compiled on Ubuntu 20.04. And an example of dataset folder](https://drive.google.com/file/d/1RC62ddx_YTp0ZtwUhIXknM614sESg0ca/view?usp=sharing)
 - [Test set](https://drive.google.com/file/d/1GT3L33ye70uku-HXI1pqU7diuiL3sRGo/view?usp=sharing)
-- [Trained model weights](https://drive.google.com/file/d/1ivYoBtZszP8R-hO5trlulRVwZ5vO9sM9/view?usp=sharing)
+- [Trained model weights](https://drive.google.com/file/d/1ivYoBtZszP8R-hO5trlulRVwZ5vO9sM9/view?usp=sharing) (Weights of lossy_coord_v2 and lossy_coord_lossy_color are temporarily unavailable and will be updated soon.)
 - [ShapeNetCorev2 OBJ format](https://huggingface.co/datasets/ShapeNet/ShapeNetCore/tree/main) (for training)
 - [8iVFBv2](https://plenodb.jpeg.org/pc/8ilabs) (for training. Optional)
 
@@ -62,7 +62,7 @@ The definition of training and testing configurations is lib/config.py
 
 
 ## Known issues
-- For your first training on ShapeNetCorev2, the meshes in the dataset will be loaded and cached using Open3D. However, Open3D may complain about the loading of textures. This issue can be safely ignored for geometry compression, and won't appear next time. Besides, you can manually remove the cache of ShapeNetCorev2 in `datasets/ShapeNet/ShapeNetCore.v2/cache`. 
+- For your first training on ShapeNetCorev2, the meshes in the dataset will be loaded and cached using Open3D. However, Open3D may complain about the loading of textures. You can avoid this by running `scripts/shapenet_mtls.py`. Besides, you can manually remove the cache of ShapeNetCorev2 in `datasets/ShapeNet/ShapeNetCore.v2/cache`. 
 - There are some experimental code snippets in this project. Only the models we mentioned above are recommended for use. 
 
 

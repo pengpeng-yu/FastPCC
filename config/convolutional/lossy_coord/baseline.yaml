@@ -34,7 +34,7 @@ train:
   lr_step_size: 12
   lr_step_gamma: 0.3
 
-  ckpt_frequency: 1
+  ckpt_frequency: 4
   test_frequency: 4
 
   dataset_path: 'lib.datasets.ShapeNetCorev2'
@@ -46,6 +46,8 @@ train:
     mesh_sample_point_method: 'uniform'
     mesh_sample_point_resolution: 256
     random_rotation: True
+    resolution: 128
+
 
 test:
   batch_size: 1

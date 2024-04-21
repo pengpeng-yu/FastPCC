@@ -131,9 +131,6 @@ class PCCEvaluator(Evaluator):
                 f'Error when calling mpeg pc error software with ' \
                 f'infile1={osp.abspath(file_path)} '
             self.file_path_to_info[file_path].update(mpeg_pc_error_dict)
-            self.file_path_to_info[file_path]["mse1+mse2 (p2point)"] = \
-                mpeg_pc_error_dict["mse1      (p2point)"] + \
-                mpeg_pc_error_dict["mse2      (p2point)"]
 
         if results_dir is not None:
             with open(osp.join(results_dir, 'metric.txt'), 'w') as f:
@@ -181,7 +178,8 @@ class ImageCompressionEvaluator(Evaluator):
 
         im = im.cpu().numpy()
         im_recon = im_recon.cpu().numpy()
-        psnr = (np.log10(255 / np.linalg.norm(im.astype(np.double) - im_recon) * np.sqrt(im.size)) * 20).item()
+        psnr = (np.log10(255 / np.linalg.norm(im.astype(np.double, copy=False) - im_recon)
+                         * np.sqrt(im.size)) * 20).item()
         pixels_num = im_recon.shape[1] * im_recon.shape[2]
 
         if results_dir is not None:

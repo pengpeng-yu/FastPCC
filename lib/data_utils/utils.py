@@ -404,14 +404,14 @@ def write_ply_file(
     if isinstance(xyz, torch.Tensor):
         xyz = xyz.cpu().numpy()
     assert xyz.shape[1] == 3
-    xyz = xyz.astype(xyz_dtype)
+    xyz = xyz.astype(xyz_dtype, copy=False)
     rgb_dtype = np.uint8
     if isinstance(rgb, torch.Tensor):
         rgb = rgb.cpu().numpy()
     if rgb is not None:
         assert rgb.shape[1] == 3 and rgb.shape[0] == xyz.shape[0]
         assert rgb.dtype in (np.float32, rgb_dtype)
-        rgb = rgb.astype(rgb_dtype)
+        rgb = rgb.astype(rgb_dtype, copy=False)
     el_with_properties_dtype = [('x', xyz_dtype), ('y', xyz_dtype), ('z', xyz_dtype)]
     if estimate_normals:
         el_with_properties_dtype.extend([('nx', np.float32), ('ny', np.float32), ('nz', np.float32)])
@@ -479,13 +479,10 @@ def o3d_coords_sampled_from_triangle_mesh(
     return np.asarray(point_cloud.points)
 
 
-def normalize_coords(xyz: np.ndarray, dtype=np.float64) -> Tuple[np.ndarray, np.ndarray]:
+def normalize_coords(xyz: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     coord_max = xyz.max(axis=0, keepdims=True)
     coord_min = xyz.min(axis=0, keepdims=True)
     scale = (coord_max - coord_min).max()
-    if dtype != np.float64:
-        coord_min = coord_min.astype(dtype)
-        scale = scale.astype(dtype)
     xyz -= coord_min
     np.divide(xyz, scale, out=xyz)
     return coord_min, scale

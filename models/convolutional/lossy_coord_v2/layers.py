@@ -117,15 +117,23 @@ class Decoder(nn.Module):
 
     def train_forward(self, fea, points_num_list, target_key):
         loss_dict = {}
+        inv_num_list = [1 / sum(_) for _ in points_num_list] if points_num_list is not None else None
         for idx, (upsample_block, classify_block) in \
                 enumerate(zip(self.upsample_blocks, self.classify_blocks)):
+            inv_idx = len(self.upsample_blocks) - idx - 1
             fea = upsample_block(fea)
             pred = classify_block(fea)
             keep = self.get_keep(pred, points_num_list, [2 ** len(self.classify_blocks)] * 3)
             keep_target = self.get_target(pred, target_key)
             keep |= keep_target
-            loss_dict[f'coord_{idx}_recon_loss'] = self.get_coord_recon_loss(pred, keep_target)
+            loss_dict[f'coord_{inv_idx}_recon_loss'] = self.get_coord_recon_loss(pred, keep_target)
             fea = self.pruning(fea, keep)
+
+        # TODO: point-wise density weighting?
+        if inv_num_list is not None and len(inv_num_list) != 1:
+            tmp_sum = sum(inv_num_list)
+            for idx in range(len(self.upsample_blocks)):
+                loss_dict[f'coord_{idx}_recon_loss'] *= inv_num_list[idx] / tmp_sum * len(inv_num_list)
         return loss_dict
 
     def test_forward(self, fea, points_num_list):
@@ -134,8 +142,11 @@ class Decoder(nn.Module):
             fea = upsample_block(fea)
             keep = self.get_keep(classify_block(fea), points_num_list,
                                  [2 ** len(self.classify_blocks)] * 3)
-            fea = self.pruning(fea, keep)
-        return fea
+            if idx != len(self.upsample_blocks) - 1:
+                fea = self.pruning(fea, keep)
+            else:
+                recon = fea.C[:, 1:][keep]
+        return recon
 
     @torch.no_grad()
     def get_keep(self, pred: ME.SparseTensor, points_num_list: List[List[int]],

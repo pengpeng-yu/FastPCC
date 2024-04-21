@@ -3,17 +3,17 @@
 model:
   geo_lossl_if_sample: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
   geo_lossl_channels: [64, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
-  warmup_fea_loss_steps: 10000
+  warmup_fea_loss_steps: 5000
 
 
 train:
-  batch_size: 4
+  batch_size: 8
   epochs: 30
   lr_step_size: 10
-  grad_acc_steps: 2
   test_frequency: 0
   dataset_path: 'lib.datasets.KITTIOdometry'
   dataset:
+    random_flip: True
     resolution: 8192
 
 

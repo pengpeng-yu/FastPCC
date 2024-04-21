@@ -141,12 +141,12 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         file_path = self.file_list[index]
         if self.use_binvox:
             with open(file_path, 'rb') as f:
-                xyz = binvox_rw.read_as_coord_array(f).data.T.astype(np.float64)
+                xyz = binvox_rw.read_as_coord_array(f).data.T.astype(np.float64, copy=False)
                 xyz = np.ascontiguousarray(xyz)
             resolution = 128
         else:
             if self.use_cache:
-                xyz = np.load(file_path)['xyz'].astype(np.float64)
+                xyz = np.load(file_path)['xyz'].astype(np.float64, copy=False)
             else:
                 xyz = o3d_coords_sampled_from_triangle_mesh(
                     file_path,
@@ -156,11 +156,11 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                 normalize_coords(xyz)
                 xyz *= self.cfg.mesh_sample_point_resolution
                 if self.gen_cache:
-                    xyz = xyz.astype(self.cfg.ply_cache_dtype)
+                    xyz = xyz.astype(self.cfg.ply_cache_dtype, copy=False)
                     xyz = np.unique(xyz, axis=0)
                     cache_file_path = self.cached_file_list[index]
                     os.makedirs(osp.dirname(cache_file_path), exist_ok=True)
-                    np.savez_compressed(xyz=xyz.astype(self.cfg.ply_cache_dtype))
+                    np.savez_compressed(xyz=xyz)
                     return
             resolution = self.cfg.mesh_sample_point_resolution
 
@@ -171,6 +171,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         if self.cfg.resolution != resolution:
             xyz *= self.cfg.resolution / resolution
         # xyz = np.unique(xyz.astype(np.int32), axis=0)
+        xyz = xyz.astype(np.int32)
 
         par_num = self.cfg.kd_tree_partition_max_points_num
         if par_num != 0 and xyz.shape[0] > par_num:
