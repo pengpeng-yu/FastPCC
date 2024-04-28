@@ -1,0 +1,28 @@
+# include "config/convolutional/lossy_coord_v2/baseline_r1.yaml"
+
+model:
+  skip_encoding_fea: 3
+  encoder_channels: [4, 8]
+  decoder_channels: [4]
+  geo_lossl_if_sample: [1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+  geo_lossl_channels: [8, 32, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
+  bits_loss_factor: 0.6
+  warmup_fea_loss_steps: 5000
+
+
+train:
+  batch_size: 8
+  epochs: 30
+  lr_step_size: 10
+  ckpt_frequency: 5
+  test_frequency: 0
+  dataset_path: 'lib.datasets.KITTIOdometry'
+  dataset:
+    random_flip: True
+    resolution: 65535
+
+
+test:
+  dataset_path: 'lib.datasets.KITTIOdometry'
+  dataset:
+    resolution: 65535

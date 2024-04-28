@@ -133,7 +133,7 @@ class PCCEvaluator(Evaluator):
             self.file_path_to_info[file_path].update(mpeg_pc_error_dict)
 
         if results_dir is not None:
-            with open(osp.join(results_dir, 'metric.txt'), 'w') as f:
+            with open(osp.join(results_dir, '..', 'metric_dict.json'), 'w') as f:
                 f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
 
         mean_dict = defaultdict(float)
@@ -153,7 +153,7 @@ class PCCEvaluator(Evaluator):
         mean_dict = {k: v for k, v in mean_dict.items() if count_dist[k] == samples_num}
         mean_dict['samples_num'] = samples_num
         if results_dir is not None:
-            with open(osp.join(results_dir, 'mean_metric.txt'), 'w') as f:
+            with open(osp.join(results_dir, '..', 'mean_metric.json'), 'w') as f:
                 f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
 
         self.reset()
@@ -195,7 +195,7 @@ class ImageCompressionEvaluator(Evaluator):
 
     def show(self, results_dir: str) -> Dict[str, Union[int, float]]:
         if results_dir is not None:
-            with open(osp.join(results_dir, 'metric.txt'), 'w') as f:
+            with open(osp.join(results_dir, '..', 'metric_dict.json'), 'w') as f:
                 f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
 
         mean_dict = defaultdict(float)
@@ -206,7 +206,7 @@ class ImageCompressionEvaluator(Evaluator):
         for key in mean_dict:
             mean_dict[key] /= samples_num
         if results_dir is not None:
-            with open(osp.join(results_dir, 'mean_metric.txt'), 'w') as f:
+            with open(osp.join(results_dir, '..', 'mean_metric.json'), 'w') as f:
                 f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
 
         self.reset()

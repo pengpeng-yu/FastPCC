@@ -43,7 +43,8 @@ def test():
             if len(weights_paths) == 0:
                 weights_paths = sorted(glob(glob_weight_path[:-3] + '/*.pt'))
             if len(weights_paths) == 0:
-                raise RuntimeError(glob_weight_path)
+                print(f'Warning: weights of {glob_weight_path} missing!')
+                continue
 
             for weight_path in sorted(weights_paths):
                 print(f'\nTest config: "{config_path}", weight "{weight_path}"\n')
@@ -62,7 +63,7 @@ def test():
                     f' test.device={cuda_device}',
                     shell=True, check=True, executable=shutil.which('bash')
                 )
-                sub_metric_dict_path = osp.join(sub_sub_run_dir, 'results', 'metric.txt')
+                sub_metric_dict_path = osp.join(sub_sub_run_dir, 'metric_dict.json')
                 with open(sub_metric_dict_path, 'rb') as f:
                     sub_metric_dict = json.load(f)
                 for key in sub_metric_dict:

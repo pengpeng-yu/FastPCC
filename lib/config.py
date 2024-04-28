@@ -101,7 +101,7 @@ class TestConfig(SimpleConfig):
     log_frequency: int = 50  # (steps) used for logging
     save_results: bool = False  # save outputs of model in runs/rundir_name/results
 
-    # you can keep this empty to use the same dataloader class with the one in training during testing
+    # you can keep this empty to use the same dataloader class as the one in training
     # this feature is defined in test.py
     dataset_path: str = ''
     dataset: SimpleConfig = field(default_factory=SimpleConfig)

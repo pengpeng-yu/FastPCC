@@ -78,7 +78,7 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
         fig.yaxis.set_major_locator(MultipleLocator(2))
         fig.grid()
         fig.tick_params(pad=0.5)
-        fig.set_xlabel('bpp', labelpad=-1)
+        fig.set_xlabel('bpp (bits per input point)', labelpad=-1)
         fig.set_ylabel(y_label, labelpad=0)
         fig.set_title(osp.splitext(osp.split(sample_name)[1])[0])
         for method_name, method_json in method_to_json.items():

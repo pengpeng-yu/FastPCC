@@ -160,7 +160,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                     xyz = np.unique(xyz, axis=0)
                     cache_file_path = self.cached_file_list[index]
                     os.makedirs(osp.dirname(cache_file_path), exist_ok=True)
-                    np.savez_compressed(xyz=xyz)
+                    np.savez_compressed(cache_file_path, xyz=xyz)
                     return
             resolution = self.cfg.mesh_sample_point_resolution
 

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 
-def _split_by_3(a: np.ndarray):
+def _split_by_3(a: Union[np.ndarray, torch.Tensor]):
     if isinstance(a, np.ndarray):  # assert np.all(0 <= a <= 0x1fffff)
         x = a.astype(np.uint64)
     else:

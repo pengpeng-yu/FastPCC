@@ -1,0 +1,18 @@
+# include "config/convolutional/lossy_coord_v2/baseline_kitti_r1.yaml"
+
+model:
+  skip_encoding_fea: 2
+  encoder_channels: [8, 32]
+  decoder_channels: [8]
+  geo_lossl_if_sample: [1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+  geo_lossl_channels: [32, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
+
+
+train:
+  dataset:
+    resolution: 32768
+
+
+test:
+  dataset:
+    resolution: 32768
