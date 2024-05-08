@@ -11,7 +11,7 @@ from matplotlib.pyplot import MultipleLocator
 
 sys.path.append(osp.dirname(osp.dirname(__file__)))
 from scripts.log_extract_utils import all_file_metric_dict_type, concat_values_for_dict, concat_values_for_dict_2
-from scripts.shared_config import metric_dict_filename
+from scripts.shared_config import metric_dict_filename, test_dir
 from lib.metrics.bjontegaard import bdrate, bdsnr
 
 
@@ -98,6 +98,7 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
         fig.figure.savefig(osp.join(
             output_dir, f'{y_label} {osp.splitext(osp.split(sample_name)[1])[0]}.pdf'
         ))
+        plt.close(fig.figure)
     print(f'Plot "{y_label}" Done')
 
 
@@ -108,8 +109,6 @@ def list_mean(ls: List):
 def remove_low_psnr_point(method_name, sample_name, sorted_indices):
     if method_name == 'G-PCC octree':
         slice_val = (1, -1)
-    elif method_name == 'G-PCC trisoup':
-        slice_val = (1, None)
     elif method_name == 'ADLPCC':
         slice_val = (None, -2)
     elif method_name == 'SparsePCGC':
@@ -134,18 +133,18 @@ def compute_multiple_bdrate():
         #     'convolutional/lossy_coord_v2/wo_residual_r*',
         # 'Ours part6e5': 'convolutional/lossy_coord_v2/baseline_part6e5_r*',
         # 'Ours color': 'convolutional/lossy_coord_lossy_color/baseline_r*',
+        # 'Ours KITTI': 'lossy_coord_v2/baseline_kitti_r*.yaml'',
 
         'PCGCv2': 'convolutional/lossy_coord/baseline',
         'SparsePCGC': 'SparsePCGC',
         'V-PCC': 'tmc2_geo',
         # 'ADLPCC': 'ADLPCC',
         'G-PCC octree': 'tmc3_geo/octree',
-        'G-PCC trisoup': 'tmc3_geo/trisoup',
         # 'G-PCC octree-raht': 'tmc3/octree-raht',
         # 'G-PCC octree-predlift': 'tmc3/octree-predlift',
     }
     output_dir = 'runs/comparisons'
-    rel_json_path_pattern = osp.join('runs', 'tests', '{}', metric_dict_filename)
+    rel_json_path_pattern = osp.join(test_dir, '{}', metric_dict_filename)
 
     for k, v in method_to_json_path.items():
         if not isinstance(v, list):

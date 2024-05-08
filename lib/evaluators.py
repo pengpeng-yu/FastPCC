@@ -92,24 +92,22 @@ class PCCEvaluator(Evaluator):
             if self.cal_mpeg_pc_error:
                 write_ply_for_orig_pc = False
                 if file_path.endswith('.ply'):
-                    if_target_has_normal = if_ply_has_vertex_normal(file_path)
-                    if if_target_has_normal:
+                    if if_ply_has_vertex_normal(file_path):
                         normal_file_path = file_path
                     else:
                         normal_file_path = osp.splitext(file_path)[0] + '_n.ply'
                         if not osp.isfile(normal_file_path):
-                            normal_file_path = out_file_path + '.ply'
                             write_ply_for_orig_pc = True
                 else:
-                    normal_file_path = out_file_path + '.ply'
                     write_ply_for_orig_pc = True
                 if write_ply_for_orig_pc:
-                    file_path = out_file_path + '.ply'
+                    file_path = osp.splitext(file_path)[0] + '_n.ply'
                     write_ply_file(
                         target, file_path, rgb=target_color if have_color else None,
                         estimate_normals=True
                     )
-                    print(f'Wrote Ply file to {file_path} with normals estimation')
+                    print(f'Warning: For computing point-to-plane loss, '
+                          f'a PLY file is generated at {file_path} with Open3D normal estimation.')
                     normal_file_path = file_path
                 self.file_path_to_info_run_res[file_path] = self.mpeg_pc_error_pool.apply_async(
                     mpeg_pc_error,

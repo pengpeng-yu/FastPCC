@@ -1,4 +1,4 @@
-# include "config/convolutional/lossy_coord_lossy_color/baseline_r2.yaml"
+# include "config/convolutional/lossy_coord_lossy_color/baseline_r1.yaml"
 
 model:
-  bits_loss_factor: 3.0
+  bits_loss_factor: 1.0

@@ -31,6 +31,8 @@ for idx in range(res.shape[0]):
         for i in range(99):
             if tgt_key.format(i=i) in line:
                 sub_d[key].append(line[tgt_key.format(i=i)].item())
+            else:
+                break
     filename = line.filedir.rsplit('/', 1)[1]
     for file_path in file_paths:
         if filename in file_path:

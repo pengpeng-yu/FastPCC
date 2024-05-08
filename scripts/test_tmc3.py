@@ -13,39 +13,52 @@ import multiprocessing as mp
 sys.path.append(osp.dirname(osp.dirname(__file__)))
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
-from scripts.shared_config import pc_error_path, metric_dict_filename
+from scripts.shared_config import pc_error_path, metric_dict_filename, test_dir
+try:
+    import numpy as np
+    from lib.data_utils.utils import write_ply_file
+except Exception:
+    np = write_ply_file = None
 
 
 geo_only = True
 single_frame_only = True
+run_on_kitti = False
 
 tmc3_path = '../mpeg-pcc-tmc13/build/tmc3/tmc3'
 
-if single_frame_only:
-    file_lists = (
-        "datasets/MVUB/list.txt",
-        "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
-        "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
-        "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
-    )
-    resolutions = (512, 1024, 2048, 4096)
-    results_dir = "tests"
+if not run_on_kitti:
+    if single_frame_only:
+        file_lists = (
+            "datasets/MVUB/list.txt",
+            "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
+            "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
+            "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
+        )
+        resolutions = (512, 1024, 2048, 4096)
+    else:
+        # Note: I assume that you have run test.py on 8iVFBv2,
+        #       which generates *_n.ply files as the input of pc_error and tmc3.
+        file_lists = (
+            'datasets/Owlii/list_basketball_player_dancer.txt',
+            'datasets/8iVFBv2/list_loot_redandblack.txt'
+        )
+        resolutions = (2048, 1024)
 else:
+    assert geo_only
+    # Note: I assume that you have run test.py with class lib.datasets.KITTIOdometry,
+    #       which generates *_n.ply files as the input of pc_error and tmc3.
     file_lists = (
-        'datasets/Owlii/list_basketball_player_dancer.txt',
-        'datasets/8iVFBv2/list_all.txt'
+        'datasets/KITTI/sequences/test_list.txt',
     )
-    resolutions = (2048, 1024)
-    results_dir = "tests_seq"
+    resolutions = (59.70 + 1,)
 
 if geo_only:
     config_dirs = (
         '../mpeg-pcc-tmc13/cfg/octree-predlift/lossy-geom-lossy-attrs',
-        '../mpeg-pcc-tmc13/cfg/trisoup-predlift/lossy-geom-lossy-attrs'
     )
     output_dirs = (
-        f'runs/{results_dir}/tmc3_geo/octree',
-        f'runs/{results_dir}/tmc3_geo/trisoup',
+        f'{test_dir}/tmc3_geo/octree',
     )
 else:
     config_dirs = (
@@ -53,8 +66,8 @@ else:
         '../mpeg-pcc-tmc13/cfg/octree-raht/lossy-geom-lossy-attrs'
     )
     output_dirs = (
-        f'runs/{results_dir}/tmc3/octree-predlift',
-        f'runs/{results_dir}/tmc3/octree-raht',
+        f'{test_dir}/tmc3/octree-predlift',
+        f'{test_dir}/tmc3/octree-raht',
     )
 assert len(file_lists) == len(resolutions)
 assert len(config_dirs) == len(output_dirs)
@@ -143,9 +156,13 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
         file_basename = f'queen_{file_path.rsplit("_", 1)[1]}'
     config_paths = glob(osp.join(config_dir, file_basename.lower(), '*', 'encoder.cfg'))
     flag_mvub = False
+    flag_kitti = False
     if len(config_paths) == 0:
         if 'MVUB' in file_list:
             flag_mvub = True
+            config_paths = default_config_paths
+        elif 'KITTI' in file_list:
+            flag_kitti = True
             config_paths = default_config_paths
         else:
             assert single_frame_only is False
@@ -156,7 +173,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
                 print(f'\nlen(config_paths) == 0 for : {file_basename}\n')
                 return None
     config_paths.sort()
-    sub_output_dir = osp.join(output_dir, file_basename)
+    sub_output_dir = osp.join(output_dir, osp.splitext(file_path)[0])
     os.makedirs(sub_output_dir, exist_ok=True)
     for config_path in config_paths:
         rate_flag = osp.split(osp.split(config_path)[0])[1]
@@ -178,6 +195,14 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
                     f'{get_tmc3_trisoup_trisoupNodeSizeLog2(rate_flag[1:])}'
             else:
                 raise NotImplementedError
+        if flag_kitti:
+            temp_xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
+            scale_for_kitti = (2 ** (int(rate_flag[1:]) + 9) - 1) / 400
+            temp_xyz *= scale_for_kitti
+            temp_xyz.round(out=temp_xyz)
+            temp_file_path_for_kitti = osp.join(sub_output_dir, f"{rate_flag}_scaled_input.ply")
+            write_ply_file(temp_xyz, temp_file_path_for_kitti)
+            command_enc += f' --uncompressedDataPath={temp_file_path_for_kitti} --positionQuantizationScale=1'
         subp_enc = subprocess.run(
             command_enc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             shell=True, check=True, text=True
@@ -194,6 +219,9 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             f' --outputBinaryPly=0' \
             f' --compressedStreamPath={osp.join(sub_output_dir, f"{rate_flag}.bin")}' \
             f' --reconstructedDataPath={osp.join(sub_output_dir, f"{rate_flag}_recon.ply")}'
+        if flag_kitti:
+            os.remove(temp_file_path_for_kitti)
+            command_dec += f' --outputScaling=1 --outputUnitLength={scale_for_kitti}'
         subp_dec = subprocess.run(
             command_dec, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             shell=True, check=True, text=True
@@ -207,7 +235,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
         sub_metric_dict = concat_values_for_dict(
             sub_metric_dict,
             mpeg_pc_error(
-                file_path,
+                file_path if not flag_kitti else file_path[:-len('.ply')] + '_n.ply',
                 osp.join(sub_output_dir, f'{rate_flag}_recon.ply'), resolution,
                 color=False if geo_only else True,
                 normal_file=f'{osp.splitext(file_path)[0]}_n.ply',

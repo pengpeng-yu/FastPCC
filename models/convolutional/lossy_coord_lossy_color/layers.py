@@ -258,7 +258,7 @@ class Decoder(nn.Module):
                 batched_tgt_rgb[tgt_coord_row_ids]
             )
             rgb_loss_list.append(rgb_loss)
-        sum_rgb_loss = sum([_.sum() for _ in rgb_loss_list])
+        sum_rgb_loss = sum(rgb_loss_list)
 
         return sum_rgb_loss
 
@@ -335,8 +335,8 @@ class Decoder(nn.Module):
         if self.use_yuv_loss:
             pred_rgb = self.rgb_to_yuvbt709(pred_rgb)
             recolored_pred_rgb = self.rgb_to_yuvbt709(recolored_pred_rgb)
-        rgb_loss = F.l1_loss(
-            pred_rgb, recolored_pred_rgb, reduction='none'
+        rgb_loss = F.mse_loss(
+            pred_rgb, recolored_pred_rgb, reduction='sum'
         )
         return rgb_loss
 

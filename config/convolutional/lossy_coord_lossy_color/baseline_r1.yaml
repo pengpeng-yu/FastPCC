@@ -2,22 +2,20 @@ model_path: models.convolutional.lossy_coord_lossy_color
 model:
   activation: 'prelu'
   compressed_channels: [1]
-  bottleneck_scaler: 2
-  encoder_channels: [32, 64]
-  decoder_channels: [32]
+  bottleneck_scaler: 1
+  encoder_channels: [32, 64, 128]
+  decoder_channels: [64, 32]
   adaptive_pruning: True
-  adaptive_pruning_scaler_train: 1.01
-  adaptive_pruning_scaler_test: 1.00
-  geo_lossl_if_sample: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
-  geo_lossl_channels: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
-  bits_loss_factor: 2.0
-  coord_recon_loss_factor: 0.4
-  color_recon_loss_factor: 0.2
+  geo_lossl_if_sample: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+  geo_lossl_channels: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
+  use_yuv_loss: True
+  bits_loss_factor: 0.2
+  coord_recon_loss_factor: 1.0
+  color_recon_loss_factor: 0.02
   warmup_fea_loss_steps: 5000
   warmup_color_loss_steps: 5000
-  warmup_fea_loss_factor: 0.00001
-  warmup_color_loss_factor: 0.00001
-  linear_warmup: True
+  warmup_fea_loss_factor: 0.001
+  warmup_color_loss_factor: 0.0001
 
 
 train:
@@ -33,20 +31,20 @@ train:
   max_grad_norm: 1.0
 
   learning_rate: [0.0006, 0.0002]
-  epochs: 100
+  epochs: 150
 
   scheduler: Step
-  lr_step_size: 20
+  lr_step_size: 60
   lr_step_gamma: 0.3
 
   log_frequency: 10
-  ckpt_frequency: 5
+  ckpt_frequency: 10
   test_frequency: 0
 
   dataset_path: 'lib.datasets.PlyVoxel.Base'
   dataset:
-    root: ['datasets/MVUB', 'datasets/8iVFBv2', 'datasets/Owlii']
-    filelist_path: ['list_andrew_david_sarah10.txt', 'list_longdress_solider.txt', 'list_exercise_model.txt']
+    root: ['datasets/8iVFBv2', 'datasets/Owlii']
+    filelist_path: ['list_longdress_solider.txt', 'list_exercise_model.txt']
     kd_tree_partition_max_points_num: 200000
     with_color: True
     random_rotation: False
@@ -59,9 +57,9 @@ test:
   num_workers: 0
   log_frequency: 1
   save_results: True
-  dataset_path: 'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_Solid'
+  dataset_path: 'lib.datasets.PlyVoxel.Base'
   dataset:
-    root: ['datasets/MVUB', 'datasets/8iVFBv2', 'datasets/Owlii']
-    filelist_path: ['list_phil_ricardo10.txt', 'list_loot_redandblack.txt', 'list_basketball_player_dancer.txt']
-    kd_tree_partition_max_points_num: 0
+    root: ['datasets/8iVFBv2', 'datasets/Owlii']
+    filelist_path: ['list_loot_redandblack.txt', 'list_basketball_player_dancer.txt']
+    kd_tree_partition_max_points_num: 2000000
     with_color: True

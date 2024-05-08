@@ -1,5 +1,4 @@
 # include "config/convolutional/lossy_coord_lossy_color/baseline_r1.yaml"
 
 model:
-  skip_encoding_fea: 1
-  bits_loss_factor: 2.0
+  bits_loss_factor: 0.5

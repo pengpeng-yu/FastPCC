@@ -33,14 +33,14 @@ train:
   lr_step_gamma: 0.3
 
   ckpt_frequency: 5
-  test_frequency: 5
+  test_frequency: 0
 
   dataset_path: 'lib.datasets.ShapeNetCorev2'
   dataset:
     train_filelist_path: 'all_list_obj.txt'
     train_divisions: 'all'
     data_format: '.obj'
-    mesh_sample_points_num: 400000
+    mesh_sample_points_num: 500000
     mesh_sample_point_method: 'uniform'
     mesh_sample_point_resolution: 256
     random_rotation: True

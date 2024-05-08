@@ -7,12 +7,12 @@ import json
 
 sys.path.append(osp.dirname(osp.dirname(__file__)))
 from scripts.log_extract_utils import concat_values_for_dict
-from scripts.shared_config import metric_dict_filename, cuda_device
+from scripts.shared_config import metric_dict_filename, cuda_device, test_dir
 
 
 weight_prefix = 'weights/convolutional'
 config_prefix = 'config/convolutional'
-output_prefix = 'runs/tests/convolutional'
+output_prefix = f'{test_dir}/convolutional'
 config_paths = [
     'lossy_coord_v2/baseline_r*.yaml',
     'lossy_coord_v2/baseline_part6e5_r*.yaml',
@@ -20,6 +20,7 @@ config_paths = [
     'lossy_coord_v2/wo_residual_r*.yaml',
     'lossy_coord/baseline.yaml',
     'lossy_coord_lossy_color/baseline_r*.yaml'
+    'lossy_coord_v2/baseline_kitti_r*.yaml'
 ]
 sub_config_to_weight_path_maps = {
     1: lambda _: _.replace('_part6e5', '', 1)

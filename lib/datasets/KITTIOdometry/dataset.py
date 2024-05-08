@@ -1,5 +1,5 @@
 import os.path as osp
-from glob import glob
+import pathlib
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -43,12 +43,14 @@ class KITTIOdometry(torch.utils.data.Dataset):
     def load_filelist(self, filelist_abs_path):
         self.logger.info(f'using filelist: "{filelist_abs_path}"')
         with open(filelist_abs_path) as f:
-            file_list = [line.strip() for line in f]
+            file_list = [osp.join(self.cfg.root, line.strip()) for line in f]
         return file_list
 
     @staticmethod
     def get_subset(root, index):
-        return sorted(glob(osp.join(root, f'{index:02d}/velodyne/*.bin')))
+        ls = [str(_.relative_to(root)) for _ in pathlib.Path(root).glob(f'{index:02d}/velodyne/*.bin')]
+        ls.sort()
+        return ls
 
     def __len__(self):
         return len(self.file_list)
@@ -61,7 +63,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
         # For calculating distortion metrics
         if not self.is_training:
             p, n = osp.split(file_path)
-            cache_path = osp.join(p, n.replace('.bin', '_cached_xyz.ply'))
+            cache_path = osp.join(p, n.replace('.bin', '_n.ply'))
             if not osp.isfile(cache_path):
                 write_ply_file(xyz, cache_path, estimate_normals=True)
 

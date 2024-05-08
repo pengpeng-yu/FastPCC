@@ -12,7 +12,7 @@ import multiprocessing as mp
 sys.path.append(osp.dirname(osp.dirname(__file__)))
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
-from scripts.shared_config import pc_error_path, metric_dict_filename
+from scripts.shared_config import pc_error_path, metric_dict_filename, test_dir
 
 
 geo_only = True
@@ -27,19 +27,17 @@ if single_frame_only:
         "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
     )
     resolutions = (1024, 2048, 4096)
-    results_dir = "tests"
 else:  # all intra
     file_lists = (
         'datasets/Owlii/list_basketball_player_dancer.txt',
-        'datasets/8iVFBv2/list_all.txt'
+        'datasets/8iVFBv2/list_loot_redandblack.txt'
     )
     resolutions = (2048, 1024)
-    results_dir = "tests_seq"
 
 assert len(file_lists) == len(resolutions)
 
 config_dir = '../mpeg-pcc-tmc2/cfg'
-output_dir = f'runs/{results_dir}/tmc2_geo' if geo_only else f'runs/{results_dir}/tmc2'
+output_dir = f'{test_dir}/tmc2_geo' if geo_only else f'{test_dir}/tmc2'
 
 
 class TMC2LogExtractor(LogExtractor):
@@ -102,12 +100,11 @@ def run_single_file(file_path, resolution):
     seq_cfg_path = f'{config_dir}/sequence/{cfg_name}.cfg'
     if not osp.isfile(seq_cfg_path):
         if 'queen/frame' in file_path:
-            file_basename = f'queen_{file_path.rsplit("_", 1)[1]}'
             seq_cfg_path = f'{config_dir}/sequence/queen.cfg'
         else:
             print(f'    Skip {file_basename} because {seq_cfg_path} is not found.')
             return None
-    sub_output_dir = osp.join(output_dir, file_basename)
+    sub_output_dir = osp.join(output_dir, osp.splitext(file_path)[0])
     os.makedirs(sub_output_dir, exist_ok=True)
     for rate in range(1, 6):
         print(f'    Test file {file_path}, res {resolution}, r{rate}')

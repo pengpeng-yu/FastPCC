@@ -12,7 +12,7 @@ import json
 sys.path.append(osp.dirname(osp.dirname(__file__)))
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
-from scripts.shared_config import pc_error_path, metric_dict_filename, cuda_device
+from scripts.shared_config import pc_error_path, metric_dict_filename, cuda_device, test_dir
 
 
 adl_pcc_dir = '../ADLPCC'
@@ -27,7 +27,7 @@ file_lists = (
 resolutions = (512, 1024, 2048, 4096)
 assert len(file_lists) == len(resolutions)
 
-output_dir = 'runs/tests/ADLPCC'
+output_dir = f'{test_dir}/ADLPCC'
 
 
 class ADLPCCLogExtractor(LogExtractor):

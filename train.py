@@ -122,6 +122,7 @@ def main():
                 tb_proc.kill()
         else:
             if tb_proc is not None:
+                logger.info(f'Tensorboard is still running. Run "kill {tb_proc.pid}" to stop')
                 tb_proc.wait()
 
     else:
@@ -358,7 +359,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 batch_data = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                               for k, v in batch_data.items()}
             elif isinstance(batch_data, SampleData):
-                batch_data.training_step = global_step // cfg.train.grad_acc_steps
+                batch_data.training_step = global_step // cfg.train.grad_acc_steps  # backward steps
                 batch_data.to(device=device, non_blocking=True)
             else: raise NotImplementedError
 
