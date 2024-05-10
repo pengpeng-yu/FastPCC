@@ -130,7 +130,7 @@ def test_geo_intra(processes_num, immediate_dump):
         for file_path, run_res in all_file_run_res.items():
             ret = run_res.get()
             if ret is not None:
-                all_file_metric_dict[file_path] = ret
+                all_file_metric_dict.update(ret)
                 if immediate_dump:
                     with open(osp.join(output_dir, metric_dict_filename), 'w') as f:
                         f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
@@ -235,11 +235,12 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             sub_metric_dict,
             log_extractor.extract_dec_log(subp_dec.stdout), False
         )
+        org_pc_for_pc_error = file_path if not flag_kitti \
+            else osp.splitext(file_path)[0] + ('_n.ply' if not flag_sparsepcgc else '_q1mm_n.ply')
         sub_metric_dict = concat_values_for_dict(
             sub_metric_dict,
             mpeg_pc_error(
-                file_path if not flag_kitti else osp.splitext(file_path)[0] +
-                ('_n.ply' if not flag_sparsepcgc else '_q1mm_n.ply'),
+                org_pc_for_pc_error,
                 osp.join(sub_output_dir, f'{rate_flag}_recon.ply'), resolution,
                 color=False if geo_only else True,
                 normal_file=osp.splitext(file_path)[0] + ('_n.ply' if not flag_sparsepcgc else '_q1mm_n.ply'),
@@ -250,8 +251,8 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
     sub_metric_dict['bpp'] = [bits / org_points_num for bits, org_points_num in zip(
         sub_metric_dict['bits'], sub_metric_dict['org points num'])]
     del sub_metric_dict['bits'], sub_metric_dict['org points num']
-    return sub_metric_dict
+    return {org_pc_for_pc_error: sub_metric_dict}
 
 
 if __name__ == '__main__':
-    test_geo_intra(32, True)
+    test_geo_intra(32, False)

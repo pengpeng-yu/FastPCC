@@ -168,4 +168,4 @@ def run_single_file(file_path, resolution):
 
 
 if __name__ == '__main__':
-    test_geo_intra(32, True)
+    test_geo_intra(32, False)

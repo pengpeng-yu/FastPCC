@@ -106,13 +106,15 @@ def list_mean(ls: List):
     return sum(ls) / len(ls)
 
 
-def remove_low_psnr_point(method_name, sample_name, sorted_indices):
+def remove_non_overlapping_points(method_name, sample_name, sorted_indices):
     if method_name == 'G-PCC octree':
         slice_val = (1, -1)
     elif method_name == 'ADLPCC':
         slice_val = (None, -2)
     elif method_name == 'SparsePCGC':
         slice_val = (1, None)
+    elif method_name == 'SparsePCGC vox1mm':
+        slice_val = (1, -1)
     elif method_name == 'G-PCC octree-raht':
         slice_val = (1, -1)
     elif method_name == 'G-PCC octree-predlift':
@@ -135,10 +137,11 @@ def compute_multiple_bdrate():
         # 'Ours part6e5': 'convolutional/lossy_coord_v2/baseline_part6e5_r*',
         # 'Ours color': 'convolutional/lossy_coord_lossy_color/baseline_r*',
         # 'Ours KITTI': 'convolutional/lossy_coord_v2/baseline_kitti_r*',
-        # 'Ours KITTI q1mm': 'convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*',
+        # 'Ours KITTI vox1mm': 'convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*',
 
+        'SparsePCGC': 'SparsePCGC/dense_lossy',
+        # 'SparsePCGC vox1mm': 'SparsePCGC/kitti_q1mm',
         'PCGCv2': 'convolutional/lossy_coord/baseline',
-        'SparsePCGC': 'SparsePCGC',
         'V-PCC': 'tmc2_geo',
         # 'ADLPCC': 'ADLPCC',
         'G-PCC octree': 'tmc3_geo/octree',
@@ -172,7 +175,7 @@ def compute_multiple_bdrate():
                 concat_values_for_dict_2(method_to_json[method_name], json.load(f))
         for sample_name, metric_dict in method_to_json[method_name].items():
             sorted_indices = sorted(range(len(metric_dict['bpp'])), key=lambda _: metric_dict['bpp'][_])
-            sorted_indices = remove_low_psnr_point(method_name, sample_name, sorted_indices)
+            sorted_indices = remove_non_overlapping_points(method_name, sample_name, sorted_indices)
             for k, v in metric_dict.items():
                 metric_dict[k] = [v[_] for _ in sorted_indices]
 
