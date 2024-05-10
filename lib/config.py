@@ -47,11 +47,12 @@ class TrainConfig(SimpleConfig):
     test_frequency: int = 0  # (epochs) 0 means no test in training phase
     cuda_empty_cache_frequency: int = 0  # (steps)
 
-    dataset_path: str = 'lib.datasets.ModelNet'  # dataset_path.Dataset and dataset_path.Config are required
+    dataset_path: str = ''  # dataset_path.Dataset and dataset_path.Config are required
     dataset: SimpleConfig = None
 
     def __post_init__(self):
-        self.local_auto_import()
+        if self.dataset_path != '':
+            self.local_auto_import()
 
     def merge_setattr(self, key, value):
         if key == 'resume_items':
@@ -104,7 +105,7 @@ class TestConfig(SimpleConfig):
     # you can keep this empty to use the same dataloader class as the one in training
     # this feature is defined in test.py
     dataset_path: str = ''
-    dataset: SimpleConfig = field(default_factory=SimpleConfig)
+    dataset: SimpleConfig = None
 
     def __post_init__(self):
         if self.dataset_path != '':
@@ -113,13 +114,14 @@ class TestConfig(SimpleConfig):
 
 @dataclass
 class Config(SimpleConfig):
-    model_path: str = 'models.convolutional.lossy_coord'  # model_path.Config and model_path.Model are required
+    model_path: str = ''  # model_path.Config and model_path.Model are required
     model: SimpleConfig = None
     train: TrainConfig = field(default_factory=TrainConfig)
     test: TestConfig = field(default_factory=TestConfig)
 
     def __post_init__(self):
-        self.local_auto_import()
+        if self.model_path != '':
+            self.local_auto_import()
 
     def check_local_value(self):
         if hasattr(self.model, 'input_points_num') and hasattr(self.train.dataset, 'input_points_num'):

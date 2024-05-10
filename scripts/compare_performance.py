@@ -125,6 +125,7 @@ def remove_low_psnr_point(method_name, sample_name, sorted_indices):
 def compute_multiple_bdrate():
     anchor_name = 'Ours'
     anchor_secondly = True
+    plot_rd = True
     method_to_json_path: Dict[str, Union[str, List[str]]] = {
         'Ours': 'convolutional/lossy_coord_v2/baseline_r*',
         # 'Ours w/o geometry residual':
@@ -133,7 +134,8 @@ def compute_multiple_bdrate():
         #     'convolutional/lossy_coord_v2/wo_residual_r*',
         # 'Ours part6e5': 'convolutional/lossy_coord_v2/baseline_part6e5_r*',
         # 'Ours color': 'convolutional/lossy_coord_lossy_color/baseline_r*',
-        # 'Ours KITTI': 'lossy_coord_v2/baseline_kitti_r*.yaml'',
+        # 'Ours KITTI': 'convolutional/lossy_coord_v2/baseline_kitti_r*',
+        # 'Ours KITTI q1mm': 'convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*',
 
         'PCGCv2': 'convolutional/lossy_coord/baseline',
         'SparsePCGC': 'SparsePCGC',
@@ -183,6 +185,12 @@ def compute_multiple_bdrate():
     sample_wise_bdpsnr_d2: metric_dict_t = {}
     sample_wise_bdrate_y: metric_dict_t = {}
     sample_wise_bdpsnr_y: metric_dict_t = {}
+    sample_wise_bdrate_u: metric_dict_t = {}
+    sample_wise_bdpsnr_u: metric_dict_t = {}
+    sample_wise_bdrate_v: metric_dict_t = {}
+    sample_wise_bdpsnr_v: metric_dict_t = {}
+    sample_wise_bdrate_yuv: metric_dict_t = {}
+    sample_wise_bdpsnr_yuv: metric_dict_t = {}
     sample_wise_time_complexity: metric_dict_t = {}
     sample_wise_mem_complexity: metric_dict_t = {}
 
@@ -219,6 +227,18 @@ def compute_multiple_bdrate():
                 sample_wise_bdrate_y, compute_bd(*comparison_tuple, c=0))
             concat_values_for_dict(
                 sample_wise_bdpsnr_y, compute_bd(*comparison_tuple, rate=False, c=0))
+            concat_values_for_dict(
+                sample_wise_bdrate_u, compute_bd(*comparison_tuple, c=1))
+            concat_values_for_dict(
+                sample_wise_bdpsnr_u, compute_bd(*comparison_tuple, rate=False, c=1))
+            concat_values_for_dict(
+                sample_wise_bdrate_v, compute_bd(*comparison_tuple, c=2))
+            concat_values_for_dict(
+                sample_wise_bdpsnr_v, compute_bd(*comparison_tuple, rate=False, c=2))
+            concat_values_for_dict(
+                sample_wise_bdrate_yuv, compute_bd(*comparison_tuple, c=3))
+            concat_values_for_dict(
+                sample_wise_bdpsnr_yuv, compute_bd(*comparison_tuple, rate=False, c=3))
 
     write_metric_to_csv(
         (list(method_to_json.keys()), ('Enc', 'Dec')),
@@ -231,16 +251,24 @@ def compute_multiple_bdrate():
     sample_wise_bd_metric = {}
     for sample_name in sample_wise_bdrate_d1:
         sample_wise_bd_metric[sample_name] = []
-        for bdrate_d1, bdrate_d2, bdpsnr_d1, bdpsnr_d2, bdrate_y, bdpsnr_y in zip(
+        for (bdrate_d1, bdrate_d2, bdpsnr_d1, bdpsnr_d2, bdrate_y, bdpsnr_y,
+             bdrate_u, bdpsnr_u, bdrate_v, bdpsnr_v, bdrate_yuv, bdpsnr_yuv) in zip(
             sample_wise_bdrate_d1[sample_name],
             sample_wise_bdrate_d2[sample_name],
             sample_wise_bdpsnr_d1[sample_name],
             sample_wise_bdpsnr_d2[sample_name],
             sample_wise_bdrate_y[sample_name],
             sample_wise_bdpsnr_y[sample_name],
+            sample_wise_bdrate_u[sample_name],
+            sample_wise_bdpsnr_u[sample_name],
+            sample_wise_bdrate_v[sample_name],
+            sample_wise_bdpsnr_v[sample_name],
+            sample_wise_bdrate_yuv[sample_name],
+            sample_wise_bdpsnr_yuv[sample_name],
         ):
             sample_wise_bd_metric[sample_name].extend(
-                [bdrate_d1, bdrate_d2, bdrate_y, bdpsnr_d1, bdpsnr_d2, bdpsnr_y]
+                [bdrate_d1, bdrate_d2, bdrate_y, bdrate_u, bdrate_v, bdrate_yuv,
+                 bdpsnr_d1, bdpsnr_d2, bdpsnr_y, bdpsnr_u, bdpsnr_v, bdpsnr_yuv]
             )
     bd_filename = f'{anchor_name.replace("*", "^")}'
     if anchor_secondly:
@@ -249,15 +277,17 @@ def compute_multiple_bdrate():
         bd_filename += ' bd gains'
     bd_filename += '.csv'
     write_metric_to_csv(
-        (method_names_to_compare, ('BD-Rate', 'BD-PSNR'), ('D1', 'D2', 'Y')),
+        (method_names_to_compare, ('BD-Rate (%)', 'BD-PSNR (dB)'), ('D1', 'D2', 'Y', 'U', 'V', 'YUV')),
         sample_wise_bd_metric, osp.join(output_dir, bd_filename)
     )
 
-    plot_bpp_psnr(method_to_json, output_dir)
-    plot_bpp_psnr(method_to_json, output_dir, d1=False)
-    plot_bpp_psnr(method_to_json, output_dir, c=0)
-    plot_bpp_psnr(method_to_json, output_dir, c=1)
-    plot_bpp_psnr(method_to_json, output_dir, c=2)
+    if plot_rd:
+        plot_bpp_psnr(method_to_json, output_dir)
+        plot_bpp_psnr(method_to_json, output_dir, d1=False)
+        plot_bpp_psnr(method_to_json, output_dir, c=0)
+        plot_bpp_psnr(method_to_json, output_dir, c=1)
+        plot_bpp_psnr(method_to_json, output_dir, c=2)
+        plot_bpp_psnr(method_to_json, output_dir, c=3)
     print('All Done')
 
 

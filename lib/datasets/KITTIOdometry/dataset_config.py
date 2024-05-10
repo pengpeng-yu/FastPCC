@@ -13,3 +13,4 @@ class DatasetConfig(SimpleConfig):
     random_rotation: bool = False
     random_flip: bool = False
     resolution: int = 4096
+    flag_sparsepcgc: bool = False

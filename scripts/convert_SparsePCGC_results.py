@@ -1,6 +1,7 @@
+import os
+
 import pandas as pd
 import json
-import os.path as osp
 
 
 file_paths = [
@@ -19,8 +20,8 @@ key_maps = {
     'mseF,PSNR (p2plane)': 'R{i}_mseF,PSNR (p2plane)',
     'bpp': 'R{i}_bpp'
 }
-path = 'tmp/SparsePCGCResults/ours.xlsx'
-res = pd.read_excel(path)
+path = '../SparsePCGC/results/dense_lossy/ours.csv'
+res = pd.read_csv(path)
 d = {}
 
 for idx in range(res.shape[0]):
@@ -39,7 +40,8 @@ for idx in range(res.shape[0]):
             d[file_path] = sub_d
             break
 
-with open(osp.join(osp.split(path)[0], 'metric_dict.json'), 'w') as f:
+os.makedirs('runs/tests/SparsePCGC', exist_ok=True)
+with open('runs/tests/SparsePCGC/metric_dict.json', 'w') as f:
     f.write(json.dumps(d, indent=2, sort_keys=False))
 
 print('Done')

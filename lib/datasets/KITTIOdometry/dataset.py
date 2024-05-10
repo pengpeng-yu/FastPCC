@@ -63,9 +63,14 @@ class KITTIOdometry(torch.utils.data.Dataset):
         # For calculating distortion metrics
         if not self.is_training:
             p, n = osp.split(file_path)
-            cache_path = osp.join(p, n.replace('.bin', '_n.ply'))
-            if not osp.isfile(cache_path):
-                write_ply_file(xyz, cache_path, estimate_normals=True)
+            if not self.cfg.flag_sparsepcgc:
+                cache_path = osp.join(p, n.replace('.bin', '_n.ply'))
+                if not osp.isfile(cache_path):
+                    write_ply_file(xyz, cache_path, estimate_normals=True)
+            else:
+                cache_path = osp.join(p, n.replace('.bin', '_q1mm_n.ply'))
+                if not osp.isfile(cache_path):
+                    write_ply_file((xyz * 1000).round(), cache_path, estimate_normals=True)
 
         if self.cfg.random_rotation:
             xyz = R.from_euler('z', np.random.uniform(0, 2 * np.pi)).apply(xyz).astype(np.float32)
@@ -83,12 +88,17 @@ class KITTIOdometry(torch.utils.data.Dataset):
             if np.random.rand() > 0.5:
                 xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max()
 
+        resolution = 59.70 + 1
+        inv_trans = torch.from_numpy(np.concatenate((org_point.reshape(-1), (scale,)), 0, dtype=np.float32))
+        if self.cfg.flag_sparsepcgc:
+            resolution = 30000 + 1
+            inv_trans *= 1000
         return PCData(
             xyz=torch.from_numpy(xyz),
             file_path=cache_path if not self.is_training else file_path,
             org_xyz=(torch.from_numpy(org_xyz)),
-            resolution=59.70 + 1,  # For the peak value in pc_error
-            inv_transform=torch.from_numpy(np.concatenate((org_point.reshape(-1), (scale,)), 0, dtype=np.float32))
+            resolution=resolution,  # For the peak value in pc_error
+            inv_transform=inv_trans
         )
 
     def collate_fn(self, batch):

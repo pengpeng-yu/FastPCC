@@ -1,0 +1,6 @@
+# include "config/convolutional/lossy_coord_v2/baseline_kitti_r6.yaml"
+
+test:
+  dataset:
+    test_filelist_path: 'test_list_SparsePCGC110.txt'
+    flag_sparsepcgc: True

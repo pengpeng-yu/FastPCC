@@ -24,9 +24,9 @@ tested on Ubuntu 20.04. This project is still under development.
 
 
 ## Requirements
-- [Binary pc_error and tmc3 compiled on Ubuntu 20.04. And an example of dataset folder](https://drive.google.com/file/d/1Z0h7umZ6YKtxmqY6h-lBK5aS6I_5Kjo9/view?usp=sharing)
-- [Test set of coordinate compression](https://drive.google.com/file/d/1GT3L33ye70uku-HXI1pqU7diuiL3sRGo/view?usp=drive_link)
-- [Trained model weights]() (will be uploaded soon)
+- [Binary pc_error and tmc3 compiled on Ubuntu 20.04. And an example of dataset folder](https://drive.google.com/file/d/1KiG2c-S9OLD8vQZ-Mi_Y0zF1RCLGWAkU/view?usp=sharing)
+- [Test set of coordinate compression](https://drive.google.com/file/d/1GT3L33ye70uku-HXI1pqU7diuiL3sRGo/view?usp=sharing)
+- [Trained model weights](https://drive.google.com/file/d/1DDvnBaUIbyhyepK55cDPrHAacJEpcvgu/view?usp=sharing)
 - [ShapeNetCorev2 OBJ format](https://huggingface.co/datasets/ShapeNet/ShapeNetCore/tree/main) (for training coordinate compression)
 - [KITTI Odometry](https://www.cvlibs.net/datasets/kitti/eval_odometry.php) (for training and testing coordinate compression)
 - [8iVFBv2](https://plenodb.jpeg.org/pc/8ilabs) & [Owlii](https://mpeg-pcc.org/index.php/pcc-content-database/owlii-dynamic-human-textured-mesh-sequence-dataset/) (for training joint coordinate and color compression)

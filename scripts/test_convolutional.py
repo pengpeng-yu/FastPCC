@@ -21,14 +21,17 @@ config_paths = [
     'lossy_coord/baseline.yaml',
     'lossy_coord_lossy_color/baseline_r*.yaml'
     'lossy_coord_v2/baseline_kitti_r*.yaml'
+    'lossy_coord_v2/baseline_kitti_q1mm_r*.yaml'
 ]
 sub_config_to_weight_path_maps = {
-    1: lambda _: _.replace('_part6e5', '', 1)
+    'lossy_coord_v2/baseline_part6e5_r*.yaml': lambda _: _.replace('_part6e5', '', 1),
+    'lossy_coord_v2/baseline_kitti_q1mm_r*.yaml': lambda _: _.replace('_q1mm', '', 1)
 }
 
 
 def test():
-    for glob_idx, glob_config_path in enumerate(config_paths):
+    for glob_config_path in config_paths:
+        glob_config_path_org = glob_config_path
         glob_config_path = osp.join(config_prefix, glob_config_path)
         sub_config_paths = sorted(glob(glob_config_path))
         for config_path in sub_config_paths:
@@ -38,7 +41,7 @@ def test():
 
             glob_weight_path = osp.join(
                 weight_prefix,
-                sub_config_to_weight_path_maps.get(glob_idx, lambda _: _)(config_name) + '.pt'
+                sub_config_to_weight_path_maps.get(glob_config_path_org, lambda _: _)(config_name) + '.pt'
             )
             weights_paths = sorted(glob(glob_weight_path))
             if len(weights_paths) == 0:
@@ -64,18 +67,20 @@ def test():
                     f' test.device={cuda_device}',
                     shell=True, check=True, executable=shutil.which('bash')
                 )
-                sub_metric_dict_path = osp.join(sub_sub_run_dir, 'metric_dict.json')
-                with open(sub_metric_dict_path, 'rb') as f:
-                    sub_metric_dict = json.load(f)
-                for key in sub_metric_dict:
-                    all_file_metric_dict[key] = concat_values_for_dict(
-                        all_file_metric_dict[key] if key in all_file_metric_dict else {},
-                        sub_metric_dict[key]
-                    )
+                if len(weights_paths) != 1:
+                    sub_metric_dict_path = osp.join(sub_sub_run_dir, 'metric_dict.json')
+                    with open(sub_metric_dict_path, 'rb') as f:
+                        sub_metric_dict = json.load(f)
+                    for key in sub_metric_dict:
+                        all_file_metric_dict[key] = concat_values_for_dict(
+                            all_file_metric_dict[key] if key in all_file_metric_dict else {},
+                            sub_metric_dict[key]
+                        )
 
             print(f'config "{config_path}" Done')
-            with open(osp.join(sub_run_dir, metric_dict_filename), 'w') as f:
-                f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
+            if len(weights_paths) != 1:
+                with open(osp.join(sub_run_dir, metric_dict_filename), 'w') as f:
+                    f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
     print('All Done')
 
 
