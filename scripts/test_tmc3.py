@@ -35,12 +35,15 @@ if single_frame_only:
         'datasets/KITTI/sequences/test_list.txt',
         'datasets/KITTI/sequences/test_list_SparsePCGC110.txt'
     )
-    # Note: I assume that you have run test.py with class lib.datasets.KITTIOdometry,
-    #       which generates *_n.ply and *_q1mm_n.ply files as the input of pc_error and tmc3.
+    # ↑ Two different calculation of distortion metrics on KITTI.
+    # I put them in a single json file since they have different reconstruction targets (*_n.ply / *_q1mm_n.ply)
+    #   and won't cause key conflicts.
+    # Note: I assume that you HAVE RUN test.py with class lib.datasets.KITTIOdometry,
+    #       which generates *_n.ply and *_q1mm_n.ply files as the input of pc_error.
     resolutions = (512, 1024, 2048, 4096, 59.70 + 1, 30000 + 1)
 else:
-    # Note: I assume that you have run test.py on 8iVFBv2,
-    #       which generates *_n.ply files as the input of pc_error and tmc3.
+    # Note: I assume that HAVE RUN test.py on 8iVFBv2,
+    #       which generates *_n.ply files as the input of pc_error.
     file_lists = (
         'datasets/Owlii/list_basketball_player_dancer.txt',
         'datasets/8iVFBv2/list_loot_redandblack.txt'
@@ -108,7 +111,7 @@ def get_tmc3_trisoup_trisoupNodeSizeLog2(rate_flag):
     return d[int(rate_flag)]
 
 
-def test_geo_intra(processes_num, immediate_dump):
+def test_intra(processes_num):
     print(f'Test tmc3 {"geo " if geo_only else ""}coding')
     pool = mp.Pool(processes_num)
 
@@ -118,22 +121,19 @@ def test_geo_intra(processes_num, immediate_dump):
         print(f'Test config: "{config_dir}"')
         print(f'Output to "{output_dir}"')
         all_file_metric_dict: all_file_metric_dict_type = {}
-        all_file_run_res = {}
+        all_file_run_res = []
 
         for resolution, file_list in zip(resolutions, file_lists):
             file_paths = read_file_list_with_rel_path(file_list)
             for file_path in file_paths:
-                all_file_run_res[file_path] = pool.apply_async(
+                all_file_run_res.append(pool.apply_async(
                     run_single_file,
                     (file_path, resolution, file_list, default_config_paths, config_dir, output_dir)
-                )
-        for file_path, run_res in all_file_run_res.items():
+                ))
+        for run_res in all_file_run_res:
             ret = run_res.get()
             if ret is not None:
-                all_file_metric_dict.update(ret)
-                if immediate_dump:
-                    with open(osp.join(output_dir, metric_dict_filename), 'w') as f:
-                        f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
+                all_file_metric_dict[ret[0]] = ret[1]
 
         print(f'{config_dir} Done')
         with open(osp.join(output_dir, metric_dict_filename), 'w') as f:
@@ -199,6 +199,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             scale_for_kitti = (2 ** (int(rate_flag[1:]) + 9) - 1) / 400
             temp_xyz *= scale_for_kitti
             temp_xyz.round(out=temp_xyz)
+            temp_xyz = np.unique(temp_xyz, axis=0)
             temp_file_path_for_kitti = osp.join(sub_output_dir, f"{rate_flag}_scaled_input.ply")
             write_ply_file(temp_xyz, temp_file_path_for_kitti)
             command_enc += f' --uncompressedDataPath={temp_file_path_for_kitti} --positionQuantizationScale=1'
@@ -251,8 +252,10 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
     sub_metric_dict['bpp'] = [bits / org_points_num for bits, org_points_num in zip(
         sub_metric_dict['bits'], sub_metric_dict['org points num'])]
     del sub_metric_dict['bits'], sub_metric_dict['org points num']
-    return {org_pc_for_pc_error: sub_metric_dict}
+    with open(osp.join(sub_output_dir, metric_dict_filename), 'w') as f:
+        f.write(json.dumps(sub_metric_dict, indent=2, sort_keys=False))
+    return org_pc_for_pc_error, sub_metric_dict
 
 
 if __name__ == '__main__':
-    test_geo_intra(32, False)
+    test_intra(32)

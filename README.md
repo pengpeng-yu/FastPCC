@@ -19,8 +19,8 @@ tested on Ubuntu 20.04. This project is still under development.
 - open3d
 - plyfile
 - pytorch >= 1.7
-- [pytorch3d](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) (for knn_points. Conda installation suggested: conda install -c fvcore -c iopath -c conda-forge fvcore iopath; conda install pytorch3d -c pytorch3d)
-- [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#pip) ≈ 0.5.4
+- [pytorch3d](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) (only for knn_points in joint lossy compression. Conda installation suggested: conda install -c fvcore -c iopath -c conda-forge fvcore iopath; conda install pytorch3d -c pytorch3d)
+- [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#pip) ≈ 0.5.4 (for compilation with CUDA > 12, please refer to [this](https://github.com/NVIDIA/MinkowskiEngine/issues/543#issuecomment-1773458776))
 
 
 ## Requirements
@@ -64,7 +64,7 @@ The definition of training and testing configurations is lib/config.py
 
 ## Known issues
 - For your first training on ShapeNetCorev2, the meshes in the dataset will be loaded and cached using Open3D. However, Open3D may complain about the loading of textures. You can avoid this by running `scripts/shapenet_mtls.py`. Besides, you can manually remove the ShapeNetCorev2 cache in `datasets/ShapeNet/ShapeNetCore.v2/cache` if necessary.
-- For your first test on KITTI/8iVFBv2, PLY caches with normals (*_n.ply) of the original point cloud files will be generated for pc_error, requiring approximately 55GB/12GB of storage space. You can delete them by `find ./datasets/KITTI -name "*_n.ply" -delete`.
+- For your first test on KITTI/8iVFBv2, PLY caches with normals (*_n.ply and *_q1mm_n.ply) of the original point cloud files will be generated for pc_error, requiring approximately 55GB/12GB of storage space. You can delete them by `find ./datasets/KITTI/ -name "*_n.ply" -delete`.
 - There are some experimental code snippets in this project. Only the models we mentioned above are recommended for use. 
 
 

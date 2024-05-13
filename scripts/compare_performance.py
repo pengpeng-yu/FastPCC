@@ -15,23 +15,21 @@ from scripts.shared_config import metric_dict_filename, test_dir
 from lib.metrics.bjontegaard import bdrate, bdsnr
 
 
-def compute_bd(info_dicts_a: all_file_metric_dict_type,
-               info_dicts_b: all_file_metric_dict_type,
+def compute_bd(info_dicts_a, info_dicts_b, samples_name: List[str],
                rate=True, d1=True, c=-1) -> Dict[str, float]:
     bd_rate_results = {}
     distortion_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
     if c != -1:
         distortion_key = f'c[{c}],PSNRF'
     bd_fn = bdrate if rate else bdsnr
-    for key in info_dicts_a:
-        if key in info_dicts_b:
-            try:
-                bpp_psnr_a = list(zip(info_dicts_a[key]['bpp'], info_dicts_a[key][distortion_key]))
-                bpp_psnr_b = list(zip(info_dicts_b[key]['bpp'], info_dicts_b[key][distortion_key]))
-            except KeyError:
-                bd_rate_results[key] = -1
-            else:
-                bd_rate_results[key] = bd_fn(bpp_psnr_a, bpp_psnr_b)
+    for key in samples_name:
+        try:
+            bpp_psnr_a = list(zip(info_dicts_a[key]['bpp'], info_dicts_a[key][distortion_key]))
+            bpp_psnr_b = list(zip(info_dicts_b[key]['bpp'], info_dicts_b[key][distortion_key]))
+        except KeyError:
+            bd_rate_results[key] = None
+        else:
+            bd_rate_results[key] = bd_fn(bpp_psnr_a, bpp_psnr_b)
     return bd_rate_results
 
 
@@ -113,8 +111,6 @@ def remove_non_overlapping_points(method_name, sample_name, sorted_indices):
         slice_val = (None, -2)
     elif method_name == 'SparsePCGC':
         slice_val = (1, None)
-    elif method_name == 'SparsePCGC vox1mm':
-        slice_val = (1, -1)
     elif method_name == 'G-PCC octree-raht':
         slice_val = (1, -1)
     elif method_name == 'G-PCC octree-predlift':
@@ -135,15 +131,16 @@ def compute_multiple_bdrate():
         # 'Ours w/o feature residual':
         #     'convolutional/lossy_coord_v2/wo_residual_r*',
         # 'Ours part6e5': 'convolutional/lossy_coord_v2/baseline_part6e5_r*',
-        # 'Ours color': 'convolutional/lossy_coord_lossy_color/baseline_r*',
-        # 'Ours KITTI': 'convolutional/lossy_coord_v2/baseline_kitti_r*',
-        # 'Ours KITTI vox1mm': 'convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*',
+        # 'Ours joint': 'convolutional/lossy_coord_lossy_color/baseline_r*',
+        # 'Ours': 'convolutional/lossy_coord_v2/baseline_kitti_r*',
+        # 'Ours': 'convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*',
 
         'SparsePCGC': 'SparsePCGC/dense_lossy',
-        # 'SparsePCGC vox1mm': 'SparsePCGC/kitti_q1mm',
+        # 'SparsePCGC': 'SparsePCGC/kitti_q1mm',
         'PCGCv2': 'convolutional/lossy_coord/baseline',
         'V-PCC': 'tmc2_geo',
         # 'ADLPCC': 'ADLPCC',
+        'OctAttention': 'OctAttention-lidar',
         'G-PCC octree': 'tmc3_geo/octree',
         # 'G-PCC octree-raht': 'tmc3/octree-raht',
         # 'G-PCC octree-predlift': 'tmc3/octree-predlift',
@@ -219,29 +216,29 @@ def compute_multiple_bdrate():
             comparison_tuple = (method_to_json[anchor_name], method_json)
             if anchor_secondly: comparison_tuple = comparison_tuple[::-1]
             concat_values_for_dict(
-                sample_wise_bdrate_d1, compute_bd(*comparison_tuple))
+                sample_wise_bdrate_d1, compute_bd(*comparison_tuple, sample_names))
             concat_values_for_dict(
-                sample_wise_bdrate_d2, compute_bd(*comparison_tuple, d1=False))
+                sample_wise_bdrate_d2, compute_bd(*comparison_tuple, sample_names, d1=False))
             concat_values_for_dict(
-                sample_wise_bdpsnr_d1, compute_bd(*comparison_tuple, rate=False))
+                sample_wise_bdpsnr_d1, compute_bd(*comparison_tuple, sample_names, rate=False))
             concat_values_for_dict(
-                sample_wise_bdpsnr_d2, compute_bd(*comparison_tuple, rate=False, d1=False))
+                sample_wise_bdpsnr_d2, compute_bd(*comparison_tuple, sample_names, rate=False, d1=False))
             concat_values_for_dict(
-                sample_wise_bdrate_y, compute_bd(*comparison_tuple, c=0))
+                sample_wise_bdrate_y, compute_bd(*comparison_tuple, sample_names, c=0))
             concat_values_for_dict(
-                sample_wise_bdpsnr_y, compute_bd(*comparison_tuple, rate=False, c=0))
+                sample_wise_bdpsnr_y, compute_bd(*comparison_tuple, sample_names, rate=False, c=0))
             concat_values_for_dict(
-                sample_wise_bdrate_u, compute_bd(*comparison_tuple, c=1))
+                sample_wise_bdrate_u, compute_bd(*comparison_tuple, sample_names, c=1))
             concat_values_for_dict(
-                sample_wise_bdpsnr_u, compute_bd(*comparison_tuple, rate=False, c=1))
+                sample_wise_bdpsnr_u, compute_bd(*comparison_tuple, sample_names, rate=False, c=1))
             concat_values_for_dict(
-                sample_wise_bdrate_v, compute_bd(*comparison_tuple, c=2))
+                sample_wise_bdrate_v, compute_bd(*comparison_tuple, sample_names, c=2))
             concat_values_for_dict(
-                sample_wise_bdpsnr_v, compute_bd(*comparison_tuple, rate=False, c=2))
+                sample_wise_bdpsnr_v, compute_bd(*comparison_tuple, sample_names, rate=False, c=2))
             concat_values_for_dict(
-                sample_wise_bdrate_yuv, compute_bd(*comparison_tuple, c=3))
+                sample_wise_bdrate_yuv, compute_bd(*comparison_tuple, sample_names, c=3))
             concat_values_for_dict(
-                sample_wise_bdpsnr_yuv, compute_bd(*comparison_tuple, rate=False, c=3))
+                sample_wise_bdpsnr_yuv, compute_bd(*comparison_tuple, sample_names, rate=False, c=3))
 
     write_metric_to_csv(
         (list(method_to_json.keys()), ('Enc', 'Dec')),

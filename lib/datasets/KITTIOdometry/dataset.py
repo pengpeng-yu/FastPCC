@@ -69,8 +69,9 @@ class KITTIOdometry(torch.utils.data.Dataset):
                     write_ply_file(xyz, cache_path, estimate_normals=True)
             else:
                 cache_path = osp.join(p, n.replace('.bin', '_q1mm_n.ply'))
+                org_xyz = np.unique((xyz * 1000).round(), axis=0)
                 if not osp.isfile(cache_path):
-                    write_ply_file((xyz * 1000).round(), cache_path, estimate_normals=True)
+                    write_ply_file(org_xyz, cache_path, estimate_normals=True)
 
         if self.cfg.random_rotation:
             xyz = R.from_euler('z', np.random.uniform(0, 2 * np.pi)).apply(xyz).astype(np.float32)

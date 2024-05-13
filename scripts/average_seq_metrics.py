@@ -10,11 +10,18 @@ from scripts.shared_config import test_dir, metric_dict_filename
 
 
 def main():
+    """
+    Averaging the metrics of each rate-distortion points for sequences.
+    input: a list of metric dicts ('metric_dict.json').
+    output: averaged dicts ('metric_dict.json', which will be used by compare_performance.py)
+            and original dicts ('metric_dict_bak.json')
+    If 'metric_dict_bak.json' already exists, I will skip that folder to avoid the original dicts being overwritten.
+    """
     average_targets = {
-        lambda s: 'basketball_player_vox11' in s: 'basketball_player_vox11',
-        lambda s: 'dancer_vox11' in s: 'dancer_vox11',
-        lambda s: 'loot_vox10' in s: 'loot_vox10',
-        lambda s: 'redandblack_vox10' in s: 'redandblack_vox10',
+        lambda s: 'basketball_player_vox11' in s and 'Owlii' in s: 'basketball_player_vox11',
+        lambda s: 'dancer_vox11' in s and 'Owlii' in s: 'dancer_vox11',
+        lambda s: 'loot' in s and '8iVFBv2' in s: 'loot_vox10',
+        lambda s: 'redandblack' in s and '8iVFBv2' in s: 'redandblack_vox10',
         lambda s: 'KITTI' in s and 'q1mm' not in s: 'KITTI',
         lambda s: 'KITTI' in s and 'q1mm' in s: 'KITTI q1mm'
     }
@@ -36,7 +43,11 @@ def main():
                 print(f'Skip {file}\n')
                 continue
             with open(file, 'rb') as f:
-                metric_dict = json.load(f)
+                try:
+                    metric_dict = json.load(f)
+                except Exception as e:
+                    print(file)
+                    raise e
             new_metric_dict = {}
             counts = {v: 0 for v in average_targets.values()}
             for sample_name, sample_metric in metric_dict.items():

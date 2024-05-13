@@ -83,10 +83,10 @@ def test():
                     shell=True, check=True, text=True, executable=shutil.which('bash')
                 )
                 print(subp_enc.stdout)
-                sub_metric_dict = concat_values_for_dict(
-                    sub_metric_dict,
-                    log_extractor.extract_enc_log(subp_enc.stdout), False
-                )
+                # sub_metric_dict = concat_values_for_dict(
+                #     sub_metric_dict,
+                #     log_extractor.extract_enc_log(subp_enc.stdout), False
+                # )
                 encoded_path = osp.join(
                     adl_pcc_dir, 'results', rate_flag, file_basename,
                     file_basename + '.pkl.gz'
@@ -102,10 +102,10 @@ def test():
                     shell=True, check=True, text=True, executable=shutil.which('bash')
                 )
                 print(subp_dec.stdout)
-                sub_metric_dict = concat_values_for_dict(
-                    sub_metric_dict,
-                    log_extractor.extract_dec_log(subp_dec.stdout), False
-                )
+                # sub_metric_dict = concat_values_for_dict(
+                #     sub_metric_dict,
+                #     log_extractor.extract_dec_log(subp_dec.stdout), False
+                # )
                 recon_path = osp.join(
                     adl_pcc_dir, 'results', rate_flag, file_basename,
                     file_basename + '.pkl.gz.dec.ply'
