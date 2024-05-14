@@ -32,7 +32,8 @@ def main():
         f'{test_dir}/tmc3_geo/octree/{metric_dict_filename}',
         f'{test_dir}/tmc3/octree-predlift/{metric_dict_filename}',
         f'{test_dir}/tmc3/octree-raht/{metric_dict_filename}',
-        f'{test_dir}/tmc2/{metric_dict_filename}'
+        f'{test_dir}/tmc2/{metric_dict_filename}',
+        f'{test_dir}/OctAttention-lidar/{metric_dict_filename}',
     )
     for files in input_files:
         files = sorted(glob(files))

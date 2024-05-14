@@ -33,14 +33,16 @@ if single_frame_only:
         "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
         "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt",
         'datasets/KITTI/sequences/test_list.txt',
-        'datasets/KITTI/sequences/test_list_SparsePCGC110.txt'
+        'datasets/KITTI/sequences/test_list_SparsePCGC110.txt',
     )
     # ↑ Two different calculation of distortion metrics on KITTI.
     # I put them in a single json file since they have different reconstruction targets (*_n.ply / *_q1mm_n.ply)
     #   and won't cause key conflicts.
+    # I look for keywords ('MVUB'/'KITTI'/'SparsePCGC') in the paths of file lists
+    #   to flag whether special handling is needed.
     # Note: I assume that you HAVE RUN test.py with class lib.datasets.KITTIOdometry,
     #       which generates *_n.ply and *_q1mm_n.ply files as the input of pc_error.
-    resolutions = (512, 1024, 2048, 4096, 59.70 + 1, 30000 + 1)
+    resolutions = (512, 1024, 2048, 4096, 59.70 + 1, 30000 + 1,)
 else:
     # Note: I assume that HAVE RUN test.py on 8iVFBv2,
     #       which generates *_n.ply files as the input of pc_error.
@@ -174,6 +176,8 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
     if flag_sparsepcgc:
         sub_output_dir += '_q1mm'
     os.makedirs(sub_output_dir, exist_ok=True)
+    if flag_kitti:
+        org_xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
     for config_path in config_paths:
         rate_flag = osp.split(osp.split(config_path)[0])[1]
         print(f'    Test file {file_path}, res {resolution}, {rate_flag}')
@@ -195,13 +199,12 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             else:
                 raise NotImplementedError
         if flag_kitti:
-            temp_xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
             scale_for_kitti = (2 ** (int(rate_flag[1:]) + 9) - 1) / 400
-            temp_xyz *= scale_for_kitti
-            temp_xyz.round(out=temp_xyz)
-            temp_xyz = np.unique(temp_xyz, axis=0)
+            temp_xyz_q = org_xyz * scale_for_kitti
+            temp_xyz_q.round(out=temp_xyz_q)
+            temp_xyz_q = np.unique(temp_xyz_q, axis=0)
             temp_file_path_for_kitti = osp.join(sub_output_dir, f"{rate_flag}_scaled_input.ply")
-            write_ply_file(temp_xyz, temp_file_path_for_kitti)
+            write_ply_file(temp_xyz_q, temp_file_path_for_kitti)
             command_enc += f' --uncompressedDataPath={temp_file_path_for_kitti} --positionQuantizationScale=1'
         subp_enc = subprocess.run(
             command_enc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
