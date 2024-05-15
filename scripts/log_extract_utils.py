@@ -25,11 +25,6 @@ class LogExtractor:
         return extracted
 
 
-def hook_for_org_points_num(line):
-    if line.startswith('Point cloud sizes for org version, dec version, and the scaling ratio'):
-        return 'org points num', int(line.rstrip().rsplit(' ', 3)[1][:-1])
-
-
 def read_file_list_with_rel_path(file_list):
     file_paths = []
     root_path = osp.split(file_list)[0]

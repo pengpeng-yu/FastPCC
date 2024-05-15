@@ -1,7 +1,15 @@
+"""
+This script is based on the commit a3ca7b69baeaca99a67c6d0df861a99ffd90b593 of SparsePCGC.
+Converting the csv format of rate-distortion used in SparsePCGC to the json format I use.
+"""
 import os
+import os.path as osp
+import json
 
 import pandas as pd
-import json
+
+
+SparsePCGC_path = '../SparsePCGC'
 
 
 def convert_dense_lossy():
@@ -21,7 +29,7 @@ def convert_dense_lossy():
         'mseF,PSNR (p2plane)': 'R{i}_mseF,PSNR (p2plane)',
         'bpp': 'R{i}_bpp'
     }
-    path = '../SparsePCGC/results/dense_lossy/ours.csv'
+    path = osp.join(SparsePCGC_path, 'results/dense_lossy/ours.csv')
     res = pd.read_csv(path)
     d = {}
 
@@ -56,7 +64,7 @@ def convert_kitti_lossy():
         'mseF,PSNR (p2plane)': 'R{i}_mseF,PSNR (p2plane)',
         'bpp': 'R{i}_bpp'
     }
-    path = '../SparsePCGC/results/comparison_gpcc_sparse/ours_lossy_kitti_data110.csv'
+    path = osp.join(SparsePCGC_path, 'results/comparison_gpcc_sparse/ours_lossy_kitti_data110.csv')
     df = pd.read_csv(path)
     d = {k: [] for k in key_maps}
 

@@ -164,8 +164,7 @@ def run_single_file(file_path, resolution):
                 osp.join(sub_output_dir, f'r{rate}_dec_recon.ply'), resolution,
                 color=False if geo_only else True,
                 normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
-                command=pc_error_path,
-                hooks=(hook_for_org_points_num,)
+                command=pc_error_path
             ), False
         )
         print(f'    Test file {file_path}, res {resolution}, r{rate}.  Done')

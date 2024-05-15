@@ -39,7 +39,9 @@ def mpeg_pc_error(
             extracted = hook(line)
             if extracted is not None:
                 metric_dict[extracted[0]] = extracted[1]
-        if line.startswith(_DIVIDERS[0]):
+        if line.startswith('Point cloud sizes for org version'):
+            metric_dict['org points num'] = int(line.rstrip().rsplit(' ', 3)[1][:-1])
+        elif line.startswith(_DIVIDERS[0]):
             flag_read = True
         elif line.startswith(_DIVIDERS[-1]):
             break

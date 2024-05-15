@@ -248,8 +248,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
                 osp.join(sub_output_dir, f'{rate_flag}_recon.ply'), resolution,
                 color=False if geo_only else True,
                 normal_file=osp.splitext(file_path)[0] + ('_n.ply' if not flag_sparsepcgc else '_q1mm_n.ply'),
-                command=pc_error_path,
-                hooks=(hook_for_org_points_num,)
+                command=pc_error_path
             ), False
         )
     sub_metric_dict['bpp'] = [bits / org_points_num for bits, org_points_num in zip(

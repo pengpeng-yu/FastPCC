@@ -58,7 +58,7 @@ def write_metric_to_csv(titles: Tuple[Union[List[str], Tuple[str, ...]], ...],
             f.write(f'{key}, {",".join(map(str, value))},\n')
 
 
-def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
+def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_cfg,
                   output_dir, d1=True, c=-1, hook=None):
     distortion_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
     y_label = 'D1 PSNR (dB)' if d1 else 'D2 PSNR (dB)'
@@ -80,6 +80,7 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
         fig.set_ylabel(y_label, labelpad=0)
         fig.set_title(osp.splitext(osp.split(sample_name)[1])[0])
         for method_name, method_json in method_to_json.items():
+            plt_config = method_to_plt_cfg[method_name]
             if sample_name not in method_json: continue
             tmp_x_axis = method_json[sample_name]['bpp']
             if distortion_key not in method_json[sample_name]:
@@ -91,7 +92,10 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type],
             if hook is not None:
                 tmp_x_axis, tmp_y_axis = hook(tmp_x_axis, tmp_y_axis, method_name)
             if len(tmp_x_axis) and len(tmp_y_axis):
-                fig.plot(tmp_x_axis, tmp_y_axis, '.-', label=method_name)
+                if isinstance(plt_config, str):
+                    fig.plot(tmp_x_axis, tmp_y_axis, plt_config, label=method_name)
+                else:
+                    fig.plot(tmp_x_axis, tmp_y_axis, **plt_config, label=method_name)
         fig.legend(loc='lower right')
         fig.figure.savefig(osp.join(
             output_dir, f'{y_label} {osp.splitext(osp.split(sample_name)[1])[0]}.pdf'
@@ -124,29 +128,36 @@ def compute_multiple_bdrate():
     anchor_name = 'Ours'
     anchor_secondly = True
     plot_rd = True
-    method_to_json_path: Dict[str, Union[str, List[str]]] = {
-        'Ours': 'convolutional/lossy_coord_v2/baseline_r*',
+    method_configs = {
+        'Ours': ('convolutional/lossy_coord_v2/baseline_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Ours w/o geometry residual':
-        #     'convolutional/lossy_coord_v2/gpcc_based_r*',
+        #     ('convolutional/lossy_coord_v2/gpcc_based_r*', {'color': '#ff7f0e', 'marker': '.'}),
         # 'Ours w/o feature residual':
-        #     'convolutional/lossy_coord_v2/wo_residual_r*',
-        # 'Ours part6e5': 'convolutional/lossy_coord_v2/baseline_part6e5_r*',
-        # 'Ours joint': 'convolutional/lossy_coord_lossy_color/baseline_r*',
-        # 'Ours': 'convolutional/lossy_coord_v2/baseline_kitti_r*',
-        # 'Ours': 'convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*',
+        #     ('convolutional/lossy_coord_v2/wo_residual_r*', {'color': '#2ca02c', 'marker': '.'}),
+        # 'Ours part6e5': ('convolutional/lossy_coord_v2/baseline_part6e5_r*', {'color': '#d62728', 'marker': '.'}),
+        # 'Ours joint': ('convolutional/lossy_coord_lossy_color/baseline_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Ours': ('convolutional/lossy_coord_v2/baseline_kitti_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Ours': ('convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*', {'color': '#1f77b4', 'marker': '.'}),
 
-        'SparsePCGC': 'SparsePCGC/dense_lossy',
-        # 'SparsePCGC': 'SparsePCGC/kitti_q1mm',
-        'PCGCv2': 'convolutional/lossy_coord/baseline',
-        'V-PCC': 'tmc2_geo',
-        # 'ADLPCC': 'ADLPCC',
-        'OctAttention': 'OctAttention-lidar',
-        'G-PCC octree': 'tmc3_geo/octree',
-        # 'G-PCC octree-raht': 'tmc3/octree-raht',
-        # 'G-PCC octree-predlift': 'tmc3/octree-predlift',
+        'SparsePCGC': ('SparsePCGC/dense_lossy', {'color': '#ff7f0e', 'marker': '.'}),
+        # 'SparsePCGC': ('SparsePCGC/kitti_q1mm', {'color': '#ff7f0e', 'marker': '.'}),
+        'PCGCv2': ('convolutional/lossy_coord/baseline', {'color': '#2ca02c', 'marker': '.'}),
+        'V-PCC': ('tmc2_geo', {'color': '#d62728', 'marker': '.'}),
+        'ADLPCC': ('ADLPCC', {'color': '#9467bd', 'marker': '.'}),
+        # 'OctAttention': ('OctAttention-lidar', {'color': '#bcbd22', 'marker': '.'}),
+        'G-PCC octree': ('tmc3_geo/octree', {'color': '#8c564b', 'marker': '.'}),
+        # 'G-PCC octree-raht': ('tmc3/octree-raht', {'color': '#ff7f0e', 'marker': '.'}),
+        # 'G-PCC octree-predlift': ('tmc3/octree-predlift', {'color': '#2ca02c', 'marker': '.'}),
+        # 'pcc-geo-color': ('pcc-geo-color', {'color': '#d62728', 'marker': '.'}),
     }
     output_dir = 'runs/comparisons'
     rel_json_path_pattern = osp.join(test_dir, '{}', metric_dict_filename)
+
+    method_to_json_path: Dict[str, Union[str, List[str]]] = {}
+    method_to_plt_cfg = {}
+    for k, v in method_configs.items():
+        method_to_json_path[k] = v[0]
+        method_to_plt_cfg[k] = v[1]
 
     for k, v in method_to_json_path.items():
         if not isinstance(v, list):
@@ -282,12 +293,12 @@ def compute_multiple_bdrate():
     )
 
     if plot_rd:
-        plot_bpp_psnr(method_to_json, output_dir)
-        plot_bpp_psnr(method_to_json, output_dir, d1=False)
-        plot_bpp_psnr(method_to_json, output_dir, c=0)
-        plot_bpp_psnr(method_to_json, output_dir, c=1)
-        plot_bpp_psnr(method_to_json, output_dir, c=2)
-        plot_bpp_psnr(method_to_json, output_dir, c=3)
+        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir)
+        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir, d1=False)
+        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir, c=0)
+        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir, c=1)
+        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir, c=2)
+        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir, c=3)
     print('All Done')
 
 

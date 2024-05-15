@@ -50,6 +50,7 @@ train:
     random_rotation: False
     random_flip: True
     random_rgb_perm: False
+    resolution: [1024, 2048]
 
 
 test:
@@ -63,3 +64,4 @@ test:
     filelist_path: ['list_loot_redandblack.txt', 'list_basketball_player_dancer.txt']
     kd_tree_partition_max_points_num: 2000000
     with_color: True
+    resolution: [1024, 2048]

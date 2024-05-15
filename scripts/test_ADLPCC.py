@@ -28,6 +28,7 @@ resolutions = (512, 1024, 2048, 4096)
 assert len(file_lists) == len(resolutions)
 
 output_dir = f'{test_dir}/ADLPCC'
+# Only the metric file is here. The compressed and reconstructed points clouds are in ../ADLPCC/results.
 
 
 class ADLPCCLogExtractor(LogExtractor):
@@ -115,8 +116,7 @@ def test():
                     mpeg_pc_error(
                         file_path, osp.abspath(recon_path), resolution,
                         normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
-                        threads=16, command=pc_error_path,
-                        hooks=(hook_for_org_points_num,)
+                        threads=16, command=pc_error_path
                     ), False
                 )
                 sub_metric_dict['bpp'].append(
