@@ -398,25 +398,30 @@ def write_ply_file(
         rgb: Union[torch.Tensor, np.ndarray] = None,
         write_ascii: bool = False,
         make_dirs: bool = False,
-        estimate_normals: bool = False) -> None:
+        estimate_normals: bool = False,
+        normals: Union[torch.Tensor, np.ndarray] = None) -> None:
     if make_dirs:
         os.makedirs(osp.dirname(file_path), exist_ok=True)
     if isinstance(xyz, torch.Tensor):
         xyz = xyz.cpu().numpy()
+    if isinstance(rgb, torch.Tensor):
+        rgb = rgb.cpu().numpy()
+    if isinstance(normals, torch.Tensor):
+        normals = normals.cpu().numpy()
     assert xyz.shape[1] == 3
     xyz = xyz.astype(xyz_dtype, copy=False)
     rgb_dtype = np.uint8
-    if isinstance(rgb, torch.Tensor):
-        rgb = rgb.cpu().numpy()
     if rgb is not None:
         assert rgb.shape[1] == 3 and rgb.shape[0] == xyz.shape[0]
         assert rgb.dtype in (np.float32, rgb_dtype)
         rgb = rgb.astype(rgb_dtype, copy=False)
+
     el_with_properties_dtype = [('x', xyz_dtype), ('y', xyz_dtype), ('z', xyz_dtype)]
-    if estimate_normals:
+    if estimate_normals or normals is not None:
         el_with_properties_dtype.extend([('nx', np.float32), ('ny', np.float32), ('nz', np.float32)])
     if rgb is not None:
         el_with_properties_dtype.extend([('red', rgb_dtype), ('green', rgb_dtype), ('blue', rgb_dtype)])
+
     el_with_properties = np.empty(len(xyz), dtype=el_with_properties_dtype)
     el_with_properties['x'] = xyz[:, 0]
     el_with_properties['y'] = xyz[:, 1]
@@ -425,6 +430,7 @@ def write_ply_file(
         o3d_pc = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(xyz))
         o3d_pc.estimate_normals()
         normals = np.asarray(o3d_pc.normals)
+    if estimate_normals or normals is not None:
         el_with_properties['nx'] = normals[:, 0]
         el_with_properties['ny'] = normals[:, 1]
         el_with_properties['nz'] = normals[:, 2]
@@ -444,22 +450,6 @@ def read_xyz_from_ply_file(file_path: str):
         ply_data.elements[0].data['z'],
     ])
     return xyz
-
-
-def if_ply_has_vertex_normal(file_path: str):
-    has = False
-    with open(file_path, 'rb') as f:
-        while True:
-            try:
-                line = f.readline()
-                if line.strip() == b'end_header': break
-                elif line.rsplit(maxsplit=1)[-1] == b'nx':
-                    has = True
-                    break
-            except Exception as e:
-                print(file_path)
-                raise e
-    return has
 
 
 def o3d_coords_sampled_from_triangle_mesh(

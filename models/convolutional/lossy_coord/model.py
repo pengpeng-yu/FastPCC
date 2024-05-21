@@ -342,9 +342,20 @@ class PCC(nn.Module):
             coord_recon = self.decompress(compressed_bytes, sparse_tensor_coords) if not_part else \
                 self.decompress_partitions(compressed_bytes, sparse_tensor_coords)
         ME.clear_global_coordinate_manager()
+        if pc_data.inv_transform is not None:
+            inv_trans = pc_data.inv_transform[0].to(coord_recon.device)
+            pred_xyz = coord_recon * inv_trans[3]
+            pred_xyz += inv_trans[None, :3]
+            compressed_bytes = pc_data.inv_transform[0].numpy().astype('<f4').tobytes() + compressed_bytes
+        else:
+            pred_xyz = coord_recon
+        if pc_data.org_xyz is not None:
+            target_xyz = pc_data.org_xyz[0]
+        else:
+            target_xyz = (pc_data.xyz[:, 1:] if not_part else pc_data.xyz[0])
         ret = self.evaluator.log(
-            pred=coord_recon,
-            target=pc_data.xyz[:, 1:] if not_part else pc_data.xyz[0],
+            pred=pred_xyz,
+            target=target_xyz,
             compressed_bytes=compressed_bytes,
             file_path=pc_data.file_path[0],
             resolution=pc_data.resolution[0],

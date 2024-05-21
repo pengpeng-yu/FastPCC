@@ -141,7 +141,7 @@ def compute_multiple_bdrate():
 
         'SparsePCGC': ('SparsePCGC/dense_lossy', {'color': '#ff7f0e', 'marker': '.'}),
         # 'SparsePCGC': ('SparsePCGC/kitti_q1mm', {'color': '#ff7f0e', 'marker': '.'}),
-        'PCGCv2': ('convolutional/lossy_coord/baseline', {'color': '#2ca02c', 'marker': '.'}),
+        'PCGCv2': ('convolutional/lossy_coord/baseline/*', {'color': '#2ca02c', 'marker': '.'}),
         'V-PCC': ('tmc2_geo', {'color': '#d62728', 'marker': '.'}),
         'ADLPCC': ('ADLPCC', {'color': '#9467bd', 'marker': '.'}),
         # 'OctAttention': ('OctAttention-lidar', {'color': '#bcbd22', 'marker': '.'}),

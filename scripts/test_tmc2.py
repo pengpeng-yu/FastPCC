@@ -1,7 +1,6 @@
 """
 This script is based on commit 1fc928244bc778c73bed0d36f1c22d95ed6b0fe2 of mpeg-pcc-tmc2.
 """
-
 import sys
 import os
 import os.path as osp
@@ -22,11 +21,11 @@ tmc2_path = ('../mpeg-pcc-tmc2/bin/PccAppEncoder', '../mpeg-pcc-tmc2/bin/PccAppD
 
 if single_frame_only:
     file_lists = (
-        "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
+        "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt",
         "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
-        "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
+        "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
     )
-    resolutions = (1024, 2048, 4096)
+    resolutions = (4096, 2048, 1024)
 else:  # all intra
     file_lists = (
         'datasets/Owlii/list_basketball_player_dancer.txt',
@@ -38,6 +37,7 @@ assert len(file_lists) == len(resolutions)
 
 config_dir = '../mpeg-pcc-tmc2/cfg'
 output_dir = f'{test_dir}/tmc2_geo' if geo_only else f'{test_dir}/tmc2'
+processes_num = mp.cpu_count() * 2 // 3
 
 
 class TMC2LogExtractor(LogExtractor):
@@ -66,14 +66,14 @@ class TMC2LogExtractor(LogExtractor):
         return self.extract_log(log, self.dec_log_mappings)
 
 
-def test_intra(processes_num):
+def test_intra():
     print(f'Test tmc2 {"geo " if geo_only else ""}coding')
 
     all_file_metric_dict: all_file_metric_dict_type = {}
     all_file_run_res = []
 
     print(f'Output to "{output_dir}"')
-    pool = mp.Pool(processes_num)
+    pool = mp.get_context('forkserver').Pool(processes_num)
 
     for resolution, file_list in zip(resolutions, file_lists):
         file_paths = read_file_list_with_rel_path(file_list)
@@ -84,6 +84,7 @@ def test_intra(processes_num):
         if ret is not None:
             all_file_metric_dict[ret[0]] = ret[1]
 
+    pool.close()
     with open(osp.join(output_dir, metric_dict_filename), 'w') as f:
         f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
     print('Done')
@@ -121,7 +122,6 @@ def run_single_file(file_path, resolution):
             f' --uncompressedDataPath={file_path}' \
             f' --frameCount=1' \
             f' --compressedStreamPath={sub_output_dir}/r{rate}.bin' \
-            f' --reconstructedDataPath={sub_output_dir}/r{rate}_enc_recon.ply' \
             f' --noAttributes={1 if geo_only else 0}' \
             f' --computeMetrics=0'
         subp_enc = subprocess.run(
@@ -163,7 +163,6 @@ def run_single_file(file_path, resolution):
                 file_path,
                 osp.join(sub_output_dir, f'r{rate}_dec_recon.ply'), resolution,
                 color=False if geo_only else True,
-                normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
                 command=pc_error_path
             ), False
         )
@@ -178,4 +177,4 @@ def run_single_file(file_path, resolution):
 
 
 if __name__ == '__main__':
-    test_intra(32)
+    test_intra()

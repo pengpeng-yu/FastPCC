@@ -11,7 +11,7 @@ except ImportError: cv2 = None
 import numpy as np
 import torch
 
-from lib.data_utils import write_ply_file, if_ply_has_vertex_normal
+from lib.data_utils import write_ply_file
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 
 
@@ -40,6 +40,7 @@ class PCCEvaluator(Evaluator):
         self.cal_mpeg_pc_error = cal_mpeg_pc_error
         self.mpeg_pc_error_processes = mpeg_pc_error_processes
         self.working = False
+        self.mp_ctx = mp.get_context('forkserver')
 
     def reset(self):
         self.file_path_to_info: Dict[str, Dict[str, Union[int, float]]] = {}
@@ -62,7 +63,7 @@ class PCCEvaluator(Evaluator):
         """
         if not self.working:
             self.reset()
-            self.mpeg_pc_error_pool = mp.Pool(self.mpeg_pc_error_processes)
+            self.mpeg_pc_error_pool = self.mp_ctx.Pool(self.mpeg_pc_error_processes)
             self.working = True
 
         have_color = pred_color is not None and target_color is not None
@@ -90,30 +91,10 @@ class PCCEvaluator(Evaluator):
             write_ply_file(pred, reconstructed_path, rgb=pred_color if have_color else None)
 
             if self.cal_mpeg_pc_error:
-                write_ply_for_orig_pc = False
-                if file_path.endswith('.ply'):
-                    if if_ply_has_vertex_normal(file_path):
-                        normal_file_path = file_path
-                    else:
-                        normal_file_path = osp.splitext(file_path)[0] + '_n.ply'
-                        if not osp.isfile(normal_file_path):
-                            write_ply_for_orig_pc = True
-                else:
-                    write_ply_for_orig_pc = True
-                if write_ply_for_orig_pc:
-                    file_path = osp.splitext(file_path)[0] + '_n.ply'
-                    write_ply_file(
-                        target, file_path, rgb=target_color if have_color else None,
-                        estimate_normals=True
-                    )
-                    print(f'Warning: For computing point-to-plane loss, '
-                          f'a PLY file is generated at {file_path} with Open3D normal estimation.')
-                    normal_file_path = file_path
+                assert file_path.endswith('.ply'), file_path
                 self.file_path_to_info_run_res[file_path] = self.mpeg_pc_error_pool.apply_async(
                     mpeg_pc_error,
-                    (osp.abspath(file_path),
-                     osp.abspath(reconstructed_path),
-                     resolution, normal_file_path, False, have_color)
+                    (osp.abspath(file_path), osp.abspath(reconstructed_path), resolution, '', False, have_color)
                 )
 
         if file_path in self.file_path_to_info:

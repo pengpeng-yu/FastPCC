@@ -23,13 +23,15 @@ class PlyVoxel(torch.utils.data.Dataset):
         filelist_paths = get_collections(cfg.filelist_path, len(roots))
         file_path_patterns = get_collections(cfg.file_path_pattern, len(roots))
         resolutions = get_collections(cfg.resolution, len(roots))
+        test_time_coord_scaler = get_collections(cfg.test_time_coord_scaler, len(roots))
+        partition_max_points_num = get_collections(cfg.kd_tree_partition_max_points_num, len(roots))
 
         # define files list path
         for root, filelist_path, file_path_pattern in zip(roots, filelist_paths, file_path_patterns):
             filelist_abs_path = osp.join(root, filelist_path)
             # generate files list
             if not osp.exists(filelist_abs_path):
-                logger.info(f'no filelist of {root} is given. Trying to generate using {file_path_pattern}...')
+                logger.warning(f'no filelist of {root} is given. Trying to generate using {file_path_pattern}...')
                 file_list = pathlib.Path(root).glob(file_path_pattern)
                 with open(filelist_abs_path, 'w') as f:
                     f.write('\n'.join([str(_.relative_to(root)) for _ in file_list]))
@@ -37,7 +39,10 @@ class PlyVoxel(torch.utils.data.Dataset):
         # load files list
         self.file_list = []
         self.file_resolutions = []
-        for root, filelist_path, resolution in zip(roots, filelist_paths, resolutions):
+        self.file_coord_scaler_list = []
+        self.file_partition_max_points_num_list = []
+        for root, filelist_path, resolution, scaler, par_num in \
+                zip(roots, filelist_paths, resolutions, test_time_coord_scaler, partition_max_points_num):
             filelist_abs_path = osp.join(root, filelist_path)
             logger.info(f'using filelist: "{filelist_abs_path}"')
             with open(filelist_abs_path) as f:
@@ -45,6 +50,8 @@ class PlyVoxel(torch.utils.data.Dataset):
                     line = line.strip()
                     self.file_list.append(osp.join(root, line))
                     self.file_resolutions.append(resolution)
+                    self.file_coord_scaler_list.append(scaler)
+                    self.file_partition_max_points_num_list.append(par_num)
 
         self.cfg = cfg
 
@@ -67,6 +74,9 @@ class PlyVoxel(torch.utils.data.Dataset):
             xyz = R.random().apply(xyz)
             xyz -= xyz.min(0)
 
+        coord_scaler = self.file_coord_scaler_list[index]
+        if not self.is_training and coord_scaler != 1:
+            xyz = (xyz * coord_scaler).round()
         xyz = xyz.astype(np.int32)
 
         if self.cfg.with_color:
@@ -78,8 +88,8 @@ class PlyVoxel(torch.utils.data.Dataset):
         else:
             color = None
 
+        par_num = self.file_partition_max_points_num_list[index]
         if self.is_training:
-            par_num = self.cfg.kd_tree_partition_max_points_num
             if par_num != 0 and xyz.shape[0] > par_num:
                 xyz, (color,) = kd_tree_partition_randomly(
                     xyz, par_num, (color,)
@@ -107,14 +117,16 @@ class PlyVoxel(torch.utils.data.Dataset):
             xyz=torch.from_numpy(xyz),
             color=torch.from_numpy(color) if color is not None else None,
             file_path=file_path,
-            resolution=None if self.is_training else self.file_resolutions[index]
+            class_idx=par_num,  # I use class_idx to transmit par_num to collate_fn
+            resolution=None if self.is_training else self.file_resolutions[index],
+            inv_transform=torch.tensor((0, 0, 0, 1 / coord_scaler), dtype=torch.float32) if coord_scaler != 1 else None
         )
 
     def collate_fn(self, batch):
         return pc_data_collate_fn(
             batch, sparse_collate=True,
-            kd_tree_partition_max_points_num=self.cfg.kd_tree_partition_max_points_num
-            if not self.is_training else 0
+            kd_tree_partition_max_points_num=batch[0].class_idx
+            if not self.is_training else 0  # Test-time partitioning
         )
 
 

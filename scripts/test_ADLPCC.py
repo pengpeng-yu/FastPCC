@@ -18,13 +18,13 @@ from scripts.shared_config import pc_error_path, metric_dict_filename, cuda_devi
 adl_pcc_dir = '../ADLPCC'
 
 file_lists = (
-    "datasets/MVUB/list.txt",
-    "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt",
     "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
-    "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt"
+    "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
+    "datasets/MVUB/list.txt",
 )
 
-resolutions = (512, 1024, 2048, 4096)
+resolutions = (4096, 2048, 1024, 512,)
 assert len(file_lists) == len(resolutions)
 
 output_dir = f'{test_dir}/ADLPCC'
@@ -115,7 +115,6 @@ def test():
                     sub_metric_dict,
                     mpeg_pc_error(
                         file_path, osp.abspath(recon_path), resolution,
-                        normal_file=f'{osp.splitext(file_path)[0]}_n.ply',
                         threads=16, command=pc_error_path
                     ), False
                 )

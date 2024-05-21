@@ -29,7 +29,10 @@ def read_file_list_with_rel_path(file_list):
     file_paths = []
     root_path = osp.split(file_list)[0]
     with open(file_list) as f:
-        file_paths.extend((osp.join(root_path, _.strip()) for _ in f))
+        for line in f:
+            file_path = osp.join(root_path, line.strip())
+            if file_path not in file_paths:
+                file_paths.append(file_path)
     return file_paths
 
 

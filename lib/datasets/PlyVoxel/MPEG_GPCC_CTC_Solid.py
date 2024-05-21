@@ -10,6 +10,6 @@ class Config(BaseDatasetConfig):
         'datasets/MPEG_GPCC_CTC/Solid', 'datasets/MPEG_GPCC_CTC/Solid', 'datasets/MPEG_GPCC_CTC/Solid'
     )
     filelist_path: Union[str, Tuple[str, ...]] = (
-        'Solid_1024.txt', 'Solid_2048.txt', 'Solid_4096.txt'
+        'Solid_4096.txt', 'Solid_2048.txt', 'Solid_1024.txt'
     )
-    resolution: Union[int, Tuple[int, ...]] = (1024, 2048, 4096)
+    resolution: Union[int, Tuple[int, ...]] = (4096, 2048, 1024)

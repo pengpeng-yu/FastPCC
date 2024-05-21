@@ -13,3 +13,8 @@ model:
   bits_loss_factor: 0.4
   warmup_fea_loss_steps: 5000
   warmup_fea_loss_factor: 0.01
+
+  dataset_path:
+    'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_Solid_MVUB'
+  dataset:
+    kd_tree_partition_max_points_num: 0

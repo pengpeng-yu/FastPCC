@@ -10,15 +10,13 @@ import subprocess
 import json
 import multiprocessing as mp
 
+import numpy as np
+
 sys.path.append(osp.dirname(osp.dirname(__file__)))
 from lib.metrics.pc_error_wapper import mpeg_pc_error
 from scripts.log_extract_utils import *
 from scripts.shared_config import pc_error_path, metric_dict_filename, test_dir
-try:
-    import numpy as np
-    from lib.data_utils.utils import write_ply_file
-except Exception:
-    np = write_ply_file = None
+from lib.data_utils.utils import write_ply_file
 
 
 geo_only = True
@@ -28,10 +26,11 @@ tmc3_path = '../mpeg-pcc-tmc13/build/tmc3/tmc3'
 
 if single_frame_only:
     file_lists = (
-        "datasets/MVUB/list.txt",
-        "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
-        "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
+        'datasets/MPEG_GPCC_CTC/Dense/Dense_16384.txt',
         "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt",
+        "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",
+        "datasets/MPEG_GPCC_CTC/Solid/Solid_1024.txt",
+        "datasets/MVUB/list.txt",
         'datasets/KITTI/sequences/test_list.txt',
         'datasets/KITTI/sequences/test_list_SparsePCGC110.txt',
     )
@@ -40,12 +39,8 @@ if single_frame_only:
     #   and won't cause key conflicts.
     # I look for keywords ('MVUB'/'KITTI'/'SparsePCGC') in the paths of file lists
     #   to flag whether special handling is needed.
-    # Note: I assume that you HAVE RUN test.py with class lib.datasets.KITTIOdometry,
-    #       which generates *_n.ply and *_q1mm_n.ply files as the input of pc_error.
-    resolutions = (512, 1024, 2048, 4096, 59.70 + 1, 30000 + 1,)
+    resolutions = (16384, 4096, 2048, 1024, 512, 59.70 + 1, 30000 + 1)
 else:
-    # Note: I assume that HAVE RUN test.py on 8iVFBv2,
-    #       which generates *_n.ply files as the input of pc_error.
     file_lists = (
         'datasets/Owlii/list_basketball_player_dancer.txt',
         'datasets/8iVFBv2/list_loot_redandblack.txt'
@@ -70,6 +65,7 @@ else:
     )
 assert len(file_lists) == len(resolutions)
 assert len(config_dirs) == len(output_dirs)
+processes_num = mp.cpu_count() * 2 // 3
 
 
 class TMC3LogExtractor(LogExtractor):
@@ -113,9 +109,9 @@ def get_tmc3_trisoup_trisoupNodeSizeLog2(rate_flag):
     return d[int(rate_flag)]
 
 
-def test_intra(processes_num):
+def test_intra():
     print(f'Test tmc3 {"geo " if geo_only else ""}coding')
-    pool = mp.Pool(processes_num)
+    pool = mp.get_context('forkserver').Pool(processes_num)
 
     for config_dir, output_dir in zip(config_dirs, output_dirs):
         default_config_paths = glob(osp.join(config_dir, 'longdress_vox10_1300', '*', 'encoder.cfg'))
@@ -140,6 +136,7 @@ def test_intra(processes_num):
         print(f'{config_dir} Done')
         with open(osp.join(output_dir, metric_dict_filename), 'w') as f:
             f.write(json.dumps(all_file_metric_dict, indent=2, sort_keys=False))
+    pool.close()
     print('All Done')
 
 
@@ -178,6 +175,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
     os.makedirs(sub_output_dir, exist_ok=True)
     if flag_kitti:
         org_xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
+
     for config_path in config_paths:
         rate_flag = osp.split(osp.split(config_path)[0])[1]
         print(f'    Test file {file_path}, res {resolution}, {rate_flag}')
@@ -187,6 +185,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             f' --disableAttributeCoding={1 if geo_only else 0}' \
             f' --uncompressedDataPath={file_path}' \
             f' --compressedStreamPath={osp.join(sub_output_dir, f"{rate_flag}.bin")}'
+        org_pc_for_pc_error = file_path
         if flag_mvub:
             if 'octree' in config_dir:
                 command_enc += \
@@ -206,6 +205,16 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             temp_file_path_for_kitti = osp.join(sub_output_dir, f"{rate_flag}_scaled_input.ply")
             write_ply_file(temp_xyz_q, temp_file_path_for_kitti)
             command_enc += f' --uncompressedDataPath={temp_file_path_for_kitti} --positionQuantizationScale=1'
+            if not flag_sparsepcgc:
+                org_pc_for_pc_error = osp.splitext(file_path)[0] + '_n.ply'
+                if not osp.isfile(org_pc_for_pc_error):
+                    write_ply_file(org_xyz, org_pc_for_pc_error, estimate_normals=True)
+            else:
+                org_pc_for_pc_error = osp.splitext(file_path)[0] + '_q1mm_n.ply'
+                if not osp.isfile(org_pc_for_pc_error):
+                    write_ply_file(np.unique((org_xyz * 1000).round(), axis=0),
+                                   org_pc_for_pc_error, estimate_normals=True)
+
         subp_enc = subprocess.run(
             command_enc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             shell=True, check=True, text=True
@@ -239,15 +248,12 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             sub_metric_dict,
             log_extractor.extract_dec_log(subp_dec.stdout), False
         )
-        org_pc_for_pc_error = file_path if not flag_kitti \
-            else osp.splitext(file_path)[0] + ('_n.ply' if not flag_sparsepcgc else '_q1mm_n.ply')
         sub_metric_dict = concat_values_for_dict(
             sub_metric_dict,
             mpeg_pc_error(
                 org_pc_for_pc_error,
                 osp.join(sub_output_dir, f'{rate_flag}_recon.ply'), resolution,
                 color=False if geo_only else True,
-                normal_file=osp.splitext(file_path)[0] + ('_n.ply' if not flag_sparsepcgc else '_q1mm_n.ply'),
                 command=pc_error_path
             ), False
         )
@@ -260,4 +266,4 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
 
 
 if __name__ == '__main__':
-    test_intra(32)
+    test_intra()

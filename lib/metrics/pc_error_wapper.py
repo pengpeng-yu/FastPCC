@@ -1,8 +1,30 @@
 import subprocess
-from typing import Dict, Callable, Union, Tuple
+from typing import Dict
 import os.path as osp
 
+import numpy as np
+import open3d as o3d
+
+try:
+    from lib.data_utils.utils import write_ply_file
+except ImportError: write_ply_file = None
 from scripts.shared_config import pc_error_path
+
+
+def if_ply_has_vertex_normal(file_path: str):
+    has = False
+    with open(file_path, 'rb') as f:
+        while True:
+            try:
+                line = f.readline()
+                if line.strip() == b'end_header': break
+                elif line.rsplit(maxsplit=1)[-1] == b'nx':
+                    has = True
+                    break
+            except Exception as e:
+                print(file_path)
+                raise e
+    return has
 
 
 _DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A->B).',
@@ -13,8 +35,7 @@ _DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A
 
 def mpeg_pc_error(
         infile1: str, infile2: str, resolution: float, normal_file: str = '',
-        hausdorff: bool = False, color: bool = False, threads: int = 1, command='',
-        hooks: Tuple[Callable[[str], Tuple[str, Union[None, int, float, str]]]] = ()
+        hausdorff: bool = False, color: bool = False, threads: int = 1, command=''
 ) -> Dict[str, float]:
     if command == '': command = pc_error_path
     cmd_args = f'{command}' \
@@ -24,8 +45,25 @@ def mpeg_pc_error(
                f' --hausdorff={int(hausdorff)}' \
                f' --color={int(color)}' \
                f' --nbThreads={threads}'
+
+    # Priority: arg "normal_file" -> infile1's normals -> existing *_n.ply -> generate *_n.ply using infile1
     if normal_file != '' and osp.exists(normal_file):
         cmd_args += ' -n ' + normal_file
+    else:
+        if if_ply_has_vertex_normal(infile1):
+            pass
+        else:
+            normal_file = osp.splitext(infile1)[0] + '_n.ply'
+            if osp.isfile(normal_file):
+                pass
+            else:
+                pc = o3d.io.read_point_cloud(infile1)
+                # https://github.com/isl-org/Open3D/wiki/Deadlock-with-multiprocessing-(using-fork)-and-OpenMP
+                pc.estimate_normals()
+                write_ply_file(np.asarray(pc.points), normal_file, normals=np.asarray(pc.normals))
+                print(f'Warning: For computing point-to-plane loss, '
+                      f'a PLY file is generated at {normal_file} with Open3D normal estimation.')
+            cmd_args += ' -n ' + normal_file
 
     subp_stdout = subprocess.run(
         cmd_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -35,10 +73,6 @@ def mpeg_pc_error(
     metric_dict = {}
     flag_read = False
     for line in subp_stdout.splitlines():
-        for hook in hooks:
-            extracted = hook(line)
-            if extracted is not None:
-                metric_dict[extracted[0]] = extracted[1]
         if line.startswith('Point cloud sizes for org version'):
             metric_dict['org points num'] = int(line.rstrip().rsplit(' ', 3)[1][:-1])
         elif line.startswith(_DIVIDERS[0]):

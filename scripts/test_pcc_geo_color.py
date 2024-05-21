@@ -23,15 +23,17 @@ file_dirs = (
     'datasets/Owlii/basketball_player_vox11', 'datasets/Owlii/dancer_vox11',
     'datasets/8iVFBv2/loot/Ply', 'datasets/8iVFBv2/redandblack/Ply'
 )
+filename_pattern = '*[0-9].ply'  # excludes *_n.ply
 resolutions = (2048, 2048, 1024, 1024)
 output_dir = f'{test_dir}/pcc-geo-color'
 output_dir = osp.abspath(output_dir)
+processes_num = mp.cpu_count() * 2 // 3
 
 
 def test():
     print('Test pcc-geo-color')
     os.makedirs(output_dir, exist_ok=True)
-    pool = mp.Pool(16)
+    pool = mp.get_context('forkserver').Pool(processes_num)
 
     pretrained_paths = sorted(glob(osp.join(pretrained_models_path, 'geom_color', '*')),
                               key=lambda _: int(_.rsplit('_', 1)[1][3:]))
@@ -42,13 +44,14 @@ def test():
 
     all_file_metric_dict = {}
     all_pc_error_res = {}
+    pre_command = f'export TF_FORCE_GPU_ALLOW_GROWTH=true;' \
+                  f'export CUDA_VISIBLE_DEVICES={cuda_device};cd {pcc_geo_color_src_path};'
     for resolution, file_dir in zip(resolutions, file_dirs):
         sub_output_dir = osp.abspath(osp.join(output_dir, file_dir))
-        file_dir = osp.abspath(file_dir)
         subprocess.run(
-            f'cd {pcc_geo_color_src_path};'
+            f'{pre_command}'
             f'{sys.executable} partition.py'
-            f' {file_dir} {osp.join(sub_output_dir, "par")} --block_size=128 --keep_size=0',
+            f' {osp.abspath(file_dir)} {osp.join(sub_output_dir, "par")} --block_size=128 --keep_size=0',
             shell=True, check=True, executable=shutil.which('bash')
         )
         for pretrained_path in pretrained_paths:
@@ -56,8 +59,7 @@ def test():
             sub_sub_output_dir = osp.join(sub_output_dir, pretrained_name)
             pretrained_path = osp.abspath(pretrained_path)
             subprocess.run(
-                f'export CUDA_VISIBLE_DEVICES={cuda_device};'
-                f'cd {pcc_geo_color_src_path};'
+                f'{pre_command}'
                 f'{sys.executable} compress.py'
                 f' {osp.join(sub_output_dir, "par")} "*.ply"'
                 f' {osp.join(sub_sub_output_dir, "cmp")}'
@@ -65,8 +67,7 @@ def test():
                 shell=True, check=True, executable=shutil.which('bash')
             )
             subprocess.run(
-                f'export CUDA_VISIBLE_DEVICES={cuda_device};'
-                f'cd {pcc_geo_color_src_path};'
+                f'{pre_command}'
                 f'{sys.executable} decompress.py'
                 f' {osp.join(sub_output_dir, "par")} "*.ply"'
                 f' {osp.join(sub_sub_output_dir, "cmp")} "*.ply.bin"'
@@ -75,9 +76,9 @@ def test():
                 shell=True, check=True, executable=shutil.which('bash')
             )
             subprocess.run(
-                f'cd {pcc_geo_color_src_path};'
+                f'{pre_command}'
                 f'{sys.executable} merge.py'
-                f' {file_dir}'
+                f' {osp.abspath(file_dir)}'
                 f' {osp.join(sub_sub_output_dir, "recon")}'
                 f' {osp.join(sub_sub_output_dir, "merge")} --resolution=128 --task=geometry+color',
                 shell=True, check=True, executable=shutil.which('bash')
@@ -91,12 +92,10 @@ def test():
                 if org_file_path not in all_pc_error_res: all_pc_error_res[org_file_path] = []
                 all_pc_error_res[org_file_path].append((pool.apply_async(
                     mpeg_pc_error,
-                    (org_file_path, recon_file_path, resolution,
-                     osp.splitext(org_file_path)[0] + '_n.ply',
+                    (org_file_path, recon_file_path, resolution, '',
                      False, True, 1, pc_error_path)), cmp_size))
-            shutil.rmtree(osp.join(sub_sub_output_dir, "cmp"))
-            shutil.rmtree(osp.join(sub_sub_output_dir, "recon"))
         shutil.rmtree(osp.join(sub_output_dir, "par"))
+    pool.close()
 
     for k, v in all_pc_error_res.items():
         metric_dict = v[0][0].get()

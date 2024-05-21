@@ -1,16 +1,17 @@
 This project contains an implementation of our ICME 2023 paper "Sparse Representation based Deep Residual Geometry Compression Network for Large-scale Point Clouds" [1], 
-tested on Ubuntu 20.04. This project is still under development. 
+tested on Ubuntu 18.04. This project is still under development. 
 
 ## Models
-- `config/convolutional/lossy_coord_v2` and `config/convolutional/lossy_coord_lossy_color`: coming, but not soon. 
-- `config/convolutional/lossy_coord` contains the yaml files of the main model and its variants in this paper [1].
+- `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression based on [1]. 
+- `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint geometry and color lossy compression. 
+- `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model in [1].
 
 
 ## Other content
 - `lib/simple_config.py` is a simple configuration system supports separate configuration definitions, inheritance of yaml files, basic checks of argument types, and mixed use of yaml files and command line arguments.
 - `lib/entropy_models` is a minor PyTorch-based re-implementation of the continuous indexed entropy models in tensorflow_compression.
 - `lib/entropy_models/rans_coder` is a minor wrapper of RANS coder for simple python calls.
-- `scripts` contains useful scripts for batch testing PCC models, summarizing test results and plotting RD curves.
+- `scripts` contains useful scripts for batch testing PCC models, summarizing test results and plotting RD curves. All test results (on an Intel E5-2678 v3 and a 2080Ti GPU) can be [downloaded](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EbzFDM93okNPmceKE5ZLzhgBZPJ1Cb4L-GeoP3stilFJxQ). 
 
 
 ## Environment
@@ -20,16 +21,16 @@ tested on Ubuntu 20.04. This project is still under development.
 - plyfile
 - pytorch >= 1.7
 - [pytorch3d](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) (only for knn_points in joint lossy compression. Conda installation suggested: conda install -c fvcore -c iopath -c conda-forge fvcore iopath; conda install pytorch3d -c pytorch3d)
-- [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#pip) ≈ 0.5.4 (for compilation with CUDA > 12, please refer to [this](https://github.com/NVIDIA/MinkowskiEngine/issues/543#issuecomment-1773458776))
+- [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#pip) ≈ 0.5.4 (for compilation with CUDA >= 12, please refer to [this](https://github.com/NVIDIA/MinkowskiEngine/issues/543#issuecomment-1773458776))
 
 
 ## Requirements
-- [Binary pc_error and tmc3 compiled on Ubuntu 20.04. And an example of dataset folder](https://drive.google.com/file/d/1KiG2c-S9OLD8vQZ-Mi_Y0zF1RCLGWAkU/view?usp=sharing)
-- [Test set of coordinate compression](https://drive.google.com/file/d/1GT3L33ye70uku-HXI1pqU7diuiL3sRGo/view?usp=sharing)
-- [Trained model weights](https://drive.google.com/file/d/1DDvnBaUIbyhyepK55cDPrHAacJEpcvgu/view?usp=sharing)
-- [ShapeNetCorev2 OBJ format](https://huggingface.co/datasets/ShapeNet/ShapeNetCore/tree/main) (for training coordinate compression)
-- [KITTI Odometry](https://www.cvlibs.net/datasets/kitti/eval_odometry.php) (for training and testing coordinate compression)
-- [8iVFBv2](https://plenodb.jpeg.org/pc/8ilabs) & [Owlii](https://mpeg-pcc.org/index.php/pcc-content-database/owlii-dynamic-human-textured-mesh-sequence-dataset/) (for training joint coordinate and color compression)
+- [Binary pc_error and tmc3 compiled on Ubuntu 18.04. And an example of dataset folder](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EWQeTYD3y8dDr1-lvq7YawQB-JoJ2_GQw2jSOgpS2i6xLw)
+- [Test set of geometry compression](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/Ed9ljLgHJD9Ipd_Sd8nP9NABxJbywu1kT1pPo4vdNIZWjg)
+- [Trained model weights](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EUIl3GRmQL5KvKCwwipEOhkBzoNXfyDwMs_BHju7M70ayg)
+- [ShapeNetCorev2 OBJ format](https://huggingface.co/datasets/ShapeNet/ShapeNetCore/tree/main) (for training geometry compression)
+- [KITTI Odometry](https://www.cvlibs.net/datasets/kitti/eval_odometry.php) (for training and testing LiDAR geometry compression)
+- [8iVFBv2](https://plenodb.jpeg.org/pc/8ilabs) & [Owlii](https://mpeg-pcc.org/index.php/pcc-content-database/owlii-dynamic-human-textured-mesh-sequence-dataset/) (for joint geometry and color compression)
 
 
 ## Train / Test

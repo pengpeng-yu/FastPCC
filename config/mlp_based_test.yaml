@@ -37,7 +37,7 @@ test:
   log_frequency: 1
   save_results: True
   dataset_path:
-    'lib.datasets.PlyVoxel.Owlii_8iVFBv2'
+    'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_Solid'
   dataset:
     resolution: 0
     kd_tree_partition_max_points_num: 1500000

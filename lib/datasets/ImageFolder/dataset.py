@@ -28,7 +28,7 @@ class ImageFolder(torch.utils.data.Dataset):
             filelist_abs_path = osp.join(root, filelist_path)
             # generate files list
             if not osp.exists(filelist_abs_path):
-                logger.info(f'no filelist of {root} is given. Trying to generate using {file_path_pattern}...')
+                logger.warning(f'no filelist of {root} is given. Trying to generate using {file_path_pattern}...')
                 file_list = pathlib.Path(root).glob(file_path_pattern)
                 with open(filelist_abs_path, 'w') as f:
                     f.write('\n'.join([str(_.relative_to(root)) for _ in file_list]))

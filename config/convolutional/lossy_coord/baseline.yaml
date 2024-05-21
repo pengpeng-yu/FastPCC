@@ -55,6 +55,7 @@ test:
   log_frequency: 1
   save_results: True
   dataset_path:
-    'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_Solid_MVUB'
+    'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_DenseVox14_Solid_MVUB'
   dataset:
-    kd_tree_partition_max_points_num: 0
+    kd_tree_partition_max_points_num: [4000000, 0, 0, 0, 0]
+    test_time_coord_scaler: [0.25, 1.0, 1.0, 1.0, 1.0]
