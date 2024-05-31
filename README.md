@@ -1,17 +1,23 @@
-This project contains an implementation of our ICME 2023 paper "Sparse Representation based Deep Residual Geometry Compression Network for Large-scale Point Clouds" [1], 
-tested on Ubuntu 18.04. This project is still under development. 
+This project contains an implementation of our ICME 2023 paper "Sparse Representation based Deep Residual Geometry Compression Network for Large-scale Point Clouds" [1] and other improvements, 
+tested on Ubuntu 18.04.
+
+
+## Highlights
+See our detailed experimental results on Intel E5-2678 v3 and NVIDIA 2080Ti at [OneDrive](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EbzFDM93okNPmceKE5ZLzhgBZPJ1Cb4L-GeoP3stilFJxQ). 
+
 
 ## Models
 - `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression based on [1]. 
 - `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint geometry and color lossy compression. 
 - `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model in [1].
+- `config/convolutional/lossy_coord/baseline.yaml`: A reimplementation of PCGCv2.
 
 
 ## Other content
 - `lib/simple_config.py` is a simple configuration system supports separate configuration definitions, inheritance of yaml files, basic checks of argument types, and mixed use of yaml files and command line arguments.
 - `lib/entropy_models` is a minor PyTorch-based re-implementation of the continuous indexed entropy models in tensorflow_compression.
 - `lib/entropy_models/rans_coder` is a minor wrapper of RANS coder for simple python calls.
-- `scripts` contains useful scripts for batch testing PCC models, summarizing test results and plotting RD curves. All test results (on an Intel E5-2678 v3 and a 2080Ti GPU) can be [downloaded](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EbzFDM93okNPmceKE5ZLzhgBZPJ1Cb4L-GeoP3stilFJxQ). 
+- `scripts` contains useful scripts for batch testing PCC models, summarizing test results and plotting RD curves.
 
 
 ## Environment
@@ -36,30 +42,35 @@ tested on Ubuntu 18.04. This project is still under development.
 ## Train / Test
 Training:
 ```shell
-python train.py config/convolutional/lossy_coord/baseline.yaml \
-  train.device='0' train.rundir_name='lossy_coord/baseline'
+python train.py config/convolutional/lossy_coord_v2/baseline_r1.yaml \
+  train.device='0' train.rundir_name='lossy_coord_v2/baseline_r1'
 ```
 Test:
 ```shell
-python test.py config/convolutional/lossy_coord/baseline.yaml \
-  test.weights_from_ckpt='weights/convolutional/lossy_coord/0.1_epoch_39.pt' \
+python test.py config/convolutional/lossy_coord_v2/baseline_r1.yaml \
+  test.weights_from_ckpt='weights/convolutional/lossy_coord_v2/baseline_r1.pt' \
   test.device='0'
 ```
 DDP training: 
 ```shell
 python -m torch.distributed.launch --nproc_per_node 2 \
-  train.py config/convolutional/lossy_coord/baseline.yaml \
-  train.device='0,1' train.rundir_name='lossy_coord/baseline'
+  train.py config/convolutional/lossy_coord_v2/baseline_r1.yaml \
+  train.device='0,1' train.rundir_name='lossy_coord_v2/baseline_r1'
 ```
-Resume training from "runs/lossy_coord/baseline_bak0" to "runs/lossy_coord/baseline":
+Resume training from "runs/lossy_coord_v2/baseline_r1_bak0" to "runs/lossy_coord_v2/baseline_r1":
 ```shell
-python train.py config/convolutional/lossy_coord/baseline.yaml \
-  train.resume_from_ckpt='runs/lossy_coord/baseline_bak0/ckpts/epoch_<maxindex>.pt' \
+python train.py config/convolutional/lossy_coord_v2/baseline_r1.yaml \
+  train.resume_from_ckpt='runs/lossy_coord_v2/baseline_r1_bak0/ckpts/epoch_<maxindex>.pt' \
   train.resume_items='[all]' \
-  train.rundir_name='lossy_coord/baseline' \
+  train.rundir_name='lossy_coord_v2/baseline_r1' \
   train.device='0'
 ```
-
+Training with gradient accumulation: 
+```shell
+python train.py config/convolutional/lossy_coord_v2/baseline_r1.yaml \
+  train.device='0' train.rundir_name='lossy_coord_v2/baseline_r1' \
+  train.batch_size=2 train.grad_acc_steps=4  # Approximately equivalent to batch_size 8
+```
 The definition of training and testing configurations is lib/config.py
 
 
