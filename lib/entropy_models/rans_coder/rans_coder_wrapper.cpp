@@ -49,6 +49,8 @@ int IndexedRansCoder::init_with_quantized_cdfs(
     esyms_list.resize(cdfs_num);
     dsyms_list.resize(cdfs_num);
 
+    Py_BEGIN_ALLOW_THREADS
+    #pragma omp parallel for collapse(1)
     for (size_t cdf_idx = 0; cdf_idx < cdfs.size(); ++cdf_idx)
     {
         const VecUint32 &cdf = cdfs[cdf_idx];
@@ -67,6 +69,7 @@ int IndexedRansCoder::init_with_quantized_cdfs(
             RansDecSymbolInit(&dsyms[sym], cdf[sym], cdf[sym + 1] - cdf[sym]);
         }
     }
+    Py_END_ALLOW_THREADS
 
     this->offset_array = std::move(offset_array);
     this->cdfs = std::move(cdfs);

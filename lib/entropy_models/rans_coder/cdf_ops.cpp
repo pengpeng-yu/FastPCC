@@ -119,14 +119,17 @@ std::vector<std::vector<uint32_t>> _batched_pmf_to_quantized_cdf(
     assert(offset_arr_buf.ndim == 1);
     assert(pmf_arr_buf.shape[0] == offset_arr_buf.shape[0]);
     std::vector<std::vector<uint32_t>> cdfs;
-    cdfs.reserve(pmf_arr_buf.shape[0]);
+    cdfs.resize(pmf_arr_buf.shape[0]);
 
+    Py_BEGIN_ALLOW_THREADS
+    #pragma omp parallel for collapse(1)
     for (size_t i = 0; i < pmf_arr_buf.shape[0]; ++i)
     {
         double * const pmf_ptr = reinterpret_cast<double *>(
             static_cast<uint8_t *>(pmf_arr_buf.ptr) + i * pmf_arr_buf.strides[0]);
-        cdfs.push_back(pmf_to_quantized_cdf<OVERFLOW_CODING>(pmf_ptr, pmf_arr_buf.shape[1], offset_ptr + i));
+        cdfs[i] = pmf_to_quantized_cdf<OVERFLOW_CODING>(pmf_ptr, pmf_arr_buf.shape[1], offset_ptr + i);
     }
+    Py_END_ALLOW_THREADS
     return cdfs;
 }
 
