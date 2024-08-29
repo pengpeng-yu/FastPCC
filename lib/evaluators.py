@@ -157,7 +157,7 @@ class ImageCompressionEvaluator(Evaluator):
 
         im = im.cpu().numpy()
         im_recon = im_recon.cpu().numpy()
-        psnr = (np.log10(255 / np.linalg.norm(im.astype(np.double, copy=False) - im_recon)
+        psnr = (np.log10(255 / np.linalg.norm(im.astype(np.double, copy=False) - im_recon)  # TODO: valid range
                          * np.sqrt(im.size)) * 20).item()
         pixels_num = im_recon.shape[1] * im_recon.shape[2]
 

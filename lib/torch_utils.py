@@ -77,7 +77,7 @@ class MLPBlock(nn.Module):
     def __init__(self,
                  in_channels: int,
                  out_channels: int,
-                 bn: bool = True,
+                 bn: bool = False,
                  act: Optional[str] = 'leaky_relu(0.2)',
                  version: str = 'linear',
                  skip_connection: Optional[str] = None):
@@ -334,45 +334,6 @@ def minkowski_expand_coord_2x(coord: torch.Tensor, current_tensor_stride: int):
                             (0, 0, 0, 1), (0, 1, 0, 1), (0, 0, 1, 1), (0, 1, 1, 1)),
                            dtype=coord.dtype, device=coord.device) * (current_tensor_stride // 2)
     return coord.unsqueeze(1) + strides.unsqueeze(0)
-
-
-def gumbel_sigmoid(logits, tau=1, hard=False):
-    gumbels = -torch.empty_like(
-        logits, memory_format=torch.legacy_contiguous_format).exponential_().log()  # ~Gumbel(0,1)
-    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
-    y_soft = gumbels.sigmoid()
-    if hard:
-        # Straight through.
-        y_hard = y_soft.round()
-        ret = y_hard - y_soft.detach() + y_soft
-    else:
-        # Reparametrization trick.
-        ret = y_soft
-    return ret
-
-
-class GumbelSigmoidMLPBlock(MLPBlock):
-    """
-    if version == 'linear':
-        input: (N, L_1, ..., L_n, C_in)
-        output: (N, L_1, ..., L_n, C_out)
-    elif version == 'conv':
-        input: (N, C_in, L_1, ..., L_n,)
-        output: (N, C_out, L_1, ..., L_n)
-    """
-    def __init__(self, in_channels, bn=True, version='linear',
-                 skip_connection=None, tau=1, hard=False):
-        super(GumbelSigmoidMLPBlock, self).__init__(
-            in_channels=in_channels, out_channels=1, bn=bn, act=None,
-            version='linear', skip_connection=skip_connection
-        )
-        self.tau = tau
-        self.hard = hard
-
-    def forward(self, x):
-        logits = super(GumbelSigmoidMLPBlock, self).forward(x)
-        logits = gumbel_sigmoid(logits, tau=self.tau, hard=self.hard)
-        return logits * x
 
 
 class TorchCudaMaxMemoryAllocated:

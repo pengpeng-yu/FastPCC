@@ -1,3 +1,4 @@
+import math
 import os.path as osp
 import pathlib
 
@@ -5,16 +6,13 @@ import numpy as np
 import cv2
 import torch.utils.data
 
-from lib.data_utils import IMData, im_data_collate_fn, \
-    im_resize_with_crop, im_resize_with_pad, im_pad
+from lib.data_utils import IMData, im_data_collate_fn
 from lib.datasets.ImageFolder.dataset_config import DatasetConfig
 
 
 class ImageFolder(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(ImageFolder, self).__init__()
-        assert len(cfg.target_shapes) % 2 == 0 and \
-               all([_ > 0 and isinstance(_, int) for _ in cfg.target_shapes])
 
         def get_collections(x, repeat):
             return x if isinstance(x, tuple) or isinstance(x, list) else (x,) * repeat
@@ -44,6 +42,7 @@ class ImageFolder(torch.utils.data.Dataset):
                     self.file_list.append(osp.join(root, line))
 
         self.cfg = cfg
+        self.is_training = is_training
 
     def __len__(self):
         return len(self.file_list)
@@ -61,13 +60,20 @@ class ImageFolder(torch.utils.data.Dataset):
         elif self.cfg.channels_order != 'BGR':
             raise NotImplementedError
 
+        if self.is_training and self.cfg.random_h_flip and np.random.rand() > 0.5:
+            im = im[:, ::-1]
+
         return IMData(im=im, file_path=file_path)
 
     def collate_fn(self, batch):
+        if self.is_training:
+            target_shape = self.cfg.target_shape_for_training
+        else:
+            target_shape = math.ceil(batch[0].im.shape[0] / self.cfg.stride_for_test) * self.cfg.stride_for_test, \
+                math.ceil(batch[0].im.shape[1] / self.cfg.stride_for_test) * self.cfg.stride_for_test
         return im_data_collate_fn(
             batch,
-            target_shapes=self.cfg.target_shapes,
-            resize_strategy=self.cfg.resize_strategy,
+            target_shape=target_shape,
             channel_last_to_channel_first=True
         )
 

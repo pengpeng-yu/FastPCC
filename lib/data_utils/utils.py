@@ -1,4 +1,3 @@
-import math
 import os
 import os.path as osp
 from collections import defaultdict
@@ -13,6 +12,7 @@ try:
     import open3d as o3d
 except ImportError: o3d = None
 import torch
+import torch.nn.functional as F
 try:
     import MinkowskiEngine as ME
 except ImportError: ME = None
@@ -44,43 +44,31 @@ class IMData(SampleData):
 
 
 def im_data_collate_fn(data_list: List[IMData],
-                       target_shapes: Union[Tuple[int, ...], List[int]],
-                       resize_strategy: str,
+                       target_shape: Tuple[int, int],
                        channel_last_to_channel_first: bool) -> IMData:
-    shape_idx = np.random.randint(0, len(target_shapes) // 2) * 2
-    target_shape = (target_shapes[shape_idx],
-                    target_shapes[shape_idx + 1])
-
     data_dict = defaultdict(list)
     for data in data_list:
         for key, value in data.__dict__.items():
             if key == 'im':
-                if resize_strategy == 'Expand':
-                    im, valid_range = im_resize_with_crop(value, target_shape)
-                elif resize_strategy == 'Shrink':
-                    im, valid_range = im_resize_with_pad(value, target_shape)
-                elif resize_strategy == 'Retain':
-                    im, valid_range = im_pad(value, target_shape=target_shape)
-                elif resize_strategy == 'Adapt':
-                    im, valid_range = im_pad(value, base_length=target_shape)
-                elif resize_strategy == 'None':
-                    im = value
-                    valid_range = None
-                else:
-                    raise NotImplementedError
-                data_dict[key].append(im)
-                data_dict['valid_range'].append(valid_range)
+                value = torch.from_numpy(np.ascontiguousarray(value))
+                if channel_last_to_channel_first:
+                    value = value.permute(2, 0, 1)
+                diff_0 = target_shape[0] - value.shape[1]
+                diff_1 = target_shape[1] - value.shape[2]
+                padding_0 = np.random.random_integers(min(0, diff_0), max(0, diff_0))
+                padding_1 = np.random.random_integers(min(0, diff_1), max(0, diff_1))
+                data_dict['valid_range'].append(
+                    np.array([max(padding_0, 0), min(value.shape[1] + padding_0, target_shape[0]),
+                              max(padding_1, 0), min(value.shape[2] + padding_1, target_shape[1])]))
+                value = F.pad(value, (padding_1, diff_1 - padding_1, padding_0, diff_0 - padding_0), 'replicate')
+                data_dict[key].append(value)
             elif value is not None:
                 data_dict[key].append(value)
 
     batched_data_dict = {}
     for key, value in data_dict.items():
         if key == 'im':
-            if channel_last_to_channel_first is True:
-                batched_data_dict[key] = \
-                    torch.from_numpy(np.stack(value)).permute(0, 3, 1, 2).contiguous()
-            else:
-                batched_data_dict[key] = torch.from_numpy(np.stack(value))
+            batched_data_dict[key] = torch.stack(value)
         else:
             batched_data_dict[key] = value
     return IMData(**batched_data_dict)
@@ -139,7 +127,7 @@ def pc_data_collate_fn(data_list: List[PCData],
     Else, PCData.xyz will be stacked as a torch.float32 tensor.
     """
     if kd_tree_partition_max_points_num > 0:
-        assert len(data_list) == 1, 'Only supports kd-tree partition when batch size == 1.'
+        assert len(data_list) == 1, 'Supports kd-tree partition only when batch size == 1.'
         use_kd_tree_partition = data_list[0].xyz.shape[0] > kd_tree_partition_max_points_num
     else:
         use_kd_tree_partition = False
@@ -215,71 +203,6 @@ def pc_data_collate_fn(data_list: List[PCData],
                 batched_data_dict[key] = value
 
     return PCData(**batched_data_dict)
-
-
-def im_resize_with_crop(
-        im: np.ndarray,
-        target_shape: Union[Tuple[int, int], List[int]]
-) -> Tuple[np.ndarray, np.ndarray]:
-    assert len(target_shape) == 2
-    shape_factor = (target_shape[0] / im.shape[0],
-                    target_shape[1] / im.shape[1])
-    shape_scaler = max(shape_factor)
-    im: np.ndarray = cv2.resize(im, (0, 0), fx=shape_scaler, fy=shape_scaler)
-    boundary = np.array([im.shape[0] - target_shape[0],
-                         im.shape[1] - target_shape[1]])
-    origin: np.ndarray = np.random.randint(0, boundary + 1)
-
-    im = im[origin[0]: origin[0] + target_shape[0],
-            origin[1]: origin[1] + target_shape[1]]
-    valid_range = np.array([[0, im.shape[0]],
-                            [0, im.shape[1]]], dtype=np.int32)
-    return im, valid_range
-
-
-def im_resize_with_pad(
-        im: np.ndarray,
-        target_shape: Union[Tuple[int, int], List[int]]
-) -> Tuple[np.ndarray, np.ndarray]:
-    assert len(target_shape) == 2
-    shape_factor = (target_shape[0] / im.shape[0],
-                    target_shape[1] / im.shape[1])
-    shape_scaler = min(shape_factor)
-    im = cv2.resize(im, (0, 0), fx=shape_scaler, fy=shape_scaler)
-    holder = np.zeros_like(im, shape=(*target_shape, 3))
-    boundary = np.array([target_shape[0] - im.shape[0],
-                         target_shape[1] - im.shape[1]])
-    origin = np.random.randint(0, boundary + 1)
-
-    valid_range = np.array(
-        [[origin[0], origin[0] + im.shape[0]],
-         [origin[1], origin[1] + im.shape[1]]],
-        dtype=np.int32
-    )
-    holder[valid_range[0][0]: valid_range[0][1],
-           valid_range[1][0]: valid_range[1][1]] = im
-    return holder, valid_range
-
-
-def im_pad(
-        im: np.ndarray,
-        target_shape: Union[Tuple[int, int], List[int]] = None,
-        base_length: Union[Tuple[int, int], List[int]] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
-    if target_shape is None:
-        assert len(base_length) == 2
-        target_shape = (math.ceil(im.shape[0] / base_length[0]) * base_length[0],
-                        math.ceil(im.shape[1] / base_length[1]) * base_length[1])
-    else:
-        assert len(target_shape) == 2
-        assert target_shape[0] >= im.shape[0] and \
-               target_shape[1] >= im.shape[1]
-
-    holder = np.zeros_like(im, shape=(*target_shape, 3))
-    holder[: im.shape[0], : im.shape[1]] = im
-    valid_range = np.array([[0, im.shape[0]],
-                            [0, im.shape[1]]], dtype=np.int32)
-    return holder, valid_range
 
 
 def kd_tree_partition(data: Union[np.ndarray, torch.Tensor], max_num: int,

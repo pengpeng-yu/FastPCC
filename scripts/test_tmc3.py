@@ -1,5 +1,5 @@
 """
-This script is based on commit c3c9798a0f63970bd17ce191900ded478a8aa0f6 of mpeg-pcc-tmc13.
+This script is based on the version 26rc2 of mpeg-pcc-tmc13.
 """
 import math
 from glob import glob
@@ -22,6 +22,7 @@ from lib.data_utils.utils import write_ply_file
 geo_only = True
 single_frame_only = True
 
+processes_num = mp.cpu_count() // 4
 tmc3_path = '../mpeg-pcc-tmc13/build/tmc3/tmc3'
 
 if single_frame_only:
@@ -65,7 +66,6 @@ else:
     )
 assert len(file_lists) == len(resolutions)
 assert len(config_dirs) == len(output_dirs)
-processes_num = mp.cpu_count() * 2 // 3
 
 
 class TMC3LogExtractor(LogExtractor):
@@ -162,11 +162,14 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             config_paths = default_config_paths
         else:
             assert single_frame_only is False
-            # e.g. basketball_player_vox11_xxx -> basketball_player_vox11_00000200
-            config_paths = glob(osp.join(
-                config_dir, file_basename.lower().rsplit('_', 1)[0] + '*', '*', 'encoder.cfg'))
+            # e.g., filename: basketball_player_vox11_xxx -> config: basketball_player_vox11
+            config_basename = file_basename.lower().rsplit('_', 1)[0]
+            config_paths = glob(osp.join(config_dir, config_basename, '*', 'encoder.cfg'))
+            # e.g., filename: loot_vox10_xxx -> config: loot_vox10_1200
             if len(config_paths) == 0:
-                print(f'\nlen(config_paths) == 0 for : {file_basename}\n')
+                config_paths = glob(osp.join(config_dir, config_basename + '*', '*', 'encoder.cfg'))
+            if len(config_paths) != 6:
+                print(f'\nlen(config_paths) == {len(config_paths)} != 6 for {file_basename}\n')
                 return None
     config_paths.sort()
     sub_output_dir = osp.join(output_dir, osp.splitext(file_path)[0])
@@ -228,7 +231,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
         command_dec = \
             f'{tmc3_path}' \
             f' --mode=1' \
-            f' --outputBinaryPly=0' \
+            f' --outputBinaryPly=1' \
             f' --compressedStreamPath={osp.join(sub_output_dir, f"{rate_flag}.bin")}' \
             f' --reconstructedDataPath={osp.join(sub_output_dir, f"{rate_flag}_recon.ply")}'
         if flag_kitti:

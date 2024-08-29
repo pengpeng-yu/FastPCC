@@ -1,5 +1,5 @@
 """
-This script is based on commit 1fc928244bc778c73bed0d36f1c22d95ed6b0fe2 of mpeg-pcc-tmc2.
+This script is based on the version 24.0 of mpeg-pcc-tmc2.
 """
 import sys
 import os
@@ -17,6 +17,7 @@ from scripts.shared_config import pc_error_path, metric_dict_filename, test_dir
 geo_only = True
 single_frame_only = True
 
+processes_num = mp.cpu_count() // 4
 tmc2_path = ('../mpeg-pcc-tmc2/bin/PccAppEncoder', '../mpeg-pcc-tmc2/bin/PccAppDecoder')
 
 if single_frame_only:
@@ -37,7 +38,6 @@ assert len(file_lists) == len(resolutions)
 
 config_dir = '../mpeg-pcc-tmc2/cfg'
 output_dir = f'{test_dir}/tmc2_geo' if geo_only else f'{test_dir}/tmc2'
-processes_num = mp.cpu_count() * 2 // 3
 
 
 class TMC2LogExtractor(LogExtractor):

@@ -374,6 +374,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             if (step_idx + 1) % cfg.train.grad_acc_steps == 0:
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
+                        if cfg.train.amp:
+                            scaler.unscale_(optimizer)
                         if cfg.train.max_grad_norm[idx] != 0:
                             torch.nn.utils.clip_grad_norm_(
                                 optimizer.param_groups[0]['params'],
