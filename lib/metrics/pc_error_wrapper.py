@@ -6,9 +6,9 @@ import numpy as np
 import open3d as o3d
 
 try:
-    from lib.data_utils.utils import write_ply_file
+    from lib.data_utils import write_ply_file
 except ImportError: write_ply_file = None
-from scripts.shared_config import pc_error_path
+from scripts.script_config import pc_error_path
 
 
 def if_ply_has_vertex_normal(file_path: str):

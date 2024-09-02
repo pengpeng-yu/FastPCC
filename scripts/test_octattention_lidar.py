@@ -10,7 +10,7 @@ from tqdm import tqdm
 import numpy as np
 sys.path.append(osp.dirname(osp.dirname(__file__)))
 from scripts.log_extract_utils import read_file_list_with_rel_path
-from scripts.shared_config import metric_dict_filename, cuda_device, test_dir
+from scripts.script_config import metric_dict_filename, cuda_device, test_dir
 
 
 octattention_path = '../OctAttention-lidar'

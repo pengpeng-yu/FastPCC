@@ -12,9 +12,9 @@ import json
 
 
 sys.path.append(osp.dirname(osp.dirname(__file__)))
-from scripts.shared_config import metric_dict_filename, cuda_device, test_dir, pc_error_path
+from scripts.script_config import metric_dict_filename, cuda_device, test_dir, pc_error_path
 from scripts.log_extract_utils import concat_values_for_dict
-from lib.metrics.pc_error_wapper import mpeg_pc_error
+from lib.metrics.pc_error_wrapper import mpeg_pc_error
 
 
 pcc_geo_color_src_path = '../pcc-geo-color/src'

@@ -6,7 +6,7 @@ import json
 from typing import List
 
 sys.path.append(osp.dirname(osp.dirname(__file__)))
-from scripts.shared_config import test_dir, metric_dict_filename
+from scripts.script_config import test_dir, metric_dict_filename
 
 
 def main():

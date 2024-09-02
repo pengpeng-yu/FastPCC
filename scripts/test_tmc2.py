@@ -9,9 +9,9 @@ import json
 import multiprocessing as mp
 
 sys.path.append(osp.dirname(osp.dirname(__file__)))
-from lib.metrics.pc_error_wapper import mpeg_pc_error
+from lib.metrics.pc_error_wrapper import mpeg_pc_error
 from scripts.log_extract_utils import *
-from scripts.shared_config import pc_error_path, metric_dict_filename, test_dir
+from scripts.script_config import pc_error_path, metric_dict_filename, test_dir
 
 
 geo_only = True

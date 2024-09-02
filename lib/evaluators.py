@@ -12,7 +12,7 @@ import numpy as np
 import torch
 
 from lib.data_utils import write_ply_file
-from lib.metrics.pc_error_wapper import mpeg_pc_error
+from lib.metrics.pc_error_wrapper import mpeg_pc_error
 
 
 class Evaluator:

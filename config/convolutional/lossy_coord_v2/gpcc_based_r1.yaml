@@ -14,6 +14,7 @@ model:
   warmup_fea_loss_steps: 5000
   warmup_fea_loss_factor: 0.01
 
+test:
   dataset_path:
     'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_Solid_MVUB'
   dataset:

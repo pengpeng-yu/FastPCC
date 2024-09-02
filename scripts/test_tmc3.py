@@ -13,11 +13,10 @@ import multiprocessing as mp
 import numpy as np
 
 sys.path.append(osp.dirname(osp.dirname(__file__)))
-from lib.metrics.pc_error_wapper import mpeg_pc_error
+from lib.metrics.pc_error_wrapper import mpeg_pc_error
 from scripts.log_extract_utils import *
-from scripts.shared_config import pc_error_path, metric_dict_filename, test_dir
-from lib.data_utils.utils import write_ply_file
-
+from scripts.script_config import pc_error_path, metric_dict_filename, test_dir
+from lib.data_utils import write_ply_file
 
 geo_only = True
 single_frame_only = True
