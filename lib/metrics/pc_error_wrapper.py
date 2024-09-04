@@ -101,5 +101,5 @@ def mpeg_pc_error(
         if cal_pcqm:
             metric_dict['PCQM'] = pcqm(infile1, infile2, threads)
         if cal_graph_sim:
-            metric_dict['GraphSim'] = graph_sim(infile1, infile2, threads)
+            metric_dict['GraphSIM'] = graph_sim(infile1, infile2, threads)
     return metric_dict

@@ -52,7 +52,7 @@ make
 ```
 
 
-## Build GraphSim
+## Build GraphSIM
 Optional. Requires MATLAB.
 ```shell
 git clone https://github.com/pengpeng-yu/GraphSIM

@@ -5,6 +5,6 @@ cuda_device = '0'
 test_dir = 'runs/tests'
 
 pcqm_build_path = '../PCQM/build'
-graph_sim_project_path = '../GraphSim'
+graph_sim_project_path = '../GraphSIM'
 matlab_path = 'bin/matlab'
-# ↑ Path to the matlab startup script, e.g., /home/xxx/MATLAB/R2024a/bin/matlab. Used by GraphSim.
+# ↑ Path to the matlab startup script, e.g., /home/xxx/MATLAB/R2024a/bin/matlab. Used by GraphSIM.
