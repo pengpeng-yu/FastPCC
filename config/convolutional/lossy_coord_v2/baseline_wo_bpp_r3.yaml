@@ -1,0 +1,5 @@
+# include "config/convolutional/lossy_coord_v2/baseline_r3.yaml"
+
+model:
+  bits_loss_factor: 0.0
+  warmup_fea_loss_factor: 0.0

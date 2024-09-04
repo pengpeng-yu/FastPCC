@@ -1,8 +1,11 @@
 import os.path as osp
 import subprocess
 
+from scripts.script_config import tmc3_path
 
-def gpcc_octree_lossless_geom_encode(in_path, out_path, command='bin/tmc3'):
+
+def gpcc_octree_lossless_geom_encode(in_path, out_path, command=''):
+    command = command or tmc3_path
     args = ' --mode=0' \
         ' --trisoupNodeSizeLog2=0' \
         ' --mergeDuplicatedPoints=1' \
@@ -25,7 +28,8 @@ def gpcc_octree_lossless_geom_encode(in_path, out_path, command='bin/tmc3'):
         raise RuntimeError(subp_stdout)
 
 
-def gpcc_decode(in_path, out_path, command='bin/tmc3'):
+def gpcc_decode(in_path, out_path, command=''):
+    command = command or tmc3_path
     args = ' --mode=1' \
         f' --compressedStreamPath={in_path}' \
         f' --reconstructedDataPath={out_path}' \

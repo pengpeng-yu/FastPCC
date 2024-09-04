@@ -35,7 +35,7 @@ class Evaluator:
 class PCCEvaluator(Evaluator):
     def __init__(self,
                  cal_mpeg_pc_error: bool = True,
-                 mpeg_pc_error_processes: int = 16):
+                 mpeg_pc_error_processes: int = 8):
         super(PCCEvaluator, self).__init__()
         self.cal_mpeg_pc_error = cal_mpeg_pc_error
         self.mpeg_pc_error_processes = mpeg_pc_error_processes

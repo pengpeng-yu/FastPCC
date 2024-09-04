@@ -1,0 +1,4 @@
+# include "config/convolutional/lossy_coord_v2/baseline_r6.yaml"
+
+model:
+  geo_lossl_channels: [128, 256, 256, 256, 256, 256, 256, 256, 1]

@@ -1,5 +1,6 @@
 import subprocess
 from typing import Dict
+import os
 import os.path as osp
 
 import numpy as np
@@ -8,6 +9,8 @@ import open3d as o3d
 try:
     from lib.data_utils import write_ply_file
 except ImportError: write_ply_file = None
+from lib.metrics.pcqm_wrapper import pcqm
+from lib.metrics.graph_sim_wrapper import graph_sim
 from scripts.script_config import pc_error_path
 
 
@@ -35,9 +38,11 @@ _DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A
 
 def mpeg_pc_error(
         infile1: str, infile2: str, resolution: float, normal_file: str = '',
-        hausdorff: bool = False, color: bool = False, threads: int = 1, command=''
+        hausdorff: bool = False, color: bool = False, threads: int = None, command='',
+        cal_pcqm=False, cal_graph_sim=False
 ) -> Dict[str, float]:
     if command == '': command = pc_error_path
+    threads = threads or os.getenv('OMP_NUM_THREADS', 2)
     cmd_args = f'{command}' \
                f' -a {infile1}' \
                f' -b {infile2}' \
@@ -91,4 +96,10 @@ def mpeg_pc_error(
     if color:
         metric_dict["c[3],PSNRF"] = metric_dict["c[0],PSNRF"] * 0.75 + \
             metric_dict["c[1],PSNRF"] / 8 + metric_dict["c[2],PSNRF"] / 8
+
+    if color:
+        if cal_pcqm:
+            metric_dict['PCQM'] = pcqm(infile1, infile2, threads)
+        if cal_graph_sim:
+            metric_dict['GraphSim'] = graph_sim(infile1, infile2, threads)
     return metric_dict

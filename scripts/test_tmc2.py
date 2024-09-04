@@ -20,7 +20,7 @@ single_frame_only = True
 processes_num = mp.cpu_count() // 4
 tmc2_path = ('../mpeg-pcc-tmc2/bin/PccAppEncoder', '../mpeg-pcc-tmc2/bin/PccAppDecoder')
 
-if single_frame_only:
+if single_frame_only:  # ↓ Check your paths below ↓
     file_lists = (
         "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt",
         "datasets/MPEG_GPCC_CTC/Solid/Solid_2048.txt",

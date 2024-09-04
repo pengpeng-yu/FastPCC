@@ -15,16 +15,19 @@ import numpy as np
 sys.path.append(osp.dirname(osp.dirname(__file__)))
 from lib.metrics.pc_error_wrapper import mpeg_pc_error
 from scripts.log_extract_utils import *
-from scripts.script_config import pc_error_path, metric_dict_filename, test_dir
+from scripts.script_config import pc_error_path, metric_dict_filename, test_dir, tmc3_path
 from lib.data_utils import write_ply_file
+
 
 geo_only = True
 single_frame_only = True
 
 processes_num = mp.cpu_count() // 4
-tmc3_path = '../mpeg-pcc-tmc13/build/tmc3/tmc3'
+if not osp.isfile(tmc3_path):
+    tmc3_path = '../mpeg-pcc-tmc13/build/tmc3/tmc3'
+    assert osp.isfile(tmc3_path)
 
-if single_frame_only:
+if single_frame_only:  # ↓ Check your paths below ↓
     file_lists = (
         'datasets/MPEG_GPCC_CTC/Dense/Dense_16384.txt',
         "datasets/MPEG_GPCC_CTC/Solid/Solid_4096.txt",
@@ -39,13 +42,13 @@ if single_frame_only:
     #   and won't cause key conflicts.
     # I look for keywords ('MVUB'/'KITTI'/'SparsePCGC') in the paths of file lists
     #   to flag whether special handling is needed.
-    resolutions = (16384, 4096, 2048, 1024, 512, 59.70 + 1, 30000 + 1)
+    resolutions = (16384, 4096, 2048, 1024, 512, 59.70 + 1, 30000 + 1,)
 else:
     file_lists = (
         'datasets/Owlii/list_basketball_player_dancer.txt',
-        'datasets/8iVFBv2/list_loot_redandblack.txt'
+        'datasets/8iVFBv2/list_loot_redandblack.txt',
     )
-    resolutions = (2048, 1024)
+    resolutions = (2048, 1024,)
 
 if geo_only:
     config_dirs = (
@@ -57,7 +60,7 @@ if geo_only:
 else:
     config_dirs = (
         '../mpeg-pcc-tmc13/cfg/octree-predlift/lossy-geom-lossy-attrs',
-        '../mpeg-pcc-tmc13/cfg/octree-raht/lossy-geom-lossy-attrs'
+        '../mpeg-pcc-tmc13/cfg/octree-raht/lossy-geom-lossy-attrs',
     )
     output_dirs = (
         f'{test_dir}/tmc3/octree-predlift',
