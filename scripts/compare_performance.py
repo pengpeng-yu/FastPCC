@@ -134,7 +134,7 @@ def compute_multiple_bdrate():
         #     ('convolutional/lossy_coord_v2/gpcc_based_r*', {'color': '#ff7f0e', 'marker': '.'}),
         # 'Ours w/o feature residual':
         #     ('convolutional/lossy_coord_v2/wo_residual_r*', {'color': '#2ca02c', 'marker': '.'}),
-        # 'Ours part6e5': ('convolutional/lossy_coord_v2/baseline_part6e5_r*', {'color': '#d62728', 'marker': '.'}),
+        # 'Ours part6e5': ('convolutional/lossy_coord_v2/part6e5_r*', {'color': '#d62728', 'marker': '.'}),
         # 'Ours joint': ('convolutional/lossy_coord_lossy_color/baseline_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Ours': ('convolutional/lossy_coord_v2/baseline_kitti_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Ours': ('convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*', {'color': '#1f77b4', 'marker': '.'}),
