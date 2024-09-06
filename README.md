@@ -48,7 +48,7 @@ python train.py config/convolutional/lossy_coord_v2/baseline_r1.yaml \
 Test:
 ```shell
 python test.py config/convolutional/lossy_coord_v2/baseline_r1.yaml \
-  test.weights_from_ckpt='weights/convolutional/lossy_coord_v2/baseline_r1.pt' \
+  test.from_ckpt='weights/convolutional/lossy_coord_v2/baseline_r1.pt' \
   test.device='0'
 ```
 DDP training: 
@@ -60,7 +60,7 @@ python -m torch.distributed.launch --nproc_per_node 2 \
 Resume training from "runs/lossy_coord_v2/baseline_r1_bak0" to "runs/lossy_coord_v2/baseline_r1":
 ```shell
 python train.py config/convolutional/lossy_coord_v2/baseline_r1.yaml \
-  train.resume_from_ckpt='runs/lossy_coord_v2/baseline_r1_bak0/ckpts/epoch_<maxindex>.pt' \
+  train.from_ckpt='runs/lossy_coord_v2/baseline_r1_bak0/ckpts/epoch_<maxindex>.pt' \
   train.resume_items='[all]' \
   train.rundir_name='lossy_coord_v2/baseline_r1' \
   train.device='0'

@@ -52,7 +52,7 @@ def test():
 
             for weight_path in sorted(weights_paths):
                 print(f'\nTest config: "{config_path}", weight "{weight_path}"\n')
-                if len(weights_paths) != 1:
+                if len(weights_paths) != 1:  # if a single config file maps to multiple weights
                     sub_sub_run_dir = osp.join(
                         sub_run_dir,
                         osp.splitext(osp.split(weight_path)[1])[0]
@@ -62,7 +62,7 @@ def test():
                     shutil.rmtree(sub_sub_run_dir)
                 subprocess.run(
                     f'{sys.executable} test.py {config_path}'
-                    f' test.weights_from_ckpt={weight_path}'
+                    f' test.from_ckpt={weight_path}'
                     f' test.rundir_name={sub_sub_run_dir.replace("runs/", "", 1)}'
                     f' test.device={cuda_device}',
                     shell=True, check=True, executable=shutil.which('bash')

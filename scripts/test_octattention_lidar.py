@@ -1,5 +1,5 @@
 """
-This script is based on the commit 436376cd95dea17096a0463116eb718af8d40dff of OctAttention-lidar.
+This script is based on the commit 436376cd95dea17096a0463116eb718af8d40dff of OctAttention-lidar (lidar branch).
 """
 import sys
 import os

@@ -70,7 +70,7 @@ def main():
         make_new_dirs(tb_logdir, logger)
         if cfg.train.resume_tensorboard:
             try:
-                last_tb_dir = pathlib.Path(cfg.train.resume_from_ckpt).parent.parent / 'tb_logdir'
+                last_tb_dir = pathlib.Path(cfg.train.from_ckpt).parent.parent / 'tb_logdir'
                 for log_file in os.listdir(last_tb_dir):
                     shutil.copy(last_tb_dir / log_file, tb_logdir)
             except Exception as e:
@@ -304,8 +304,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
     # Resume checkpoint
     start_epoch = 0
-    if cfg.train.resume_from_ckpt != '':
-        ckpt_path = autoindex_obj(cfg.train.resume_from_ckpt)
+    if cfg.train.from_ckpt != '':
+        ckpt_path = autoindex_obj(cfg.train.from_ckpt)
         ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
         if 'state_dict' in cfg.train.resume_items:
             try:

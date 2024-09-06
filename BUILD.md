@@ -38,7 +38,7 @@ make -j16
 
 
 ## Build PCQM
-Optional.
+Optional. Used by `lib/metrics/pcqm_wrapper.py`.
 ```shell
 git clone https://github.com/pengpeng-yu/PCQM.git
 # Official implementation: https://github.com/MEPP-team/PCQM
@@ -53,9 +53,9 @@ make
 
 
 ## Build GraphSIM
-Optional. Requires MATLAB.
+Optional. Requires MATLAB. Used by `lib/metrics/graph_sim_wrapper.py`.
 ```shell
-git clone https://github.com/pengpeng-yu/GraphSIM
+git clone https://github.com/pengpeng-yu/GraphSIM.git
 # Official implementation: https://github.com/NJUVISION/GraphSIM
 # I made minor modifications to support custom file paths.
 cd GraphSIM
@@ -66,6 +66,18 @@ gsp_install
 exit
 ```
 You can terminate multiple MATLAB processes with one command `ps -uax |grep "MATLAB" | awk '{print $2}' | xargs kill`.
+
+
+## Prepare pcc-geo-color
+Optional. Used by `scripts/test_pcc_geo_color.py`. 
+
+```
+git clone https://github.com/pengpeng-yu/pcc-geo-color.git
+# I made minor modifications to support custom file paths.
+```
+You need to prepare your python environment and download pretrained models according to their README.md.
+Then, check if the project and the test data are placed in the paths defined in `scripts/test_pcc_geo_color.py`.
+Finally, you can run `python scripts/test_pcc_geo_color.py`. 
 
 
 ## Contact

@@ -37,7 +37,7 @@ class TrainConfig(SimpleConfig):
     lr_init_div_factor: float_or_seq = 10.
     lr_final_div_factor: float_or_seq = 1000.
 
-    resume_from_ckpt: str = ''
+    from_ckpt: str = ''
     resume_items: Tuple[str, ...] = ('state_dict',)
     resume_tensorboard: bool = False
 
@@ -65,7 +65,7 @@ class TrainConfig(SimpleConfig):
         for item in self.resume_items:
             assert item in all_resume_items
         if self.resume_tensorboard:
-            assert self.resume_from_ckpt != ''
+            assert self.from_ckpt != ''
         assert self.ckpt_frequency > 0
         if isinstance(self.optimizer, str):
             self.optimizer = (self.optimizer,)
@@ -98,7 +98,7 @@ class TestConfig(SimpleConfig):
     batch_size: int = 8
     num_workers: int = 0
     pin_memory: bool = False
-    weights_from_ckpt: str = ''
+    from_ckpt: str = ''
     log_frequency: int = 50  # (steps) used for logging
     save_results: bool = False  # save outputs of model in runs/rundir_name/results
 

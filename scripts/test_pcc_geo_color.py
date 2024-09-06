@@ -1,5 +1,6 @@
 """
-This script is based on the commit 51d398dfccd62ac35828842effd35bc91c97abe0 of pcc-geo-color.
+This script is based on https://github.com/pengpeng-yu/pcc-geo-color
+Original repo: https://github.com/mmspg/pcc-geo-color
 """
 import sys
 import os
@@ -19,15 +20,14 @@ from lib.metrics.pc_error_wrapper import mpeg_pc_error
 
 pcc_geo_color_src_path = '../pcc-geo-color/src'
 pretrained_models_path = '../pcc-geo-color/src/pre-trained_models'
-file_dirs = (
-    'datasets/Owlii/basketball_player_vox11', 'datasets/Owlii/dancer_vox11',
-    'datasets/8iVFBv2/loot/Ply', 'datasets/8iVFBv2/redandblack/Ply'
+file_lists = (
+    'datasets/Owlii/list_basketball_player_dancer.txt',
+    'datasets/8iVFBv2/list_loot_redandblack.txt',
 )
-filename_pattern = '*[0-9].ply'  # excludes *_n.ply
-resolutions = (2048, 2048, 1024, 1024)
+resolutions = (2048, 1024,)
 output_dir = f'{test_dir}/pcc-geo-color'
 output_dir = osp.abspath(output_dir)
-processes_num = mp.cpu_count() * 2 // 3
+processes_num = mp.cpu_count() // 2  # only for mpeg_pc_error
 
 
 def test():
@@ -46,12 +46,14 @@ def test():
     all_pc_error_res = {}
     pre_command = f'export TF_FORCE_GPU_ALLOW_GROWTH=true;' \
                   f'export CUDA_VISIBLE_DEVICES={cuda_device};cd {pcc_geo_color_src_path};'
-    for resolution, file_dir in zip(resolutions, file_dirs):
-        sub_output_dir = osp.abspath(osp.join(output_dir, file_dir))
+    for resolution, file_list in zip(resolutions, file_lists):
+        sub_output_dir = osp.abspath(osp.join(output_dir, osp.dirname(file_list)))
         subprocess.run(
             f'{pre_command}'
             f'{sys.executable} partition.py'
-            f' {osp.abspath(file_dir)} {osp.join(sub_output_dir, "par")} --block_size=128 --keep_size=0',
+            f' {osp.abspath(osp.dirname(file_list))}'
+            f' --input_list {osp.abspath(file_list)}'
+            f' {osp.join(sub_output_dir, "par")} --block_size=128 --keep_size=0',
             shell=True, check=True, executable=shutil.which('bash')
         )
         for pretrained_path in pretrained_paths:
@@ -61,7 +63,7 @@ def test():
             subprocess.run(
                 f'{pre_command}'
                 f'{sys.executable} compress.py'
-                f' {osp.join(sub_output_dir, "par")} "*.ply"'
+                f' {osp.join(sub_output_dir, "par")} "**/*.ply"'
                 f' {osp.join(sub_sub_output_dir, "cmp")}'
                 f' {pretrained_path} --resolution=128 --task=geometry+color',
                 shell=True, check=True, executable=shutil.which('bash')
@@ -69,8 +71,8 @@ def test():
             subprocess.run(
                 f'{pre_command}'
                 f'{sys.executable} decompress.py'
-                f' {osp.join(sub_output_dir, "par")} "*.ply"'
-                f' {osp.join(sub_sub_output_dir, "cmp")} "*.ply.bin"'
+                f' {osp.join(sub_output_dir, "par")} "**/*.ply"'
+                f' {osp.join(sub_sub_output_dir, "cmp")} "**/*.ply.bin"'
                 f' {osp.join(sub_sub_output_dir, "recon")}'
                 f' {pretrained_path} --resolution=128 --task=geometry+color',
                 shell=True, check=True, executable=shutil.which('bash')
@@ -78,23 +80,29 @@ def test():
             subprocess.run(
                 f'{pre_command}'
                 f'{sys.executable} merge.py'
-                f' {osp.abspath(file_dir)}'
+                f' {osp.abspath(osp.dirname(file_list))}'
                 f' {osp.join(sub_sub_output_dir, "recon")}'
-                f' {osp.join(sub_sub_output_dir, "merge")} --resolution=128 --task=geometry+color',
+                f' {osp.join(sub_sub_output_dir, "merge")}'
+                f' --input_list {osp.abspath(file_list)}'
+                f' --resolution=128 --task=geometry+color',
                 shell=True, check=True, executable=shutil.which('bash')
             )
-            for org_file_path, recon_file_path in \
-                    zip(sorted(glob(osp.join(file_dir, '*.ply'))),
-                        sorted(glob(osp.join(sub_sub_output_dir, "merge", '*.ply')))):
+            with open(file_list) as f:
+                f_lines = [_.strip() for _ in f.readlines()]
+            org_file_paths = [osp.join(osp.dirname(file_list), _) for _ in f_lines]
+            recon_file_paths = [osp.join(sub_sub_output_dir, "merge", osp.splitext(_)[0] + '_dec.ply') for _ in f_lines]
+            cmp_file_paths = [osp.join(sub_sub_output_dir, "cmp", osp.splitext(_)[0] + '*') for _ in f_lines]
+            for org_file_path, recon_file_path, cmp_file_path in zip(org_file_paths, recon_file_paths, cmp_file_paths):
                 cmp_size = 0
-                for cmp_file in glob(osp.join(sub_sub_output_dir, "cmp", osp.split(org_file_path)[1][:-4] + '*')):
+                for cmp_file in glob(cmp_file_path):
                     cmp_size += osp.getsize(cmp_file)
                 if org_file_path not in all_pc_error_res: all_pc_error_res[org_file_path] = []
                 all_pc_error_res[org_file_path].append((pool.apply_async(
                     mpeg_pc_error,
                     (org_file_path, recon_file_path, resolution, '',
-                     False, True, 1, pc_error_path)), cmp_size))
+                     False, True)), cmp_size))
         shutil.rmtree(osp.join(sub_output_dir, "par"))
+        shutil.rmtree(osp.join(sub_output_dir, "recon"))
     pool.close()
 
     for k, v in all_pc_error_res.items():

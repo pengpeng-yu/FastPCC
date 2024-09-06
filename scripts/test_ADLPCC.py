@@ -114,8 +114,7 @@ def test():
                 sub_metric_dict = concat_values_for_dict(
                     sub_metric_dict,
                     mpeg_pc_error(
-                        file_path, osp.abspath(recon_path), resolution,
-                        threads=16, command=pc_error_path
+                        file_path, osp.abspath(recon_path), resolution, command=pc_error_path
                     ), False
                 )
                 sub_metric_dict['bpp'].append(

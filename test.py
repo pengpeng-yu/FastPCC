@@ -81,8 +81,8 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         except Exception as e:
             raise ImportError(*e.args)
         model = Model(cfg.model)
-        if cfg.test.weights_from_ckpt != '':
-            ckpt_path = autoindex_obj(cfg.test.weights_from_ckpt)
+        if cfg.test.from_ckpt != '':
+            ckpt_path = autoindex_obj(cfg.test.from_ckpt)
             logger.info(f'loading weights from {ckpt_path}')
             try:
                 incompatible_keys = model.load_state_dict(
