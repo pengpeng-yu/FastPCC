@@ -250,95 +250,89 @@ class Decoder(nn.Module):
         for pred_row_ids, tgt_coord_row_ids in zip(
             batched_pred._batchwise_row_indices, mg.origin_map(batched_tgt_coord_key)[1]
         ):
-            rgb_loss = self.sample_wise_recolor(
-                batched_pred.C[pred_row_ids, 1:].to(torch.float),
-                batched_pred_rgb[pred_row_ids],
-                batched_pred_keep_mask[pred_row_ids],
-                batched_tgt_coord[tgt_coord_row_ids, 1:].to(torch.float),
-                batched_tgt_rgb[tgt_coord_row_ids]
+            pred_mask = batched_pred_keep_mask[pred_row_ids]
+            pred_xyz = batched_pred.C[pred_row_ids, 1:].to(torch.float)[pred_mask]
+            pred_rgb = batched_pred_rgb[pred_row_ids][pred_mask]
+            tgt_xyz = batched_tgt_coord[tgt_coord_row_ids, 1:].to(torch.float)
+            tgt_rgb = batched_tgt_rgb[tgt_coord_row_ids]
+            recolored_pred_rgb = sample_wise_recolor(
+                pred_xyz, tgt_xyz, tgt_rgb
+            )
+            if self.use_yuv_loss:
+                pred_rgb = self.rgb_to_yuvbt709(pred_rgb)
+                recolored_pred_rgb = self.rgb_to_yuvbt709(recolored_pred_rgb)
+            rgb_loss = F.mse_loss(
+                pred_rgb, recolored_pred_rgb, reduction='sum'
             )
             rgb_loss_list.append(rgb_loss)
         sum_rgb_loss = sum(rgb_loss_list)
 
         return sum_rgb_loss
 
-    def sample_wise_recolor(
-            self,
-            cand_xyz: torch.Tensor,
-            cand_rgb: torch.Tensor,
-            pred_mask: torch.Tensor,
-            tgt_xyz: torch.Tensor,
-            tgt_rgb: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Args:
-            cand_xyz: L x 3 float
-            cand_rgb: L x 3 float RGB, **with gard**
-            pred_mask: L bool, sum(pred_mask) == M
-            tgt_xyz: N x 3 float
-            tgt_rgb: L x 3 float RGB
-            Note that cand_xyz[tgt_true_mask] != tgt_xyz
-        """
-        device = cand_xyz.device
-        search_range = 8
 
-        pred_xyz = cand_xyz[pred_mask]
-        pred_rgb = cand_rgb[pred_mask]
-        recolored_pred_rgb = torch.full_like(pred_xyz, 0)
+@torch.no_grad()
+def sample_wise_recolor(
+        pred_xyz: torch.Tensor,
+        tgt_xyz: torch.Tensor,
+        tgt_rgb: torch.Tensor,
+        search_range: int = 8
+) -> torch.Tensor:
+    """
+    Args:
+        pred_xyz: M x 3 float
+        tgt_xyz: N x 3 float
+        tgt_rgb: N x 3 float RGB
+        search_range: int, K in KNN search.
+        Note that cand_xyz[tgt_true_mask] != tgt_xyz
+    """
+    device = pred_xyz.device
+    recolored_pred_rgb = torch.zeros_like(pred_xyz, dtype=tgt_rgb.dtype)
 
-        @torch.no_grad()
-        def recolor_backward():
-            tgt_to_pt_dist, tgt_to_pt_idx = knn_points(
-                tgt_xyz[None], pred_xyz[None], K=search_range, return_sorted=False
-            )[:2]
-            tgt_to_pt_dist, tgt_to_pt_idx = tgt_to_pt_dist[0], tgt_to_pt_idx[0]
-            tgt_to_pt_zero_mask = tgt_to_pt_dist == 0
-            tgt_to_pt_mask = tgt_to_pt_dist == tgt_to_pt_dist.amin(1, keepdim=True)
-            tgt_to_pt_mask.logical_and_(~tgt_to_pt_zero_mask.any(1).unsqueeze(1))
-            expanded_tgt_rgb = tgt_rgb.unsqueeze(1).expand(-1, search_range, -1)
-            masked_rec_tgt_to_pt_dist = tgt_to_pt_dist[tgt_to_pt_mask].sqrt().reciprocal_()
-            recolored_pred_rgb.index_add_(
-                0, tgt_to_pt_idx[tgt_to_pt_mask],
-                (expanded_tgt_rgb[tgt_to_pt_mask]).mul(
-                    masked_rec_tgt_to_pt_dist.unsqueeze(1))
-            )
-            recolored_pred_rgb_denominator = torch.zeros(
-                (pred_xyz.shape[0],), dtype=cand_rgb.dtype, device=device).index_add_(
-                0, tgt_to_pt_idx[tgt_to_pt_mask], masked_rec_tgt_to_pt_dist
-            )
-            tmp_mask = recolored_pred_rgb_denominator != 0
-            recolored_pred_rgb[tmp_mask] = recolored_pred_rgb[tmp_mask].div(
-                recolored_pred_rgb_denominator[tmp_mask].unsqueeze(1))
-            recolored_pred_rgb[tgt_to_pt_idx[tgt_to_pt_zero_mask]] = \
-                expanded_tgt_rgb[tgt_to_pt_zero_mask]
-            tmp_mask.logical_not_()
-            tmp_mask[tgt_to_pt_idx[tgt_to_pt_zero_mask]] = False
-            return tmp_mask
-
-        empty_rgb_mask = recolor_backward()
-
-        @torch.no_grad()
-        def recolor_forward():
-            if torch.any(empty_rgb_mask):
-                empty_rgb_xyz = pred_xyz[empty_rgb_mask]
-                empty_rgb_to_tgt_dist, empty_rgb_to_tgt_idx = knn_points(
-                    empty_rgb_xyz[None], tgt_xyz[None], K=search_range, return_sorted=False
-                )[:2]
-                empty_rgb_to_tgt_dist, empty_rgb_to_tgt_idx = empty_rgb_to_tgt_dist[0], empty_rgb_to_tgt_idx[0]
-                empty_rgb_to_tgt_mask = empty_rgb_to_tgt_dist == empty_rgb_to_tgt_dist.amin(1, keepdim=True)
-                recolored_pred_rgb[empty_rgb_mask] = torch.sum(
-                    tgt_rgb[empty_rgb_to_tgt_idx] * empty_rgb_to_tgt_mask[:, :, None], dim=1
-                ) / empty_rgb_to_tgt_mask.sum(1, keepdim=True)
-
-        recolor_forward()
-
-        if self.use_yuv_loss:
-            pred_rgb = self.rgb_to_yuvbt709(pred_rgb)
-            recolored_pred_rgb = self.rgb_to_yuvbt709(recolored_pred_rgb)
-        rgb_loss = F.mse_loss(
-            pred_rgb, recolored_pred_rgb, reduction='sum'
+    def recolor_backward():
+        tgt_to_pt_dist, tgt_to_pt_idx = knn_points(
+            tgt_xyz[None], pred_xyz[None], K=search_range, return_sorted=False
+        )[:2]
+        tgt_to_pt_dist, tgt_to_pt_idx = tgt_to_pt_dist[0], tgt_to_pt_idx[0]
+        tgt_to_pt_zero_mask = tgt_to_pt_dist == 0
+        tgt_to_pt_mask = tgt_to_pt_dist == tgt_to_pt_dist.amin(1, keepdim=True)
+        tgt_to_pt_mask.logical_and_(~tgt_to_pt_zero_mask.any(1).unsqueeze(1))
+        expanded_tgt_rgb = tgt_rgb.unsqueeze(1).expand(-1, search_range, -1)
+        masked_rec_tgt_to_pt_dist = tgt_to_pt_dist[tgt_to_pt_mask].sqrt().reciprocal_()
+        recolored_pred_rgb.index_add_(
+            0, tgt_to_pt_idx[tgt_to_pt_mask],
+            (expanded_tgt_rgb[tgt_to_pt_mask]).mul(
+                masked_rec_tgt_to_pt_dist.unsqueeze(1))
         )
-        return rgb_loss
+        recolored_pred_rgb_denominator = torch.zeros(
+            (pred_xyz.shape[0],), dtype=tgt_rgb.dtype, device=device).index_add_(
+            0, tgt_to_pt_idx[tgt_to_pt_mask], masked_rec_tgt_to_pt_dist
+        )
+        tmp_mask = recolored_pred_rgb_denominator != 0
+        recolored_pred_rgb[tmp_mask] = recolored_pred_rgb[tmp_mask].div(
+            recolored_pred_rgb_denominator[tmp_mask].unsqueeze(1))
+        recolored_pred_rgb[tgt_to_pt_idx[tgt_to_pt_zero_mask]] = \
+            expanded_tgt_rgb[tgt_to_pt_zero_mask]
+        tmp_mask.logical_not_()
+        tmp_mask[tgt_to_pt_idx[tgt_to_pt_zero_mask]] = False
+        return tmp_mask
+
+    empty_rgb_mask = recolor_backward()
+
+    def recolor_forward():
+        if torch.any(empty_rgb_mask):
+            empty_rgb_xyz = pred_xyz[empty_rgb_mask]
+            empty_rgb_to_tgt_dist, empty_rgb_to_tgt_idx = knn_points(
+                empty_rgb_xyz[None], tgt_xyz[None], K=search_range, return_sorted=False
+            )[:2]
+            empty_rgb_to_tgt_dist, empty_rgb_to_tgt_idx = empty_rgb_to_tgt_dist[0], empty_rgb_to_tgt_idx[0]
+            empty_rgb_to_tgt_mask = empty_rgb_to_tgt_dist == empty_rgb_to_tgt_dist.amin(1, keepdim=True)
+            recolored_pred_rgb[empty_rgb_mask] = torch.sum(
+                tgt_rgb[empty_rgb_to_tgt_idx] * empty_rgb_to_tgt_mask[:, :, None], dim=1
+            ) / empty_rgb_to_tgt_mask.sum(1, keepdim=True)
+
+    recolor_forward()
+
+    return recolored_pred_rgb
 
 
 class HyperDecoderUpsample(nn.Module):

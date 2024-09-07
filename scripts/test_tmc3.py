@@ -22,6 +22,8 @@ from lib.data_utils import write_ply_file
 geo_only = True
 single_frame_only = True
 
+cal_pcqm = False
+cal_graph_sim = False
 processes_num = mp.cpu_count() // 4
 if not osp.isfile(tmc3_path):
     tmc3_path = '../mpeg-pcc-tmc13/build/tmc3/tmc3'
@@ -259,7 +261,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
                 org_pc_for_pc_error,
                 osp.join(sub_output_dir, f'{rate_flag}_recon.ply'), resolution,
                 color=False if geo_only else True,
-                command=pc_error_path
+                command=pc_error_path, cal_pcqm=cal_pcqm, cal_graph_sim=cal_graph_sim
             ), False
         )
     sub_metric_dict['bpp'] = [bits / org_points_num for bits, org_points_num in zip(

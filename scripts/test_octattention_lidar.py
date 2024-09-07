@@ -17,7 +17,7 @@ octattention_path = '../OctAttention-lidar'
 reuse_distortion_metric = 'runs/tests/tmc3_geo/octree/metric_dict_bak.json'
 # I assume that you HAVE RUN test_tmc3.py on KITTI. So I simply reuse its distortion metrics.
 if not osp.isfile(reuse_distortion_metric):
-    reuse_distortion_metric = 'runs/tests/tmc3_geo/octree/metric_dict.json'
+    reuse_distortion_metric = f'runs/tests/tmc3_geo/octree/{metric_dict_filename}'
 file_lists = (
     'datasets/KITTI/sequences/test_list.txt',
     'datasets/KITTI/sequences/test_list_SparsePCGC110.txt',

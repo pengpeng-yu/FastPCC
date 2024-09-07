@@ -8,6 +8,8 @@ import json
 
 import pandas as pd
 
+from scripts.script_config import metric_dict_filename
+
 
 SparsePCGC_path = '../SparsePCGC'
 
@@ -50,7 +52,7 @@ def convert_dense_lossy():
                 break
 
     os.makedirs('runs/tests/SparsePCGC/dense_lossy', exist_ok=True)
-    with open('runs/tests/SparsePCGC/dense_lossy/metric_dict.json', 'w') as f:
+    with open(f'runs/tests/SparsePCGC/dense_lossy/{metric_dict_filename}', 'w') as f:
         f.write(json.dumps(d, indent=2, sort_keys=False))
 
     print('Done')
@@ -75,7 +77,7 @@ def convert_kitti_lossy():
                 d[key].append(df[tgt_key_i].mean())
 
     os.makedirs('runs/tests/SparsePCGC/kitti_q1mm', exist_ok=True)
-    with open('runs/tests/SparsePCGC/kitti_q1mm/metric_dict.json', 'w') as f:
+    with open(f'runs/tests/SparsePCGC/kitti_q1mm/{metric_dict_filename}', 'w') as f:
         f.write(json.dumps({'KITTI q1mm': d}, indent=2, sort_keys=False))
 
     print('Done')

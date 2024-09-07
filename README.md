@@ -27,7 +27,7 @@ Please see detailed commands [below](#train--test).
 
 
 ## Requirements
-- [Examples of dataset folder and bin folder (with binary tools compiled on Ubuntu 16.04)](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EWQeTYD3y8dDr1-lvq7YawQB-JoJ2_GQw2jSOgpS2i6xLw)
+- [Examples of datasets folder and bin folder (with binary tools compiled on Ubuntu 16.04)](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EWQeTYD3y8dDr1-lvq7YawQB-JoJ2_GQw2jSOgpS2i6xLw)
 - [Test set of geometry compression](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/Ed9ljLgHJD9Ipd_Sd8nP9NABxJbywu1kT1pPo4vdNIZWjg)
 - [Trained model weights](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EUIl3GRmQL5KvKCwwipEOhkBzoNXfyDwMs_BHju7M70ayg)
 - [ShapeNetCorev2 of OBJ format](https://huggingface.co/datasets/ShapeNet/ShapeNetCore/tree/main) (for training geometry compression)
@@ -37,6 +37,13 @@ Please see detailed commands [below](#train--test).
 The first link provides binaries of tmc3 and pc_error built on Ubuntu 16.04 with `-O3 -march=x86-64`.
 Place them in the `bin` folder, and run `chmod u+x bin/tmc3 bin/pc_error` to make the files executable.
 For detailed compilation instructions, please refer to [BUILD.md](BUILD.md).
+
+The first link also provides the file lists of each dataset, which is **necessary** for data retrieval.
+If your datasets are stored in directories other than the `datasets` folder, 
+it is recommended to create soft links to point to these datasets.
+
+For training on ShapeNet dataset, you need to run `python scripts/shapenet_mtls.py` to prevent Open3D from loading textures, 
+which may cause errors. See [Known issues](#Known-issues).
 
 
 ## Train / Test
@@ -99,12 +106,13 @@ These modules will be automatically imported and instantiated according to the p
 #### Configurations via YAML or Command Line:
 You don’t need to modify default values in `*.py` files. 
 Instead, you can specify configuration values through YAML files or command line arguments. 
-For more details, refer to the training/test commands below and the YAML files located in the `config` folder.
+For more details, refer to the training/test commands [above](#train--test) and the YAML files located in the `config` folder.
 
 #### Global Script Configuration:
 Located in [`scripts/script_config.py`](scripts/script_config.py).
-Contains several global path configurations used by `lib/metrics/xxx_wrapper.py` and `scripts/xxx.py`. 
-You need to edit these configurations manually if you are using different paths.   
+Contains several global path configurations used by `lib/metrics/xxx_wrapper.py` and `scripts/xxx.py`.
+If you are using different paths, 
+you need to create soft links or edit these configurations manually.
 
 
 ## Other content

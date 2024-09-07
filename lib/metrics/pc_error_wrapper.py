@@ -38,11 +38,10 @@ _DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A
 
 def mpeg_pc_error(
         infile1: str, infile2: str, resolution: float, normal_file: str = '',
-        hausdorff: bool = False, color: bool = False, threads: int = None, command='',
+        hausdorff: bool = False, color: bool = False, threads: int = 2, command='',
         cal_pcqm=False, cal_graph_sim=False
 ) -> Dict[str, float]:
     if command == '': command = pc_error_path
-    threads = threads or os.getenv('OMP_NUM_THREADS', 2)
     cmd_args = f'{command}' \
                f' -a {infile1}' \
                f' -b {infile2}' \
