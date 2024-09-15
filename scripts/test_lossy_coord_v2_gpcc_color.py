@@ -40,13 +40,22 @@ processes_num = mp.cpu_count() // 2
 assert len(file_lists) == len(resolutions)
 
 
-def extract_colors_bits_log(log: str):
+def extract_color_bytes_log(log: str):
     lines = log.splitlines()
     bits = 0
     for idx, line in enumerate(lines):
         if line.startswith('colors bitstream size'):
             bits += float(line.split()[3])
     return bits
+
+
+def extract_color_time_log(log: str):
+    lines = log.splitlines()
+    t = 0
+    for idx, line in enumerate(lines):
+        if line.startswith('colors processing time (user):'):
+            t += float(line.split()[4])
+    return t
 
 
 def test_lossy_coord_v2():
@@ -110,7 +119,7 @@ def test_tmc3_color():
                 all_file_run_res.append(pool.apply_async(
                     run_single_file,
                     (recon_recolor_file, org_file_path, resolution, tmc3_config_dir, tmc3_rate_flag,
-                     sub_metric_dict[org_file_path]['compressed_bytes'], osp.dirname(recon_recolor_file))
+                     sub_metric_dict[org_file_path], osp.dirname(recon_recolor_file))
                 ))
             all_file_metric_dict = {}
             for run_res in all_file_run_res:
@@ -132,7 +141,7 @@ def test_tmc3_color():
     print('All Done')
 
 
-def run_single_file(file_path, org_file_path, resolution, config_dir, rate_flag, geo_bytes, output_dir):
+def run_single_file(file_path, org_file_path, resolution, config_dir, rate_flag, org_metrics, output_dir):
     file_basename = osp.splitext(osp.split(org_file_path)[1])[0]
     config_path = osp.join(config_dir, file_basename.lower(), rate_flag, 'encoder.cfg')
     if not osp.isfile(config_path):
@@ -172,7 +181,11 @@ def run_single_file(file_path, org_file_path, resolution, config_dir, rate_flag,
         osp.join(output_dir, f'{file_basename}_tmc3_recon.ply'), resolution,
         color=True, command=pc_error_path, cal_pcqm=cal_pcqm, cal_graph_sim=cal_graph_sim
     )
-    metric_dict['compressed_bytes'] = geo_bytes + extract_colors_bits_log(subp_enc.stdout)
+    metric_dict['compressed_bytes'] = org_metrics['compressed_bytes'] + extract_color_bytes_log(subp_enc.stdout)
+    metric_dict['encode time'] = org_metrics['encode time'] + extract_color_time_log(subp_enc.stdout)
+    metric_dict['decode time'] = org_metrics['decode time'] + extract_color_time_log(subp_dec.stdout)
+    metric_dict['encode memory'] = org_metrics['encode memory']
+    metric_dict['decode memory'] = org_metrics['decode memory']
     metric_dict['bpp'] = metric_dict['compressed_bytes'] * 8 / metric_dict['org points num']
     return org_file_path, metric_dict
 

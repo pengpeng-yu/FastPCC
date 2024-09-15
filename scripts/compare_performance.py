@@ -16,12 +16,16 @@ from lib.metrics.bjontegaard import bdrate, bdsnr
 
 
 def compute_bd(info_dicts_a, info_dicts_b, samples_name: List[str],
-               rate=True, d1=True, c=-1) -> Dict[str, float]:
+               rate=True, d1=True, c=-1, pcqm=False, graphsim=False) -> Dict[str, float]:
     bd_rate_results = {}
     distortion_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
     if c != -1:
         distortion_key = f'c[{c}],PSNRF'
     bd_fn = bdrate if rate else bdsnr
+    if pcqm is True:
+        distortion_key = 'PCQM'
+    if graphsim is True:
+        distortion_key = 'GraphSIM'
     for key in samples_name:
         try:
             bpp_psnr_a = list(zip(info_dicts_a[key]['bpp'], info_dicts_a[key][distortion_key]))
@@ -58,13 +62,17 @@ def write_metric_to_csv(titles: Tuple[Union[List[str], Tuple[str, ...]], ...],
             f.write(f'{key}, {",".join(map(str, value))},\n')
 
 
-def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_cfg,
-                  output_dir, d1=True, c=-1, hook=None):
+def plot_rd(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_cfg,
+            output_dir, d1=True, c=-1, pcqm=False, graphsim=False, hook=None, tight_legend=True):
     distortion_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
     y_label = 'D1 PSNR (dB)' if d1 else 'D2 PSNR (dB)'
     if c != -1:
         distortion_key = f'c[{c}],PSNRF'
         y_label = 'Y PSNR (dB)' if c == 0 else 'U PSNR (dB)' if c == 1 else 'V PSNR (dB)' if c == 2 else 'YUV PSNR (dB)'
+    if pcqm is True:
+        distortion_key = y_label = 'PCQM'
+    if graphsim is True:
+        distortion_key = y_label = 'GraphSIM'
     output_dir = osp.join(output_dir, f'sample-wise {y_label}')
     if osp.exists(output_dir):
         shutil.rmtree(output_dir)
@@ -72,13 +80,20 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type], method_t
 
     sample_names = next(iter(method_to_json.values())).keys()
     for sample_name in sample_names:
-        fig = plt.figure(figsize=(4.5, 3.5)).add_subplot(111)
-        fig.yaxis.set_major_locator(MultipleLocator(2))
-        fig.grid()
-        fig.tick_params(pad=0.5)
-        fig.set_xlabel('bpp (bits per input point)', labelpad=-1)
-        fig.set_ylabel(y_label, labelpad=0)
-        fig.set_title(osp.splitext(osp.split(sample_name)[1])[0])
+        fig = plt.figure(figsize=(4.5, 3.5))
+        ax = fig.add_subplot(111)
+        if not pcqm and not graphsim:
+            ax.yaxis.set_major_locator(MultipleLocator(2))
+        elif graphsim:
+            ax.yaxis.set_major_locator(MultipleLocator(0.05))
+        elif pcqm:
+            ax.yaxis.set_major_locator(MultipleLocator(0.005))
+            fig.subplots_adjust(left=0.15)
+        ax.grid()
+        ax.tick_params(pad=0.5)
+        ax.set_xlabel('bpp (bits per input point)', labelpad=-1)
+        ax.set_ylabel(y_label, labelpad=0)
+        ax.set_title(osp.splitext(osp.split(sample_name)[1])[0])
         for method_name, method_json in method_to_json.items():
             plt_config = method_to_plt_cfg[method_name]
             if sample_name not in method_json: continue
@@ -93,14 +108,23 @@ def plot_bpp_psnr(method_to_json: Dict[str, all_file_metric_dict_type], method_t
                 tmp_x_axis, tmp_y_axis = hook(tmp_x_axis, tmp_y_axis, method_name)
             if len(tmp_x_axis) and len(tmp_y_axis):
                 if isinstance(plt_config, str):
-                    fig.plot(tmp_x_axis, tmp_y_axis, plt_config, label=method_name)
+                    ax.plot(tmp_x_axis, tmp_y_axis, plt_config, label=method_name)
                 else:
-                    fig.plot(tmp_x_axis, tmp_y_axis, **plt_config, label=method_name)
-        fig.legend(loc='lower right')
-        fig.figure.savefig(osp.join(
+                    ax.plot(tmp_x_axis, tmp_y_axis, **plt_config, label=method_name)
+        if tight_legend:
+            legend_args = dict(
+                fontsize=10, labelspacing=0.1, borderpad=0.2,
+                handlelength=1.3, handletextpad=0.2, borderaxespad=0.1)
+        else:
+            legend_args = {}
+        if not pcqm:
+            ax.legend(loc='lower right', **legend_args)
+        else:
+            ax.legend(loc='upper right', **legend_args)
+        ax.figure.savefig(osp.join(
             output_dir, f'{y_label} {osp.splitext(osp.split(sample_name)[1])[0]}.pdf'
         ))
-        plt.close(fig.figure)
+        plt.close(ax.figure)
     print(f'Plot "{y_label}" Done')
 
 
@@ -109,6 +133,7 @@ def list_mean(ls: List):
 
 
 def remove_non_overlapping_points(method_name, sample_name, sorted_indices):
+    # Change the numbers below as needed.
     if method_name == 'G-PCC octree':
         slice_val = (1, -1)
     elif method_name == 'ADLPCC':
@@ -119,23 +144,45 @@ def remove_non_overlapping_points(method_name, sample_name, sorted_indices):
         slice_val = (1, -1)
     elif method_name == 'G-PCC octree-predlift':
         slice_val = (1, -1)
+    elif method_name == 'Ours geo + G-PCC predlift':
+        slice_val = (None, -1)
+    elif method_name == 'Ours geo + G-PCC raht':
+        slice_val = (None, -1)
+    elif method_name == 'PCGCv2 + G-PCC predlift':
+        slice_val = (None, -1)
+    elif method_name == 'PCGCv2 + G-PCC raht':
+        slice_val = (None, -1)
     else:
         slice_val = (None, None)
     return sorted_indices[slice_val[0]: slice_val[1]]
 
 
 def compute_multiple_bdrate():
+    # Change the flags and paths below as needed.
     anchor_name = 'Ours'
     anchor_secondly = True
-    plot_rd = True
+    if_plot_rd = True
+    tight_legend = False
     method_configs = {
         'Ours': ('convolutional/lossy_coord_v2/baseline_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Ours w/o geometry residual':
         #     ('convolutional/lossy_coord_v2/gpcc_based_r*', {'color': '#ff7f0e', 'marker': '.'}),
         # 'Ours w/o feature residual':
         #     ('convolutional/lossy_coord_v2/wo_residual_r*', {'color': '#2ca02c', 'marker': '.'}),
-        # 'Ours part6e5': ('convolutional/lossy_coord_v2/part6e5_r*', {'color': '#d62728', 'marker': '.'}),
+        # 'Ours w/ expanded channels':
+        #     ('convolutional/lossy_coord_v2/expanded_r*', {'color': '#d62728', 'marker': '.'}),
+        # 'Ours w/o entropy restriction':
+        #     ('convolutional/lossy_coord_v2/wo_bpp_r*', {'color': '#8c564b', 'marker': '.'}),
+        # 'Ours part6e5': ('convolutional/lossy_coord_v2/part6e5_r*', {'color': '#9467bd', 'marker': '.'}),
         # 'Ours joint': ('convolutional/lossy_coord_lossy_color/baseline_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Ours geo + G-PCC predlift': ('convolutional/lossy_coord_v2_predlift/baseline_r*',
+        #                               {'color': '#ff7f0e', 'marker': '.'}),
+        # 'Ours geo + G-PCC raht': ('convolutional/lossy_coord_v2_raht/baseline_r*',
+        #                           {'color': '#d62728', 'marker': '.'}),
+        # 'PCGCv2 + G-PCC predlift': ('convolutional/lossy_coord_predlift/baseline/*',
+        #                             {'color': '#2ca02c', 'marker': '.'}),
+        # 'PCGCv2 + G-PCC raht': ('convolutional/lossy_coord_raht/baseline/*',
+        #                         {'color': '#9467bd', 'marker': '.'}),
         # 'Ours': ('convolutional/lossy_coord_v2/baseline_kitti_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Ours': ('convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*', {'color': '#1f77b4', 'marker': '.'}),
 
@@ -144,12 +191,17 @@ def compute_multiple_bdrate():
         'PCGCv2': ('convolutional/lossy_coord/baseline/*', {'color': '#2ca02c', 'marker': '.'}),
         'V-PCC': ('tmc2_geo', {'color': '#d62728', 'marker': '.'}),
         'ADLPCC': ('ADLPCC', {'color': '#9467bd', 'marker': '.'}),
-        # 'OctAttention': ('OctAttention-lidar', {'color': '#bcbd22', 'marker': '.'}),
         'G-PCC octree': ('tmc3_geo/octree', {'color': '#8c564b', 'marker': '.'}),
-        # 'G-PCC octree-raht': ('tmc3/octree-raht', {'color': '#ff7f0e', 'marker': '.'}),
-        # 'G-PCC octree-predlift': ('tmc3/octree-predlift', {'color': '#2ca02c', 'marker': '.'}),
-        # 'pcc-geo-color': ('pcc-geo-color', {'color': '#d62728', 'marker': '.'}),
+        # 'OctAttention': ('OctAttention-lidar', {'color': '#e377c2', 'marker': '.'}),
+        # 'EHEM': ('EHEM', {'color': '#bcbd22', 'marker': '.'}),
+        # 'Light EHEM': ('Light-EHEM', {'color': '#17becf', 'marker': '.'}),
+        # 'pcc-geo-color': ('pcc-geo-color', {'color': '#8c564b', 'marker': '.'}),
+        # 'G-PCC octree-predlift': ('tmc3/octree-predlift', {'color': '#bcbd22', 'marker': '.'}),
+        # 'G-PCC octree-raht': ('tmc3/octree-raht', {'color': '#17becf', 'marker': '.'}),
     }
+
+    # Change the flags and paths above as needed.
+    # Code below should not be frequently changed.
     output_dir = 'runs/comparisons'
     rel_json_path_pattern = osp.join(test_dir, '{}', metric_dict_filename)
 
@@ -202,6 +254,10 @@ def compute_multiple_bdrate():
     sample_wise_bdpsnr_v: metric_dict_t = {}
     sample_wise_bdrate_yuv: metric_dict_t = {}
     sample_wise_bdpsnr_yuv: metric_dict_t = {}
+    sample_wise_bdrate_pcqm: metric_dict_t = {}
+    sample_wise_bdrate_graphsim: metric_dict_t = {}
+    sample_wise_bd_pcqm: metric_dict_t = {}
+    sample_wise_bd_graphsim: metric_dict_t = {}
     sample_wise_time_complexity: metric_dict_t = {}
     sample_wise_mem_complexity: metric_dict_t = {}
 
@@ -250,6 +306,14 @@ def compute_multiple_bdrate():
                 sample_wise_bdrate_yuv, compute_bd(*comparison_tuple, sample_names, c=3))
             concat_values_for_dict(
                 sample_wise_bdpsnr_yuv, compute_bd(*comparison_tuple, sample_names, rate=False, c=3))
+            concat_values_for_dict(
+                sample_wise_bdrate_pcqm, compute_bd(*comparison_tuple, sample_names, rate=True, pcqm=True))
+            concat_values_for_dict(
+                sample_wise_bdrate_graphsim, compute_bd(*comparison_tuple, sample_names, rate=True, graphsim=True))
+            concat_values_for_dict(
+                sample_wise_bd_pcqm, compute_bd(*comparison_tuple, sample_names, rate=False, pcqm=True))
+            concat_values_for_dict(
+                sample_wise_bd_graphsim, compute_bd(*comparison_tuple, sample_names, rate=False, graphsim=True))
 
     write_metric_to_csv(
         (list(method_to_json.keys()), ('Enc', 'Dec')),
@@ -263,7 +327,8 @@ def compute_multiple_bdrate():
     for sample_name in sample_wise_bdrate_d1:
         sample_wise_bd_metric[sample_name] = []
         for (bdrate_d1, bdrate_d2, bdpsnr_d1, bdpsnr_d2, bdrate_y, bdpsnr_y,
-             bdrate_u, bdpsnr_u, bdrate_v, bdpsnr_v, bdrate_yuv, bdpsnr_yuv) in zip(
+             bdrate_u, bdpsnr_u, bdrate_v, bdpsnr_v, bdrate_yuv, bdpsnr_yuv,
+             bdrate_pcqm, bdrate_graphsim, bd_pcqm, bd_graphsim) in zip(
             sample_wise_bdrate_d1[sample_name],
             sample_wise_bdrate_d2[sample_name],
             sample_wise_bdpsnr_d1[sample_name],
@@ -276,10 +341,14 @@ def compute_multiple_bdrate():
             sample_wise_bdpsnr_v[sample_name],
             sample_wise_bdrate_yuv[sample_name],
             sample_wise_bdpsnr_yuv[sample_name],
+            sample_wise_bdrate_pcqm[sample_name],
+            sample_wise_bdrate_graphsim[sample_name],
+            sample_wise_bd_pcqm[sample_name],
+            sample_wise_bd_graphsim[sample_name]
         ):
             sample_wise_bd_metric[sample_name].extend(
-                [bdrate_d1, bdrate_d2, bdrate_y, bdrate_u, bdrate_v, bdrate_yuv,
-                 bdpsnr_d1, bdpsnr_d2, bdpsnr_y, bdpsnr_u, bdpsnr_v, bdpsnr_yuv]
+                [bdrate_d1, bdrate_d2, bdrate_y, bdrate_u, bdrate_v, bdrate_yuv, bdrate_pcqm, bdrate_graphsim,
+                 bdpsnr_d1, bdpsnr_d2, bdpsnr_y, bdpsnr_u, bdpsnr_v, bdpsnr_yuv, bd_pcqm, bd_graphsim]
             )
     bd_filename = f'{anchor_name.replace("*", "^")}'
     if anchor_secondly:
@@ -288,17 +357,20 @@ def compute_multiple_bdrate():
         bd_filename += ' bd gains'
     bd_filename += '.csv'
     write_metric_to_csv(
-        (method_names_to_compare, ('BD-Rate (%)', 'BD-PSNR (dB)'), ('D1', 'D2', 'Y', 'U', 'V', 'YUV')),
+        (method_names_to_compare, ('BD-Rate (%)', 'BD-PSNR (dB)'),
+         ('D1', 'D2', 'Y', 'U', 'V', 'YUV', 'PCQM', 'GraphSIM')),
         sample_wise_bd_metric, osp.join(output_dir, bd_filename)
     )
 
-    if plot_rd:
-        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir)
-        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir, d1=False)
-        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir, c=0)
-        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir, c=1)
-        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir, c=2)
-        plot_bpp_psnr(method_to_json, method_to_plt_cfg, output_dir, c=3)
+    if if_plot_rd:
+        plot_rd(method_to_json, method_to_plt_cfg, output_dir, tight_legend=tight_legend)
+        plot_rd(method_to_json, method_to_plt_cfg, output_dir, d1=False, tight_legend=tight_legend)
+        plot_rd(method_to_json, method_to_plt_cfg, output_dir, c=0, tight_legend=tight_legend)
+        plot_rd(method_to_json, method_to_plt_cfg, output_dir, c=1, tight_legend=tight_legend)
+        plot_rd(method_to_json, method_to_plt_cfg, output_dir, c=2, tight_legend=tight_legend)
+        plot_rd(method_to_json, method_to_plt_cfg, output_dir, c=3, tight_legend=tight_legend)
+        plot_rd(method_to_json, method_to_plt_cfg, output_dir, pcqm=True, tight_legend=tight_legend)
+        plot_rd(method_to_json, method_to_plt_cfg, output_dir, graphsim=True, tight_legend=tight_legend)
     print('All Done')
 
 
