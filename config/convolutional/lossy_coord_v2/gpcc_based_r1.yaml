@@ -1,6 +1,6 @@
 # include "config/convolutional/lossy_coord_v2/baseline_r1.yaml"
 
-model_path: models.convolutional.gpcc_lossy_coord_v2
+model_module_path: models.convolutional.gpcc_lossy_coord_v2
 model:
   activation: 'prelu'
   compressed_channels: [1]
@@ -15,7 +15,7 @@ model:
   warmup_fea_loss_factor: 0.01
 
 test:
-  dataset_path:
+  dataset_module_path:
     'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_Solid_MVUB'
   dataset:
     kd_tree_partition_max_points_num: 0

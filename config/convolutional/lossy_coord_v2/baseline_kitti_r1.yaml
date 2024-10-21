@@ -16,13 +16,13 @@ train:
   lr_step_size: 10
   ckpt_frequency: 5
   test_frequency: 0
-  dataset_path: 'lib.datasets.KITTIOdometry'
+  dataset_module_path: 'lib.datasets.KITTIOdometry'
   dataset:
     random_flip: True
     resolution: 65535
 
 
 test:
-  dataset_path: 'lib.datasets.KITTIOdometry'
+  dataset_module_path: 'lib.datasets.KITTIOdometry'
   dataset:
     resolution: 65535

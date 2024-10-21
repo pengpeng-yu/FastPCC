@@ -99,9 +99,9 @@ Contains configurations tailored to the specific model you're using.
 #### Specify dataset and model:
 To specify the model or dataset, set the following keys in [`lib/config.py`](lib/config.py).
 These modules will be automatically imported and instantiated according to the paths specified.
-- `model_path`: Path to a Python module containing a `Model` class and a `Config` class for that model class.
-- `train.dataset_path`: Path to a Python module containing a `Dataset` class and a `Config` class for the training dataset.
-- `test.dataset_path`: Path to a Python module containing a `Dataset` class and a `Config` class for the test dataset.
+- `model_module_path`: Path to a Python module containing a `Model` class and a `Config` class for that model class.
+- `train.dataset_module_path`: Path to a Python module containing a `Dataset` class and a `Config` class for the training dataset.
+- `test.dataset_module_path`: Path to a Python module containing a `Dataset` class and a `Config` class for the test dataset.
 
 #### Configurations via YAML or Command Line:
 You don’t need to modify default values in `*.py` files. 

@@ -38,11 +38,11 @@ def main():
 
 
 def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
-    if cfg.test.dataset_path == '':
-        cfg.test.dataset_path = cfg.train.dataset_path
+    if cfg.test.dataset_module_path == '':
+        cfg.test.dataset_module_path = cfg.train.dataset_module_path
         cfg.test.dataset = deepcopy(cfg.train.dataset)
     try:
-        Dataset = importlib.import_module(cfg.test.dataset_path).Dataset
+        Dataset = importlib.import_module(cfg.test.dataset_module_path).Dataset
     except Exception as e:
         raise ImportError(*e.args)
 
@@ -77,7 +77,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         device = next(model.parameters()).device
     else:
         try:
-            Model = importlib.import_module(cfg.model_path).Model
+            Model = importlib.import_module(cfg.model_module_path).Model
         except Exception as e:
             raise ImportError(*e.args)
         model = Model(cfg.model)

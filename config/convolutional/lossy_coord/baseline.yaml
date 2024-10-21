@@ -1,4 +1,4 @@
-model_path: models.convolutional.lossy_coord
+model_module_path: models.convolutional.lossy_coord
 model:
   basic_block_type: 'InceptionResBlock'
   basic_block_num: 3
@@ -37,7 +37,7 @@ train:
   ckpt_frequency: 4
   test_frequency: 4
 
-  dataset_path: 'lib.datasets.ShapeNetCorev2'
+  dataset_module_path: 'lib.datasets.ShapeNetCorev2'
   dataset:
     train_filelist_path: 'train_list_obj.txt'
     train_divisions: 'train'
@@ -54,7 +54,7 @@ test:
   num_workers: 4
   log_frequency: 1
   save_results: True
-  dataset_path:
+  dataset_module_path:
     'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_DenseVox14_Solid_MVUB'
   dataset:
     kd_tree_partition_max_points_num: [4000000, 0, 0, 0, 0]

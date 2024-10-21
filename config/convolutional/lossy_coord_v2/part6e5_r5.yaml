@@ -1,7 +1,7 @@
 # include "config/convolutional/lossy_coord_v2/baseline_r5.yaml"
 
 test:
-  dataset_path:
+  dataset_module_path:
     'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_Solid_MVUB'
   dataset:
     kd_tree_partition_max_points_num: 600000

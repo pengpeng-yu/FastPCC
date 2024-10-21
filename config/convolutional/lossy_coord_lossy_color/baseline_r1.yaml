@@ -1,4 +1,4 @@
-model_path: models.convolutional.lossy_coord_lossy_color
+model_module_path: models.convolutional.lossy_coord_lossy_color
 model:
   activation: 'prelu'
   compressed_channels: [1]
@@ -41,7 +41,7 @@ train:
   ckpt_frequency: 10
   test_frequency: 0
 
-  dataset_path: 'lib.datasets.PlyVoxel.Base'
+  dataset_module_path: 'lib.datasets.PlyVoxel.Base'
   dataset:
     root: ['datasets/8iVFBv2', 'datasets/Owlii']
     filelist_path: ['list_longdress_solider.txt', 'list_exercise_model.txt']
@@ -58,7 +58,7 @@ test:
   num_workers: 4
   log_frequency: 1
   save_results: True
-  dataset_path: 'lib.datasets.PlyVoxel.Base'
+  dataset_module_path: 'lib.datasets.PlyVoxel.Base'
   dataset:
     root: ['datasets/8iVFBv2', 'datasets/Owlii']
     filelist_path: ['list_loot_redandblack.txt', 'list_basketball_player_dancer.txt']

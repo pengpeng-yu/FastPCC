@@ -1,4 +1,4 @@
-model_path: models.convolutional.lossy_coord_v2
+model_module_path: models.convolutional.lossy_coord_v2
 model:
   activation: 'prelu'
   compressed_channels: [1]
@@ -35,7 +35,7 @@ train:
   ckpt_frequency: 5
   test_frequency: 0
 
-  dataset_path: 'lib.datasets.ShapeNetCorev2'
+  dataset_module_path: 'lib.datasets.ShapeNetCorev2'
   dataset:
     train_filelist_path: 'all_list_obj.txt'
     train_divisions: 'all'
@@ -52,7 +52,7 @@ test:
   num_workers: 4
   log_frequency: 1
   save_results: True
-  dataset_path:
+  dataset_module_path:
     'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_DenseVox14_Solid_MVUB'
   dataset:
     kd_tree_partition_max_points_num: [4000000, 0, 0, 0, 0]

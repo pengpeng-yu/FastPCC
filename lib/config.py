@@ -12,7 +12,7 @@ class TrainConfig(SimpleConfig):
     rundir_name: str = 'train_<autoindex>'
     device: Union[int, str] = '0'  # 0 or 0,1,2 or cpu
     more_reproducible: bool = False
-    amp: bool = True
+    amp: bool = False
     find_unused_parameters: bool = False
     batch_size: int = 2
     shuffle: bool = True
@@ -39,7 +39,6 @@ class TrainConfig(SimpleConfig):
 
     from_ckpt: str = ''
     resume_items: Tuple[str, ...] = ('state_dict',)
-    resume_tensorboard: bool = False
 
     tensorboard_port: int = 6006
     log_frequency: int = 10  # (steps) used for both logging and tensorboard
@@ -47,11 +46,11 @@ class TrainConfig(SimpleConfig):
     test_frequency: int = 0  # (epochs) 0 means no test in training phase
     cuda_empty_cache_frequency: int = 0  # (steps)
 
-    dataset_path: str = ''  # dataset_path.Dataset and dataset_path.Config are required
+    dataset_module_path: str = ''  # Classes dataset_module_path.Dataset and dataset_module_path.Config are required
     dataset: SimpleConfig = None
 
     def __post_init__(self):
-        if self.dataset_path != '':
+        if self.dataset_module_path != '':
             self.local_auto_import()
 
     def merge_setattr(self, key, value):
@@ -64,8 +63,6 @@ class TrainConfig(SimpleConfig):
         all_resume_items = ('state_dict', 'optimizer_state_dict', 'scheduler_state_dict')
         for item in self.resume_items:
             assert item in all_resume_items
-        if self.resume_tensorboard:
-            assert self.from_ckpt != ''
         assert self.ckpt_frequency > 0
         if isinstance(self.optimizer, str):
             self.optimizer = (self.optimizer,)
@@ -81,8 +78,7 @@ class TrainConfig(SimpleConfig):
                     'lr_pct_start',
                     'lr_init_div_factor',
                     'lr_final_div_factor']:
-            if isinstance(getattr(self, key), tuple) or \
-                    isinstance(getattr(self, key), list):
+            if isinstance(getattr(self, key), tuple) or isinstance(getattr(self, key), list):
                 assert len(getattr(self, key)) == len(self.optimizer), \
                     f'length of cfg.{key} is not consistent with length of cfg.optimizer\n' \
                     f'cfg.{key}: {getattr(self, key)}\n' \
@@ -100,31 +96,24 @@ class TestConfig(SimpleConfig):
     pin_memory: bool = False
     from_ckpt: str = ''
     log_frequency: int = 50  # (steps) used for logging
-    save_results: bool = False  # save outputs of model in runs/rundir_name/results
+    save_results: bool = False  # save the outputs of the model in runs/rundir_name/results
 
-    # you can keep this empty to use the same dataloader class as the one in training
-    # this feature is defined in test.py
-    dataset_path: str = ''
+    # You can keep this empty to use the same dataset module as the one in training
+    dataset_module_path: str = ''
     dataset: SimpleConfig = None
 
     def __post_init__(self):
-        if self.dataset_path != '':
+        if self.dataset_module_path != '':
             self.local_auto_import()
 
 
 @dataclass
 class Config(SimpleConfig):
-    model_path: str = ''  # model_path.Config and model_path.Model are required
+    model_module_path: str = ''  # Classes model_module_path.Config and model_module_path.Model are required
     model: SimpleConfig = None
     train: TrainConfig = field(default_factory=TrainConfig)
     test: TestConfig = field(default_factory=TestConfig)
 
     def __post_init__(self):
-        if self.model_path != '':
+        if self.model_module_path != '':
             self.local_auto_import()
-
-    def check_local_value(self):
-        if hasattr(self.model, 'input_points_num') and hasattr(self.train.dataset, 'input_points_num'):
-            assert self.model.input_points_num == self.train.dataset.input_points_num
-            if hasattr(self.test.dataset, 'input_points_num'):
-                assert self.model.input_points_num == self.test.dataset.input_points_num

@@ -68,48 +68,43 @@ def main():
         # Tensorboard
         tb_logdir = run_dir / 'tb_logdir'
         make_new_dirs(tb_logdir, logger)
-        if cfg.train.resume_tensorboard:
-            try:
-                last_tb_dir = pathlib.Path(cfg.train.from_ckpt).parent.parent / 'tb_logdir'
-                for log_file in os.listdir(last_tb_dir):
-                    shutil.copy(last_tb_dir / log_file, tb_logdir)
-            except Exception as e:
-                e.args = (*e.args, 'Error when copying tensorboard log')
-                raise e
-            else:
-                logger.info(f'resumed tensorboard log file(s) in {last_tb_dir}')
         tb_writer = SummaryWriter(str(tb_logdir))
-        try:
-            tb_port = cfg.train.tensorboard_port
-            while True:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    port_available = s.connect_ex(('localhost', tb_port)) != 0
-                if port_available: break
-                tb_port += 1
-            tb_proc = subprocess.Popen(
-                [osp.join(osp.split(sys.executable)[0], 'tensorboard'),
-                 f'--port={tb_port}', '--logdir', str(tb_logdir)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                encoding='utf-8'
-            )
-            for _ in range(50):
-                stdout_line = tb_proc.stdout.readline()
-                logger.info(stdout_line)
-                if stdout_line.startswith('TensorBoard '):
-                    logger.info(stdout_line.rsplit('(', 1)[0])
-                    break
-            else:
-                raise Exception
-            tb_proc.stdout.close()
-
-            def handle_sigterm(signal, frame):
-                tb_proc.terminate()
-                sys.exit(0)
-            signal.signal(signal.SIGTERM, handle_sigterm)
-        except Exception as e:
-            logger.warning(f'fail to launch Tensorboard')
+        tb_port = cfg.train.tensorboard_port
+        if tb_port == -1:
+            logger.warning(f'disable launching Tensorboard due to train.tensorboard_port=-1\n'
+                           f'set a valid value, e.g., train.tensorboard_port=6006, to enable it.')
             tb_proc = None
+        else:
+            try:
+                while True:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        port_available = s.connect_ex(('localhost', tb_port)) != 0
+                    if port_available: break
+                    tb_port += 1
+                tb_proc = subprocess.Popen(
+                    [osp.join(osp.split(sys.executable)[0], 'tensorboard'),
+                     f'--port={tb_port}', '--logdir', str(tb_logdir)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    encoding='utf-8'
+                )
+                for _ in range(50):
+                    stdout_line = tb_proc.stdout.readline()
+                    logger.info(stdout_line)
+                    if stdout_line.startswith('TensorBoard '):
+                        logger.info(stdout_line.rsplit('(', 1)[0])
+                        break
+                else:
+                    raise Exception
+                tb_proc.stdout.close()
+
+                def handle_sigterm(signal, frame):
+                    tb_proc.terminate()
+                    sys.exit(0)
+                signal.signal(signal.SIGTERM, handle_sigterm)
+            except Exception as e:
+                logger.warning(f'failed to launch Tensorboard')
+                tb_proc = None
 
         try:
             train(cfg, local_rank, logger, tb_writer, run_dir, ckpts_dir)
@@ -155,7 +150,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
     # Initialize model
     try:
-        Model = importlib.import_module(cfg.model_path).Model
+        Model = importlib.import_module(cfg.model_module_path).Model
     except Exception as e:
         raise ImportError(*e.args)
     model = Model(cfg.model)
@@ -180,12 +175,12 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         logger.info('using DataParallel')
     elif cuda_ids[0] != -1 and global_rank != -1:
         logger.info('using DistributedDataParallel')
-        # Old versions of pytorch infer params and buffers from state dict in DDP module,
-        # which may causes error of broadcasting if a model has non tensor states.
+        # Old versions of pytorch infer params and buffers from state_dict in DDP module,
+        # which may cause errors of broadcasting if a model has non-tensor states.
         # (lib.entropy_models.continuous_base.DistributionQuantizedCDFTable._extra_state, in my case.)
         # Explicit named_params and named_buffers are used since this pull,
         # https://github.com/pytorch/pytorch/pull/65181.
-        # For backward compatibility, I ignore all the "_extra_state" as a simple workaround.
+        # For backward compatibility, I ignore all "_extra_state", as a simple workaround.
         dpp_params_and_buffers_to_ignore = []
         for state_name in model.state_dict():
             if state_name.endswith(MODULE_EXTRA_STATE_KEY_SUFFIX):
@@ -199,7 +194,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
     # Initialize dataset
     try:
-        Dataset = importlib.import_module(cfg.train.dataset_path).Dataset
+        Dataset = importlib.import_module(cfg.train.dataset_module_path).Dataset
     except Exception as e:
         raise ImportError(*e.args)
 

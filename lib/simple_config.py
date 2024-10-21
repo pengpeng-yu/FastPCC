@@ -109,8 +109,8 @@ class SimpleConfig:
             keys = [keys]
 
         for key in keys:
-            if isinstance(key, str) and key.endswith('_path'):
-                target_key = key[:-len('_path')]
+            if isinstance(key, str) and key.endswith('_module_path'):
+                target_key = key[:-len('_module_path')]
                 if target_key in self.__dict__:
                     assert issubclass(self.get_anno_by_key(target_key), SimpleConfig)
                     try:
