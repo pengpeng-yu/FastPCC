@@ -1,14 +1,10 @@
 import json
 from collections import defaultdict
-from typing import List, Union, Dict
+from typing import Union, Dict
 import os
 import os.path as osp
 import multiprocessing as mp
 
-try:
-    import cv2
-except ImportError: cv2 = None
-import numpy as np
 import torch
 
 from lib.data_utils import write_ply_file
@@ -138,56 +134,5 @@ class PCCEvaluator(Evaluator):
         self.reset()
         self.mpeg_pc_error_pool.close()
         self.mpeg_pc_error_pool.join()
-        self.working = False
-        return mean_dict
-
-
-class ImageCompressionEvaluator(Evaluator):
-    def __init__(self):
-        super(ImageCompressionEvaluator, self).__init__()
-        self.working = False
-
-    def reset(self):
-        self.file_path_to_info = {}
-
-    def log(self, im_recon, im, compressed_bytes, file_path, results_dir):
-        if not self.working:
-            self.reset()
-            self.working = True
-
-        im = im.cpu().numpy()
-        im_recon = im_recon.cpu().numpy()
-        psnr = (np.log10(255 / np.linalg.norm(im.astype(np.double, copy=False) - im_recon)  # TODO: valid range
-                         * np.sqrt(im.size)) * 20).item()
-        pixels_num = im_recon.shape[1] * im_recon.shape[2]
-
-        if results_dir is not None:
-            out_file_path = osp.join(results_dir, file_path)
-            os.makedirs(osp.dirname(out_file_path), exist_ok=True)
-            cv2.imwrite(out_file_path, im_recon.astype(np.uint8).transpose(1, 2, 0))
-        self.file_path_to_info[file_path] = \
-            {
-                'psnr': psnr,
-                'bpp': len(compressed_bytes) * 8 / pixels_num
-            }
-        return True
-
-    def show(self, results_dir: str) -> Dict[str, Union[int, float]]:
-        if results_dir is not None:
-            with open(osp.join(results_dir, '..', 'metric_dict.json'), 'w') as f:
-                f.write(json.dumps(self.file_path_to_info, indent=2, sort_keys=False))
-
-        mean_dict = defaultdict(float)
-        for _, info in self.file_path_to_info.items():
-            for key, value in info.items():
-                mean_dict[key + '(mean)'] += value
-        samples_num = len(self.file_path_to_info)
-        for key in mean_dict:
-            mean_dict[key] /= samples_num
-        if results_dir is not None:
-            with open(osp.join(results_dir, '..', 'mean_metric.json'), 'w') as f:
-                f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
-
-        self.reset()
         self.working = False
         return mean_dict

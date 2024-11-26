@@ -14,10 +14,6 @@ class DatasetConfig(SimpleConfig):
     test_divisions: Union[str, Tuple[str, ...]] = 'test'
     generate_cache: bool = True
 
-    # '.obj' or '.solid.binvox' or '.surface.binvox' or ['.solid.binvox', '.surface.binvox']
-    data_format: Union[str, Tuple[str, ...]] = '.obj'
-
-    # For '.obj' files.
     mesh_sample_points_num: int = 2500000
     mesh_sample_point_method: str = 'uniform'
     mesh_sample_point_resolution: int = 256

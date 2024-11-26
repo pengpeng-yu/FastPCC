@@ -28,19 +28,16 @@ def main():
         f.write(cfg.to_yaml())
     from loguru import logger
     logger.remove()
-    loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> | ' \
-                    '<level>{level: <8}</level> | ' \
-                    '<cyan>{name}</cyan>:<cyan>{line}</cyan>  ' \
-                    '<level>{message}</level>'
+    loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green>' \
+                    ' <level>{level: <4}</level>' \
+                    ' <cyan>{name}</cyan>:<cyan>{line}</cyan>' \
+                    ' <level>{message}</level>'
     logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
     logger.add(run_dir / 'log.txt', format=loguru_format, level=0, mode='w')
     print(test(cfg, logger, run_dir))
 
 
 def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
-    if cfg.test.dataset_module_path == '':
-        cfg.test.dataset_module_path = cfg.train.dataset_module_path
-        cfg.test.dataset = deepcopy(cfg.train.dataset)
     try:
         Dataset = importlib.import_module(cfg.test.dataset_module_path).Dataset
     except Exception as e:

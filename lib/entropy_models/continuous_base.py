@@ -6,7 +6,6 @@ import torch.nn as nn
 import torch.distributions
 from torch.distributions import Distribution
 
-from .utils import quantization_offset
 from .rans_coder import IndexedRansCoder
 
 
@@ -87,13 +86,11 @@ class DistributionQuantizedCDFTable(nn.Module):
 
     @torch.no_grad()
     def build_quantized_cdf_table(self):
-        offset = quantization_offset(self.base)
-
-        minima = (self.lower_bound - offset) * self.bottleneck_scaler
-        maxima = (self.upper_bound.max() - offset) * self.bottleneck_scaler
+        minima = self.lower_bound * self.bottleneck_scaler
+        maxima = self.upper_bound.max() * self.bottleneck_scaler
         if torch.is_floating_point(minima):
             minima = torch.floor(minima).to(torch.int32)
-        pmf_start = minima + offset
+        pmf_start = minima
         max_length = maxima.to(torch.int32).item() - minima.max().item() + 1
 
         samples = torch.arange(max_length, device=pmf_start.device, dtype=torch.float)
@@ -196,8 +193,7 @@ class ContinuousEntropyModelBase(nn.Module):
         return x
 
     @torch.no_grad()
-    def quantize(self, x: torch.Tensor, offset=None) -> Tuple[torch.Tensor, torch.Tensor]:
-        if offset is None: offset = quantization_offset(self.prior.base)
+    def quantize(self, x: torch.Tensor, offset=0) -> Tuple[torch.Tensor, torch.Tensor]:
         x -= offset
         torch.round_(x)
         quantized_x = x.to(torch.int32)
@@ -205,8 +201,7 @@ class ContinuousEntropyModelBase(nn.Module):
         return quantized_x, x
 
     @torch.no_grad()
-    def dequantize(self, x: torch.Tensor, offset=None) -> torch.Tensor:
-        if offset is None: offset = quantization_offset(self.prior.base)
+    def dequantize(self, x: torch.Tensor, offset=0) -> torch.Tensor:
         if isinstance(offset, torch.Tensor) and x.device != offset.device:
             x = x.to(offset.device)
         x += offset

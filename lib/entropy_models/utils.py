@@ -2,7 +2,6 @@ from typing import Union
 
 import torch
 import torch.autograd
-from torch.distributions import Distribution
 
 
 class GradScalerFunction(torch.autograd.Function):
@@ -76,17 +75,3 @@ def upper_bound(x: torch.Tensor, bound: Union[int, float, torch.Tensor],
         return torch.minimum(x, bound)
     else:
         raise NotImplementedError
-
-
-@torch.no_grad()
-def quantization_offset(distribution: Distribution):
-    if isinstance(distribution, torch.distributions.MixtureSameFamily):  # TODO
-        pass
-
-    else:
-        assert isinstance(distribution, Distribution)
-        try:
-            offset = distribution.mean()
-            return offset - torch.round(offset)
-        except NotImplementedError:
-            return 0

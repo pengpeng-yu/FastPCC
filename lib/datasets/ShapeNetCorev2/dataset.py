@@ -8,8 +8,7 @@ from scipy.spatial.transform import Rotation as R
 import torch
 import torch.utils.data
 
-from lib.data_utils import PCData, pc_data_collate_fn, \
-    binvox_rw, kd_tree_partition_randomly
+from lib.data_utils import PCData, pc_data_collate_fn, kd_tree_partition_randomly
 from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
 from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coords
 
@@ -18,17 +17,7 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
     def __init__(self, cfg: DatasetConfig, is_training, logger):
         super(ShapeNetCorev2, self).__init__()
         assert cfg.resolution > 1
-        if cfg.data_format in ['.solid.binvox', '.surface.binvox'] or \
-                cfg.data_format == ['.solid.binvox', '.surface.binvox'] or \
-                cfg.data_format == ['.surface.binvox', '.solid.binvox']:
-            self.use_binvox = True
-        elif cfg.data_format == '.obj':
-            assert cfg.mesh_sample_point_resolution > 1
-            self.use_binvox = False
-        else:
-            raise RuntimeError
         self.is_training = is_training
-        data_format = [cfg.data_format] if isinstance(cfg.data_format, str) else cfg.data_format
 
         # define files list path and cache path
         if is_training:
@@ -49,13 +38,10 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
                     f.readline()
                     for line in f:
                         _, synset_id, _, model_id, split = line.strip().split(',')
-                        file_paths = [
-                            osp.join(synset_id, model_id, 'models', 'model_normalized' + d_format)
-                            for d_format in data_format]
-                        for file_path in file_paths:
-                            if osp.exists(osp.join(cfg.root, file_path)):
-                                if split in official_divisions:
-                                    file_list.append(file_path)
+                        file_path = osp.join(synset_id, model_id, 'models', 'model_normalized.obj')
+                        if osp.exists(osp.join(cfg.root, file_path)):
+                            if split in official_divisions:
+                                file_list.append(file_path)
             else:
                 file_list = (_[len(cfg.root)+1:] for _ in glob(f'{cfg.root}/*/*/*/*.obj'))
             with open(filelist_abs_path, 'w') as f:
@@ -72,29 +58,9 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         with open(filelist_abs_path) as f:
             for line in f:
                 line = line.strip()
-                ext_name = '.' + '.'.join(osp.split(line)[1].rsplit('.', 2)[1:])
-                assert ext_name == cfg.data_format or ext_name in cfg.data_format, \
-                    f'"{line}" in "{filelist_abs_path}" is inconsistent with ' \
-                    f'data format "{cfg.data_format}" in config'
                 self.file_list.append(osp.join(cfg.root, line))
 
-        try:
-            if cfg.data_format == '.surface.binvox':
-                if is_training and len(official_divisions) == 1 \
-                        and official_divisions[0] == ('train',):
-                    assert len(self.file_list) == 35765 - 80 - 1  # 80 have no binvox files
-                elif not is_training and len(official_divisions) == 1 \
-                        and official_divisions[0] == ('test',):
-                    assert len(self.file_list) == 10266 - 13  # 13 have no binvox files
-            elif cfg.data_format == '.solid.binvox':
-                pass
-            elif cfg.data_format == '.obj':
-                pass
-        except AssertionError as e:
-            logger.info('wrong number of files.')
-            raise e
-
-        if cfg.data_format == '.obj' and cfg.generate_cache:
+        if cfg.generate_cache:
             self.cache_root = osp.join(
                 cfg.root, 'cache',
                 hashlib.new(
@@ -139,30 +105,24 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         file_path = self.file_list[index]
-        if self.use_binvox:
-            with open(file_path, 'rb') as f:
-                xyz = binvox_rw.read_as_coord_array(f).data.T.astype(np.float64, copy=False)
-                xyz = np.ascontiguousarray(xyz)
-            resolution = 128
+        if self.use_cache:
+            xyz = np.load(file_path)['xyz'].astype(np.float64, copy=False)
         else:
-            if self.use_cache:
-                xyz = np.load(file_path)['xyz'].astype(np.float64, copy=False)
-            else:
-                xyz = o3d_coords_sampled_from_triangle_mesh(
-                    file_path,
-                    self.cfg.mesh_sample_points_num,
-                    sample_method=self.cfg.mesh_sample_point_method,
-                )
-                normalize_coords(xyz)
-                xyz *= self.cfg.mesh_sample_point_resolution
-                if self.gen_cache:
-                    xyz = xyz.astype(self.cfg.ply_cache_dtype, copy=False)
-                    xyz = np.unique(xyz, axis=0)
-                    cache_file_path = self.cached_file_list[index]
-                    os.makedirs(osp.dirname(cache_file_path), exist_ok=True)
-                    np.savez_compressed(cache_file_path, xyz=xyz)
-                    return
-            resolution = self.cfg.mesh_sample_point_resolution
+            xyz = o3d_coords_sampled_from_triangle_mesh(
+                file_path,
+                self.cfg.mesh_sample_points_num,
+                sample_method=self.cfg.mesh_sample_point_method,
+            )
+            normalize_coords(xyz)
+            xyz *= self.cfg.mesh_sample_point_resolution
+            if self.gen_cache:
+                xyz = xyz.astype(self.cfg.ply_cache_dtype, copy=False)
+                xyz = np.unique(xyz, axis=0)
+                cache_file_path = self.cached_file_list[index]
+                os.makedirs(osp.dirname(cache_file_path), exist_ok=True)
+                np.savez_compressed(cache_file_path, xyz=xyz)
+                return
+        resolution = self.cfg.mesh_sample_point_resolution
 
         if self.cfg.random_rotation:
             xyz = R.random().apply(xyz)
@@ -188,23 +148,3 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
     def collate_fn(self, batch):
         return pc_data_collate_fn(batch, sparse_collate=True)
-
-
-if __name__ == '__main__':
-    config = DatasetConfig()
-
-    from loguru import logger
-    dataset = ShapeNetCorev2(config, True, logger)
-    dataloader = torch.utils.data.DataLoader(dataset, 4, shuffle=False, collate_fn=dataset.collate_fn)
-    dataloader = iter(dataloader)
-    sample: PCData = next(dataloader)
-
-    from lib.vis import plt_draw_xyz, plt_batched_sparse_xyz
-    batched_xyz = sample.xyz
-    if config.resolution == 0:
-        plt_draw_xyz(batched_xyz[0])
-        plt_draw_xyz(batched_xyz[1])
-    else:
-        plt_batched_sparse_xyz(batched_xyz, 0, True)
-        plt_batched_sparse_xyz(batched_xyz, 1, True)
-    print('Done')

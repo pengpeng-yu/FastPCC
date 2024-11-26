@@ -1,6 +1,5 @@
 import os
 import os.path as osp
-import shutil
 import sys
 import importlib
 import time
@@ -13,6 +12,7 @@ import subprocess
 import socket
 import traceback
 import signal
+from contextlib import nullcontext
 
 import numpy as np
 import torch
@@ -51,8 +51,8 @@ def main():
     logger.remove()
 
     if local_rank in (-1, 0):
-        loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green> |' \
-                        ' <level>{level: <8}</level> |' \
+        loguru_format = '<green>{time:YYYY-MM-DD HH:mm:ss}</green>' \
+                        ' <level>{level: <4}</level>' \
                         ' <level>{message}</level>'
         logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
         os.makedirs('runs', exist_ok=True)
@@ -167,12 +167,9 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         logger.info('using a single GPU')
     elif cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) >= 1:
         if len(cuda_ids) > 1:
-            logger.error('These are designs incompatible with DP mode when using '
-                         'more than one cuda devices. Please use DDP.')
+            logger.error('These are designs incompatible with DP mode. Please use DDP.')
             logger.error('terminated')
             raise NotImplementedError
-        model = torch.nn.DataParallel(model.to(device), device_ids=cuda_ids)
-        logger.info('using DataParallel')
     elif cuda_ids[0] != -1 and global_rank != -1:
         logger.info('using DistributedDataParallel')
         # Old versions of pytorch infer params and buffers from state_dict in DDP module,
@@ -281,17 +278,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 step_size=cfg.train.lr_step_size[idx],
                 gamma=cfg.train.lr_step_gamma[idx]
             )
-        elif cfg.train.scheduler[idx] == 'OneCycle':
-            scheduler = torch.optim.lr_scheduler.OneCycleLR(
-                optimizer,
-                max_lr=cfg.train.learning_rate[idx],
-                total_steps=steps_one_epoch * cfg.train.epochs,
-                pct_start=cfg.train.lr_pct_start[idx],
-                div_factor=cfg.train.lr_init_div_factor[idx],
-                base_momentum=cfg.train.momentum[idx] - 0.05,
-                max_momentum=cfg.train.momentum[idx] + 0.05,
-                final_div_factor=cfg.train.lr_final_div_factor[idx]
-            )
         else: raise NotImplementedError
         optimizer_list.append(optimizer)
         scheduler_list.append(scheduler)
@@ -333,8 +319,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     total_steps = cfg.train.epochs * steps_one_epoch
     global_step = steps_one_epoch * start_epoch
     ave_time_onestep = None
-    if cfg.train.amp:
-        scaler = amp.GradScaler()
+    scaler = amp.GradScaler(enabled=cfg.train.amp)
     for epoch in range(start_epoch, cfg.train.epochs):
         if not model.training:
             model.train()
@@ -358,13 +343,11 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 batch_data.to(device=device, non_blocking=True)
             else: raise NotImplementedError
 
-            if cfg.train.amp:
-                with amp.autocast():
+            no_sync = is_parallel(model) and (step_idx + 1) % cfg.train.grad_acc_steps != 0
+            with model.no_sync() if no_sync else nullcontext():
+                with amp.autocast(enabled=cfg.train.amp):
                     loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
                 scaler.scale(loss_dict['loss'] / cfg.train.grad_acc_steps).backward()
-            else:
-                loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
-                (loss_dict['loss'] / cfg.train.grad_acc_steps).backward()
 
             if (step_idx + 1) % cfg.train.grad_acc_steps == 0:
                 for idx, optimizer in enumerate(optimizer_list):
@@ -382,12 +365,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                                 optimizer.param_groups[0]['params'],
                                 cfg.train.max_grad_value[idx]
                             )
-                        if cfg.train.amp:
-                            scaler.step(optimizer)
-                        else:
-                            optimizer.step()
-                if cfg.train.amp:
-                    scaler.update()
+                        scaler.step(optimizer)
+                scaler.update()
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
                         optimizer.zero_grad()
@@ -422,9 +401,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                     tb_writer.add_scalar('Train/Loss/total', loss_dict['loss'].item(), global_step)
 
             global_step += 1
-            for idx, scheduler in enumerate(scheduler_list):
-                if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
-                    scheduler.step()
 
             if cfg.train.cuda_empty_cache_frequency != 0 and \
                     (step_idx + 1) % cfg.train.cuda_empty_cache_frequency == 0:

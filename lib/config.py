@@ -28,14 +28,9 @@ class TrainConfig(SimpleConfig):
     max_grad_value: float_or_seq = 0.0
     grad_acc_steps: int = 1
 
-    scheduler: str_or_seq = 'Step'  # Step or OneCycle
-    # StepLR
+    scheduler: str_or_seq = 'Step'
     lr_step_size: int_or_seq = 25
     lr_step_gamma: float_or_seq = 0.3
-    # OneCycleLR
-    lr_pct_start: float_or_seq = 0.3
-    lr_init_div_factor: float_or_seq = 10.
-    lr_final_div_factor: float_or_seq = 1000.
 
     from_ckpt: str = ''
     resume_items: Tuple[str, ...] = ('state_dict',)
@@ -74,10 +69,7 @@ class TrainConfig(SimpleConfig):
                     'max_grad_value',
                     'scheduler',
                     'lr_step_size',
-                    'lr_step_gamma',
-                    'lr_pct_start',
-                    'lr_init_div_factor',
-                    'lr_final_div_factor']:
+                    'lr_step_gamma']:
             if isinstance(getattr(self, key), tuple) or isinstance(getattr(self, key), list):
                 assert len(getattr(self, key)) == len(self.optimizer), \
                     f'length of cfg.{key} is not consistent with length of cfg.optimizer\n' \
@@ -98,7 +90,6 @@ class TestConfig(SimpleConfig):
     log_frequency: int = 50  # (steps) used for logging
     save_results: bool = False  # save the outputs of the model in runs/rundir_name/results
 
-    # You can keep this empty to use the same dataset module as the one in training
     dataset_module_path: str = ''
     dataset: SimpleConfig = None
 

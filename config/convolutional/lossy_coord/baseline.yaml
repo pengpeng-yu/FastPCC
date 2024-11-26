@@ -41,7 +41,6 @@ train:
   dataset:
     train_filelist_path: 'train_list_obj.txt'
     train_divisions: 'train'
-    data_format: '.obj'
     mesh_sample_points_num: 2500000
     mesh_sample_point_method: 'uniform'
     mesh_sample_point_resolution: 256

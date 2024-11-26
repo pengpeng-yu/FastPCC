@@ -1,4 +1,5 @@
-This project contains an implementation of our ICME 2023 paper "Sparse Representation based Deep Residual Geometry Compression Network for Large-scale Point Clouds" [1] and other improvements.
+This project contains an implementation of our ICME 2023 paper "Sparse Representation based Deep Residual Geometry Compression Network for Large-scale Point Clouds" [1] and other improvements (under review).
+Contact me for any reproduction issue: <yupp5@mail2.sysu.edu.cn>
 
 
 ## Highlights
@@ -138,6 +139,3 @@ If this work is helpful to your research, please consider citing:
   pages={2555-2560}
 }
 ````
-
-## Contact
-me for any reproduction issue. <yupp5@mail2.sysu.edu.cn>

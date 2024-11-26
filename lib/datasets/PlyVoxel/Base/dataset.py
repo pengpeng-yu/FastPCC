@@ -17,7 +17,13 @@ class PlyVoxel(torch.utils.data.Dataset):
         self.is_training = is_training
 
         def get_collections(x, repeat):
-            return x if isinstance(x, tuple) or isinstance(x, list) else (x,) * repeat
+            if isinstance(x, tuple) or isinstance(x, list):
+                assert len(x) == repeat, \
+                    f'Unexpected length ({len(x)}) of a dataset config item,' \
+                    f'which is expected to have a length of {repeat}.'
+                return x
+            else:
+                return (x,) * repeat
 
         roots = (cfg.root,) if isinstance(cfg.root, str) else cfg.root
         filelist_paths = get_collections(cfg.filelist_path, len(roots))

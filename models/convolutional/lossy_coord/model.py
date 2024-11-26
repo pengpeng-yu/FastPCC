@@ -13,7 +13,7 @@ from MinkowskiEngine.MinkowskiSparseTensor import SparseTensorQuantizationMode
 
 from lib.utils import Timer
 from lib.mpeg_gpcc_utils import gpcc_octree_lossless_geom_encode, gpcc_decode
-from lib.torch_utils import MLPBlock, TorchCudaMaxMemoryAllocated
+from lib.torch_utils import TorchCudaMaxMemoryAllocated
 from lib.data_utils import PCData, write_ply_file
 from lib.evaluators import PCCEvaluator
 from lib.entropy_models.continuous_batched import \
@@ -24,7 +24,7 @@ from lib.entropy_models.hyperprior.noisy_deep_factorized.basic import \
 
 from .geo_lossl_em import GeoLosslessNoisyDeepFactorizedEntropyModel
 from .generative_upsample import GenerativeUpsampleMessage
-from .layers import \
+from .layers import MLPBlock, \
     Encoder, Decoder, \
     HyperEncoder, HyperDecoder, \
     HyperDecoderGenUpsample, HyperDecoderUpsample, EncoderRecurrent

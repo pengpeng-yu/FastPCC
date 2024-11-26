@@ -1,4 +1,3 @@
-import os
 import platform
 import math
 from functools import wraps
@@ -7,13 +6,7 @@ from typing import List, Tuple, Union, Dict, Optional, Callable, Any
 import torch
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.distributed
-
-try:
-    import thop  # for FLOPS computation
-except ImportError:
-    thop = None
 
 try:
     import MinkowskiEngine as ME
@@ -63,105 +56,6 @@ def select_device(logger, local_rank, device='', batch_size=None) -> Tuple[torch
 
 def is_parallel(model):
     return type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
-
-
-class MLPBlock(nn.Module):
-    """
-    if version == 'linear':
-        input: (N, L_1, ..., L_n, C_in)
-        output: (N, L_1, ..., L_n, C_out)
-    elif version == 'conv':
-        input: (N, C_in, L_1, ..., L_n,)
-        output: (N, C_out, L_1, ..., L_n)
-    """
-    def __init__(self,
-                 in_channels: int,
-                 out_channels: int,
-                 bn: bool = False,
-                 act: Optional[str] = 'leaky_relu(0.2)',
-                 version: str = 'linear',
-                 skip_connection: Optional[str] = None):
-        super(MLPBlock, self).__init__()
-        assert version in ['linear', 'conv']
-        assert act is None or act.split('(', 1)[0] in ['relu', 'leaky_relu', 'prelu']
-        assert skip_connection in ['sum', 'concat', None]
-
-        self.bn = nn.BatchNorm1d(out_channels) if bn is True else None
-        if version == 'linear':
-            self.mlp = nn.Linear(in_channels, out_channels, bias=self.bn is None)
-        elif version == 'conv':
-            self.mlp = nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=self.bn is None)
-
-        if act is None:
-            self.act = None
-        elif act == 'relu':
-            self.act = nn.ReLU(inplace=True)
-        elif act.startswith('leaky_relu'):
-            self.act = nn.LeakyReLU(
-                negative_slope=float(act.split('(', 1)[1].split(')', 1)[0]),
-                inplace=True)
-        elif act == 'prelu':
-            self.act = nn.PReLU()
-        else: raise NotImplementedError(act)
-
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.version = version
-        self.skip_connection = skip_connection
-
-    def forward(self, x):
-        ori_x = x
-        ori_shape = x.shape
-        if len(ori_shape) < 3:
-            raise NotImplementedError
-
-        if self.version == 'linear':
-            assert ori_shape[-1] == self.mlp.in_features
-            if len(ori_shape) > 3:
-                x = x.contiguous().view(ori_shape[0], -1, ori_shape[-1])
-            x = self.mlp(x)
-            if isinstance(self.bn, nn.BatchNorm1d):
-                x = x.permute(0, 2, 1)
-                x = self.bn(x)
-                x = x.permute(0, 2, 1)
-            if self.act is not None: x = self.act(x)
-            if len(ori_shape) != 3:
-                x = x.view(*ori_shape[:-1], self.out_channels)
-            if self.skip_connection is None:
-                pass
-            elif self.skip_connection == 'sum':
-                x = x + ori_x
-            elif self.skip_connection == 'concat':
-                x = torch.cat([ori_x, x], dim=-1)
-            return x
-
-        elif self.version == 'conv':
-            if len(ori_shape) > 3:
-                x = x.view(ori_shape[0], ori_shape[1], -1)
-            x = self.mlp(x)
-            if self.bn is not None: x = self.bn(x)
-            if self.act is not None: x = self.act(x)
-            if len(ori_shape) != 3:
-                x = x.view(ori_shape[0], self.out_channels, *ori_shape[2:])
-            if self.skip_connection is None:
-                pass
-            elif self.skip_connection == 'sum':
-                x = x + ori_x
-            elif self.skip_connection == 'concat':
-                x = torch.cat([ori_x, x], dim=1)
-            return x
-
-    def __repr__(self):
-        info = f'MLPBlock(in_ch={self.in_channels}, out_ch={self.out_channels}, ' \
-               f'act={repr(self.act).replace("inplace=True", "")}'
-        if self.bn is not None:
-            info += f', bn={self.bn}'
-        if self.version != 'linear':
-            info += f', version={self.version}'
-        if self.skip_connection is not None:
-            info += f', skip={self.skip_connection}'
-        info += ')'
-        return info
 
 
 def concat_loss_dicts(loss_dict_a: Dict[str, torch.Tensor],

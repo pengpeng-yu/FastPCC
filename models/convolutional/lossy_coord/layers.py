@@ -18,6 +18,52 @@ residuals_num_per_scale = 1
 non_shared_scales_num = 3
 
 
+class MLPBlock(nn.Module):
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 bn: bool = False,
+                 act: Optional[str] = 'leaky_relu(0.2)'):
+        super(MLPBlock, self).__init__()
+        assert act is None or act.split('(', 1)[0] in ['relu', 'leaky_relu', 'prelu']
+
+        self.bn = nn.BatchNorm1d(out_channels) if bn is True else None
+        self.mlp = nn.Linear(in_channels, out_channels, bias=self.bn is None)
+
+        if act is None:
+            self.act = None
+        elif act == 'relu':
+            self.act = nn.ReLU(inplace=True)
+        elif act.startswith('leaky_relu'):
+            self.act = nn.LeakyReLU(
+                negative_slope=float(act.split('(', 1)[1].split(')', 1)[0]),
+                inplace=True)
+        elif act == 'prelu':
+            self.act = nn.PReLU()
+        else: raise NotImplementedError(act)
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+    def forward(self, x):
+        ori_shape = x.shape
+        if len(ori_shape) < 3:
+            raise NotImplementedError
+
+        assert ori_shape[-1] == self.mlp.in_features
+        if len(ori_shape) > 3:
+            x = x.contiguous().view(ori_shape[0], -1, ori_shape[-1])
+        x = self.mlp(x)
+        if isinstance(self.bn, nn.BatchNorm1d):
+            x = x.permute(0, 2, 1)
+            x = self.bn(x)
+            x = x.permute(0, 2, 1)
+        if self.act is not None: x = self.act(x)
+        if len(ori_shape) != 3:
+            x = x.view(*ori_shape[:-1], self.out_channels)
+        return x
+
+
 def make_downsample_blocks(
         in_channels: int,
         out_channels: int,

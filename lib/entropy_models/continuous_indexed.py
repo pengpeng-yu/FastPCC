@@ -10,7 +10,7 @@ from torch.distributions import Distribution
 
 from .distributions.uniform_noise import NoisyDeepFactorized
 from .continuous_base import ContinuousEntropyModelBase
-from .utils import lower_bound, upper_bound, quantization_offset, grad_scaler
+from .utils import lower_bound, upper_bound, grad_scaler
 
 from lib.torch_utils import minkowski_tensor_wrapped_fn, minkowski_tensor_wrapped_op
 
@@ -207,7 +207,7 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
             prior = self.make_prior(indexes)
         if self.quantize_bottleneck_in_eval is True:
             quantized_x, dequantized_x = self.quantize(
-                x, offset=0  # TODO: offset=quantization_offset(prior)?
+                x, offset=0
             )
         else:
             dequantized_x = x
@@ -249,7 +249,6 @@ class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):
 
         if self.quantize_bottleneck_in_eval is True:
             symbols = self.dequantize(symbols, offset=0)
-            # TODO: offset=quantization_offset(self.make_prior(indexes)))?
         else:
             symbols = symbols.to(torch.float)
         symbols = symbols.reshape(input_shape)

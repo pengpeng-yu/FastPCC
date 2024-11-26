@@ -4,15 +4,11 @@ from collections import defaultdict
 from typing import Tuple, List, Optional, Union, Dict, Callable
 
 import numpy as np
-try:
-    import cv2
-except ImportError: cv2 = None
 from plyfile import PlyData, PlyElement
 try:
     import open3d as o3d
 except ImportError: o3d = None
 import torch
-import torch.nn.functional as F
 try:
     import MinkowskiEngine as ME
 except ImportError: ME = None
@@ -41,37 +37,6 @@ class IMData(SampleData):
         self.im = im
         self.file_path = file_path
         self.valid_range = valid_range
-
-
-def im_data_collate_fn(data_list: List[IMData],
-                       target_shape: Tuple[int, int],
-                       channel_last_to_channel_first: bool) -> IMData:
-    data_dict = defaultdict(list)
-    for data in data_list:
-        for key, value in data.__dict__.items():
-            if key == 'im':
-                value = torch.from_numpy(np.ascontiguousarray(value))
-                if channel_last_to_channel_first:
-                    value = value.permute(2, 0, 1)
-                diff_0 = target_shape[0] - value.shape[1]
-                diff_1 = target_shape[1] - value.shape[2]
-                padding_0 = np.random.random_integers(min(0, diff_0), max(0, diff_0))
-                padding_1 = np.random.random_integers(min(0, diff_1), max(0, diff_1))
-                data_dict['valid_range'].append(
-                    np.array([max(padding_0, 0), min(value.shape[1] + padding_0, target_shape[0]),
-                              max(padding_1, 0), min(value.shape[2] + padding_1, target_shape[1])]))
-                value = F.pad(value, (padding_1, diff_1 - padding_1, padding_0, diff_0 - padding_0), 'replicate')
-                data_dict[key].append(value)
-            elif value is not None:
-                data_dict[key].append(value)
-
-    batched_data_dict = {}
-    for key, value in data_dict.items():
-        if key == 'im':
-            batched_data_dict[key] = torch.stack(value)
-        else:
-            batched_data_dict[key] = value
-    return IMData(**batched_data_dict)
 
 
 class PCData(SampleData):
