@@ -12,11 +12,12 @@ class DatasetConfig(SimpleConfig):
 
     kd_tree_partition_max_points_num: Union[int, Tuple[int, ...]] = 0
     test_time_coord_scaler: Union[float, Tuple[float, ...]] = 1.0
-
     with_color: bool = False
     random_rotation: bool = False
     random_flip: bool = False
     random_rgb_offset: int = 0
     random_rgb_perm: bool = False
+    morton_sort: bool = False
+    morton_sort_inverse: bool = False
 
     resolution: Union[int, Tuple[int, ...]] = (512, 1024, 2048)

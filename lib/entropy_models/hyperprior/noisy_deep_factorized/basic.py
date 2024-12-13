@@ -11,10 +11,8 @@ from ...continuous_indexed import ContinuousIndexedEntropyModel, \
     noisy_scale_normal_indexed_entropy_model_init
 from ...distributions.uniform_noise import NoisyNormal, NoisyDeepFactorized
 
-from lib.torch_utils import \
-    minkowski_tensor_wrapped_op, \
-    get_minkowski_tensor_coords_tuple, \
-    concat_loss_dicts
+from lib.torch_utils import concat_loss_dicts
+from lib.minkowski_sparse_conv_layers import minkowski_tensor_wrapped_op, get_minkowski_tensor_coords_tuple
 
 
 class EntropyModel(nn.Module):

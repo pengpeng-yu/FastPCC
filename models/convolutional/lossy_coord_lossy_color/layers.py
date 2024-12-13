@@ -10,10 +10,9 @@ except Exception:
     knn_points = None
 
 from lib.metrics.misc import gen_rgb_to_yuvbt709_param
-from lib.sparse_conv_layers import \
+from lib.minkowski_sparse_conv_layers import \
     ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, \
-    NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs
-from lib.torch_utils import minkowski_tensor_wrapped_fn
+    NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs, minkowski_tensor_wrapped_fn
 
 
 class BoundFunction(torch.autograd.Function):

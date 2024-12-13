@@ -9,9 +9,18 @@ try:
     import open3d as o3d
 except ImportError: o3d = None
 import torch
-try:
-    import MinkowskiEngine as ME
-except ImportError: ME = None
+
+
+def batched_coordinates(coords):
+    N = np.array([len(cs) for cs in coords]).sum()
+    bcoords = torch.zeros((N, 4), dtype=torch.int32)
+    s = 0
+    for b, cs in enumerate(coords):
+        cn = len(cs)
+        bcoords[s: s + cn, 1:] = cs
+        bcoords[s: s + cn, 0] = b
+        s += cn
+    return bcoords
 
 
 class SampleData:
@@ -84,13 +93,7 @@ class PCData(SampleData):
 
 
 def pc_data_collate_fn(data_list: List[PCData],
-                       sparse_collate: bool,
                        kd_tree_partition_max_points_num: int = 0) -> PCData:
-    """
-    If sparse_collate is True, PCData.xyz will be batched to a torch.int32 tensor.
-    using ME.utils.batched_coordinates.
-    Else, PCData.xyz will be stacked as a torch.float32 tensor.
-    """
     if kd_tree_partition_max_points_num > 0:
         assert len(data_list) == 1, 'Supports kd-tree partition only when batch size == 1.'
         use_kd_tree_partition = data_list[0].xyz.shape[0] > kd_tree_partition_max_points_num
@@ -107,19 +110,9 @@ def pc_data_collate_fn(data_list: List[PCData],
     if not use_kd_tree_partition:
         for key, value in data_dict.items():
             if key == 'xyz':
-                if not sparse_collate:
-                    batched_data_dict[key] = torch.stack(
-                        [_.to(torch.float32) for _ in value], dim=0
-                    )
-                else:
-                    batched_data_dict[key] = ME.utils.batched_coordinates(
-                        value, dtype=torch.int32
-                    )
+                batched_data_dict[key] = batched_coordinates(value)
             elif key in PCData.tensor_to_tensor_items:
-                if not sparse_collate:
-                    batched_data_dict[key] = torch.stack(value, dim=0)
-                else:
-                    batched_data_dict[key] = torch.cat(value, dim=0)
+                batched_data_dict[key] = torch.cat(value, dim=0)
             elif key in PCData.list_to_tensor_items:
                 batched_data_dict[key] = torch.tensor(value)
             elif key != 'batch_size':
@@ -151,17 +144,14 @@ def pc_data_collate_fn(data_list: List[PCData],
             if key == 'xyz':
                 # Add batch dimension.
                 # The first one is supposed to be the original coordinates.
-                if not sparse_collate:
-                    batched_data_dict[key] = [_.to(torch.float32)[None] if idx != 0 else _.to(torch.float32)
-                                              for idx, _ in enumerate(batched_data_dict[key])]
-                else:
-                    batched_data_dict[key] = [ME.utils.batched_coordinates([_], dtype=torch.int32)
-                                              if idx != 0 else _.to(torch.int32)
-                                              for idx, _ in enumerate(batched_data_dict[key])]
+                tmp_ls = [batched_data_dict[key][0]]
+                for tmp_ in batched_data_dict[key][1:]:
+                    tmp = torch.zeros((tmp_.shape[0], 4), dtype=torch.int32)
+                    tmp[:, 1:] = tmp_
+                    tmp_ls.append(tmp)
+                batched_data_dict[key] = tmp_ls
             elif key in PCData.tensor_to_tensor_items:
-                # Add batch dimension.
-                if not sparse_collate:
-                    batched_data_dict[key] = [_[None] for _ in batched_data_dict[key][1:]]
+                pass
             elif key in PCData.list_to_tensor_items:
                 batched_data_dict[key] = torch.tensor(value)
             elif key != 'batch_size':

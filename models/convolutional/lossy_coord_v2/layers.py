@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import MinkowskiEngine as ME
 
-from lib.sparse_conv_layers import \
+from lib.minkowski_sparse_conv_layers import \
     ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, \
     NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs
 

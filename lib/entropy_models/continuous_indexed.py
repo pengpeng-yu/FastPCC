@@ -1,6 +1,5 @@
 from typing import List, Tuple, Union, Dict, Any, Callable
 import math
-from functools import partial
 
 import numpy as np
 import torch
@@ -8,11 +7,10 @@ import torch.nn as nn
 import torch.distributions
 from torch.distributions import Distribution
 
-from .distributions.uniform_noise import NoisyDeepFactorized
 from .continuous_base import ContinuousEntropyModelBase
 from .utils import lower_bound, upper_bound, grad_scaler
 
-from lib.torch_utils import minkowski_tensor_wrapped_fn, minkowski_tensor_wrapped_op
+from lib.minkowski_sparse_conv_layers import minkowski_tensor_wrapped_op, minkowski_tensor_wrapped_fn
 
 
 class ContinuousIndexedEntropyModel(ContinuousEntropyModelBase):

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import MinkowskiEngine as ME
 
-from lib.sparse_conv_layers import \
+from lib.minkowski_sparse_conv_layers import \
     ConvBlock, ConvTransBlock, GenConvTransBlock, MEMLPBlock, ResBlock, InceptionResBlock, \
     NNSequentialWithConvTransBlockArgs, NNSequentialWithConvBlockArgs
 

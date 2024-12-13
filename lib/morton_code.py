@@ -23,11 +23,19 @@ def _split_by_3(a: Union[np.ndarray, torch.Tensor]):
     return x
 
 
-def morton_encode_magicbits(xyz: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+def morton_encode_magicbits(xyz: Union[np.ndarray, torch.Tensor], inverse: bool = False) \
+        -> Union[np.ndarray, torch.Tensor]:
     assert xyz.ndim == 2 and xyz.shape[1] == 3
     a = _split_by_3(xyz)
-    a[:, 1] <<= 1
-    a[:, 2] <<= 2
-    a[:, 0] |= a[:, 1]
-    a[:, 0] |= a[:, 2]
-    return a[:, 0]
+    if not inverse:
+        a[:, 1] <<= 1
+        a[:, 2] <<= 2
+        a[:, 0] |= a[:, 1]
+        a[:, 0] |= a[:, 2]
+        return a[:, 0]
+    else:
+        a[:, 1] <<= 1
+        a[:, 0] <<= 2
+        a[:, 2] |= a[:, 1]
+        a[:, 2] |= a[:, 0]
+        return a[:, 2]

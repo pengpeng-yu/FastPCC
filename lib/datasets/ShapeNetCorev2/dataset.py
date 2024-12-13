@@ -9,8 +9,9 @@ import torch
 import torch.utils.data
 
 from lib.data_utils import PCData, pc_data_collate_fn, kd_tree_partition_randomly
-from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
 from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coords
+from lib.morton_code import morton_encode_magicbits
+from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
 
 
 class ShapeNetCorev2(torch.utils.data.Dataset):
@@ -141,10 +142,15 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
         if self.cfg.random_offset != 0:
             xyz += np.random.randint(0, self.cfg.random_offset, 3, dtype=np.int32)
 
+        xyz = torch.from_numpy(xyz)
+        if self.cfg.morton_sort:
+            xyz = xyz[torch.argsort(morton_encode_magicbits(xyz, inverse=self.cfg.morton_sort_inverse))]
+            xyz = torch.unique_consecutive(xyz, dim=0)
+
         return PCData(
-            xyz=torch.from_numpy(xyz),
+            xyz=xyz,
             file_path=file_path
         )
 
     def collate_fn(self, batch):
-        return pc_data_collate_fn(batch, sparse_collate=True)
+        return pc_data_collate_fn(batch)

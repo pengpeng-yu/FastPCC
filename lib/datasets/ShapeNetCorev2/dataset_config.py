@@ -22,5 +22,7 @@ class DatasetConfig(SimpleConfig):
     random_rotation: bool = True
     random_offset: Union[int, Tuple[int, ...]] = 0
     kd_tree_partition_max_points_num: int = 0
+    morton_sort: bool = False
+    morton_sort_inverse: bool = False
 
     resolution: int = 128

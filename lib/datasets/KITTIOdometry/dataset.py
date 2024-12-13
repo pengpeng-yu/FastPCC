@@ -7,6 +7,7 @@ import torch
 import torch.utils.data
 
 from lib.data_utils import PCData, pc_data_collate_fn, write_ply_file
+from lib.morton_code import morton_encode_magicbits
 from lib.datasets.KITTIOdometry.dataset_config import DatasetConfig
 
 
@@ -81,7 +82,9 @@ class KITTIOdometry(torch.utils.data.Dataset):
         scale = 400 / (self.cfg.resolution - 1)
         xyz /= scale
         xyz.round(out=xyz)
-        xyz = np.unique(xyz.astype(np.int32), axis=0)
+        xyz = torch.from_numpy(xyz)
+        xyz = xyz[torch.argsort(morton_encode_magicbits(xyz, inverse=self.cfg.morton_sort_inverse))]
+        xyz = torch.unique_consecutive(xyz, dim=0)
 
         if self.cfg.random_flip:
             if np.random.rand() > 0.5:
@@ -95,7 +98,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
             resolution = 30000 + 1
             inv_trans *= 1000
         return PCData(
-            xyz=torch.from_numpy(xyz),
+            xyz=xyz,
             file_path=cache_path if not self.is_training else file_path,
             org_xyz=(torch.from_numpy(org_xyz)),
             resolution=resolution,  # For the peak value in pc_error
@@ -103,4 +106,4 @@ class KITTIOdometry(torch.utils.data.Dataset):
         )
 
     def collate_fn(self, batch):
-        return pc_data_collate_fn(batch, sparse_collate=True)
+        return pc_data_collate_fn(batch)

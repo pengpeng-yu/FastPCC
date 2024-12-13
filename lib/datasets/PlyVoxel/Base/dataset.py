@@ -8,6 +8,7 @@ import torch
 import torch.utils.data
 
 from lib.data_utils import PCData, pc_data_collate_fn, kd_tree_partition_randomly
+from lib.morton_code import morton_encode_magicbits
 from lib.datasets.PlyVoxel.Base.dataset_config import DatasetConfig
 
 
@@ -119,9 +120,17 @@ class PlyVoxel(torch.utils.data.Dataset):
             if self.cfg.random_rgb_perm:
                 color = np.ascontiguousarray(color[:, torch.randperm(3).tolist()])
 
+        xyz = torch.from_numpy(xyz)
+        color = torch.from_numpy(color) if color is not None else None
+        if self.cfg.morton_sort:
+            order = torch.argsort(morton_encode_magicbits(xyz, inverse=self.cfg.morton_sort_inverse))
+            xyz = xyz[order]
+            if color is not None:
+                color = color[order]
+
         return PCData(
-            xyz=torch.from_numpy(xyz),
-            color=torch.from_numpy(color) if color is not None else None,
+            xyz=xyz,
+            color=color,
             file_path=file_path,
             class_idx=par_num,  # I use class_idx to transmit par_num to collate_fn
             resolution=None if self.is_training else self.file_resolutions[index],
@@ -130,7 +139,7 @@ class PlyVoxel(torch.utils.data.Dataset):
 
     def collate_fn(self, batch):
         return pc_data_collate_fn(
-            batch, sparse_collate=True,
+            batch,
             kd_tree_partition_max_points_num=batch[0].class_idx
             if not self.is_training else 0  # Test-time partitioning
         )

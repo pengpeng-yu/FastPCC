@@ -11,7 +11,7 @@ from .distributions.deep_factorized import DeepFactorized
 from .distributions.uniform_noise import NoisyDeepFactorized
 from .continuous_base import ContinuousEntropyModelBase
 
-from lib.torch_utils import minkowski_tensor_wrapped_fn
+from lib.minkowski_sparse_conv_layers import minkowski_tensor_wrapped_fn
 
 
 class ContinuousBatchedEntropyModel(ContinuousEntropyModelBase):
