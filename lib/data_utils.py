@@ -12,15 +12,15 @@ import torch
 
 
 def batched_coordinates(coords):
-    N = np.array([len(cs) for cs in coords]).sum()
-    bcoords = torch.zeros((N, 4), dtype=torch.int32)
+    N = np.array([len(cs) for cs in coords])
+    bcoords = torch.zeros((N.sum(), 4), dtype=torch.int32)
     s = 0
     for b, cs in enumerate(coords):
         cn = len(cs)
         bcoords[s: s + cn, 1:] = cs
         bcoords[s: s + cn, 0] = b
         s += cn
-    return bcoords
+    return bcoords, N
 
 
 class SampleData:
@@ -60,6 +60,7 @@ class PCData(SampleData):
                  resolution: Union[float, List[float]] = None,
                  file_path: Union[str, List[str]] = None,
                  batch_size: int = 0,
+                 points_num: List[int] = None,
                  org_xyz: Union[torch.Tensor, List[torch.Tensor]] = None,
                  inv_transform: Union[torch.Tensor, List[torch.Tensor]] = None):
         super(PCData, self).__init__()
@@ -70,6 +71,7 @@ class PCData(SampleData):
         self.resolution = resolution
         self.file_path = file_path
         self.batch_size = batch_size
+        self.points_num = points_num
         self.org_xyz = org_xyz
         self.inv_transform = inv_transform
 
@@ -110,7 +112,7 @@ def pc_data_collate_fn(data_list: List[PCData],
     if not use_kd_tree_partition:
         for key, value in data_dict.items():
             if key == 'xyz':
-                batched_data_dict[key] = batched_coordinates(value)
+                batched_data_dict[key], batched_data_dict['points_num'] = batched_coordinates(value)
             elif key in PCData.tensor_to_tensor_items:
                 batched_data_dict[key] = torch.cat(value, dim=0)
             elif key in PCData.list_to_tensor_items:

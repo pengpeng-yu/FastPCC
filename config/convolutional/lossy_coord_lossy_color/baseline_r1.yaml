@@ -37,7 +37,6 @@ train:
   lr_step_size: 60
   lr_step_gamma: 0.3
 
-  log_frequency: 10
   ckpt_frequency: 10
   test_frequency: 0
 

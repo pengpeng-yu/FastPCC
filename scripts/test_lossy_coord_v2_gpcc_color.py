@@ -76,7 +76,7 @@ def test_lossy_coord_v2():
             f' test.dataset.filelist_path=\"[{",".join([osp.split(_)[1] for _ in file_lists])}]\"' \
             f' test.dataset.resolution=\"[{",".join((str(_) for _ in resolutions))}]\"' \
             f' test.dataset.kd_tree_partition_max_points_num=0' \
-            f' test.dataset.test_time_coord_scaler=1.0'
+            f' test.dataset.coord_scaler=1.0'
         print(command)
         subprocess.run(command, shell=True, check=True, executable=shutil.which('bash'))
 

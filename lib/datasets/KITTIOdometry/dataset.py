@@ -2,7 +2,6 @@ import os.path as osp
 import pathlib
 
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 import torch
 import torch.utils.data
 
@@ -24,7 +23,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
             filelist_abs_path = osp.join(cfg.root, cfg.test_filelist_path)
 
         if not osp.exists(filelist_abs_path):
-            self.file_list = self.gen_filelist(filelist_abs_path)
+            self.file_list = [osp.join(self.cfg.root, _) for _ in self.gen_filelist(filelist_abs_path)]
         else:
             self.file_list = self.load_filelist(filelist_abs_path)
 
@@ -74,23 +73,26 @@ class KITTIOdometry(torch.utils.data.Dataset):
                 if not osp.isfile(cache_path):
                     write_ply_file(org_xyz, cache_path, estimate_normals=True)
 
-        if self.cfg.random_rotation:
-            xyz = R.from_euler('z', np.random.uniform(0, 2 * np.pi)).apply(xyz).astype(np.float32)
-
         org_point = xyz.min(0)
         xyz -= org_point
         scale = 400 / (self.cfg.resolution - 1)
         xyz /= scale
         xyz.round(out=xyz)
-        xyz = torch.from_numpy(xyz)
-        xyz = xyz[torch.argsort(morton_encode_magicbits(xyz, inverse=self.cfg.morton_sort_inverse))]
-        xyz = torch.unique_consecutive(xyz, dim=0)
 
         if self.cfg.random_flip:
             if np.random.rand() > 0.5:
                 xyz[:, 0] = -xyz[:, 0] + xyz[:, 0].max()
             if np.random.rand() > 0.5:
                 xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max()
+
+        if not self.cfg.morton_sort:
+            xyz = np.unique(xyz.astype(np.int32), axis=0)
+            xyz = torch.from_numpy(xyz)
+        else:
+            xyz = xyz.astype(np.int32)
+            xyz = torch.from_numpy(xyz)
+            xyz = xyz[torch.argsort(morton_encode_magicbits(xyz, inverse=self.cfg.morton_sort_inverse))]
+            xyz = torch.unique_consecutive(xyz, dim=0)
 
         resolution = 59.70 + 1
         inv_trans = torch.from_numpy(np.concatenate((org_point.reshape(-1), (scale,)), 0, dtype=np.float32))

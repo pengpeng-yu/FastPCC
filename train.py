@@ -22,11 +22,12 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.cuda import amp
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.modules.module import _EXTRA_STATE_KEY_SUFFIX as MODULE_EXTRA_STATE_KEY_SUFFIX
+from lib.model_ema import ModelEmaV3
 
 from test import test
 from lib.config import Config
 from lib.utils import autoindex_obj, make_new_dirs, eta_by_seconds, totaltime_by_seconds
-from lib.torch_utils import select_device, init_torch_seeds, is_parallel
+from lib.torch_utils import select_device, init_torch_seeds, unwrap_ddp, load_loose_state_dict
 from lib.data_utils import SampleData
 
 
@@ -117,8 +118,8 @@ def main():
                 tb_proc.kill()
         else:
             if tb_proc is not None:
-                logger.info(f'Tensorboard is still running. Run "kill {tb_proc.pid}" to stop')
-                tb_proc.wait()
+                tb_proc.kill()
+                logger.info(f'run "tensorboard --logdir {tb_logdir} --port={tb_port}" to reopen tensorboard.')
 
     else:
         train(cfg, local_rank, logger)
@@ -153,8 +154,19 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         Model = importlib.import_module(cfg.model_module_path).Model
     except Exception as e:
         raise ImportError(*e.args)
-    model = Model(cfg.model)
+    model = Model(cfg.model).to(device)
+    if cfg.train.ema is True:
+        ema = ModelEmaV3(
+            model, decay=cfg.train.ema_decay, use_warmup=cfg.train.ema_warmup, foreach=cfg.train.ema_foreach,
+            warmup_gamma=cfg.train.ema_warmup_gamma, warmup_power=cfg.train.ema_warmup_power)
     logger.info(f'repr(model): \n{repr(model)}')
+    total_params = 0
+    logger.info("Submodules and their parameter counts:")
+    for name, submodule in model.named_children():
+        num_params = sum(p.numel() for p in submodule.parameters())
+        logger.info(f"  {name}: {num_params / 1e6:.4f}M")
+        total_params += num_params
+    logger.info(f"Total parameters: {total_params / 1e6:.4f}M")
 
     if hasattr(model, 'params_divider'):
         params_divider = model.params_divider
@@ -163,7 +175,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         params_divider: Callable[[str], int] = lambda s: 0
 
     if cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) == 1:
-        model = model.to(device)
         logger.info('using a single GPU')
     elif cuda_ids[0] != -1 and global_rank == -1 and len(cuda_ids) >= 1:
         if len(cuda_ids) > 1:
@@ -289,16 +300,18 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         ckpt_path = autoindex_obj(cfg.train.from_ckpt)
         ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
         if 'state_dict' in cfg.train.resume_items:
-            try:
-                if is_parallel(model):
-                    incompatible_keys = model.module.load_state_dict(ckpt['state_dict'], strict=False)
-                else: incompatible_keys = model.load_state_dict(ckpt['state_dict'], strict=False)
-            except RuntimeError as e:
-                logger.error('error when loading model_state_dict')
-                raise e
+            incompatible_keys, missing_keys, unexpected_keys = load_loose_state_dict(model, ckpt['state_dict'])
             logger.info('resumed model_state_dict from checkpoint "{}"'.format(ckpt_path))
-            if incompatible_keys[0] != [] or incompatible_keys[1] != []:
-                logger.warning(incompatible_keys)
+            if len(incompatible_keys) != 0:
+                logger.warning(f'incompatible keys:\n{incompatible_keys}')
+            if len(missing_keys) != 0:
+                logger.warning(f'missing keys:\n{missing_keys}')
+            if len(incompatible_keys) != 0:
+                logger.warning(f'unexpected keys:\n{unexpected_keys}')
+            if cfg.train.ema:
+                assert ckpt['ema_state_dict'].keys() == ckpt['state_dict'].keys()
+                load_loose_state_dict(ema.module, ckpt['ema_state_dict'])
+                logger.info('resumed ema_state_dict from checkpoint "{}"'.format(ckpt_path))
         if 'scheduler_state_dict' in cfg.train.resume_items:
             start_epoch = int(ckpt['scheduler_state_dict'][0]['last_epoch'])
             for idx, scheduler in enumerate(scheduler_list):
@@ -343,17 +356,16 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 batch_data.to(device=device, non_blocking=True)
             else: raise NotImplementedError
 
-            no_sync = is_parallel(model) and (step_idx + 1) % cfg.train.grad_acc_steps != 0
+            no_sync = isinstance(model, DDP) and (global_step + 1) % cfg.train.grad_acc_steps != 0
             with model.no_sync() if no_sync else nullcontext():
                 with amp.autocast(enabled=cfg.train.amp):
                     loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
                 scaler.scale(loss_dict['loss'] / cfg.train.grad_acc_steps).backward()
 
-            if (step_idx + 1) % cfg.train.grad_acc_steps == 0:
+            if (global_step + 1) % cfg.train.grad_acc_steps == 0:
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
-                        if cfg.train.amp:
-                            scaler.unscale_(optimizer)
+                        scaler.unscale_(optimizer)
                         if cfg.train.max_grad_norm[idx] != 0:
                             torch.nn.utils.clip_grad_norm_(
                                 optimizer.param_groups[0]['params'],
@@ -370,19 +382,21 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 for idx, optimizer in enumerate(optimizer_list):
                     if optimizer is not None:
                         optimizer.zero_grad()
+                if cfg.train.ema is True:
+                    ema.update(unwrap_ddp(model), step=(global_step // cfg.train.grad_acc_steps))
 
             # logging
             time_this_step = time.time() - start_time
             ave_time_onestep = time_this_step if ave_time_onestep is None else \
                 ave_time_onestep * 0.9 + time_this_step * 0.1
-            if cfg.train.log_frequency > 0 and (step_idx == 0 or (step_idx + 1) % cfg.train.log_frequency == 0):
+            if cfg.train.log_frequency > 0 and (global_step == 0 or (global_step + 1) % cfg.train.log_frequency == 0):
                 expected_total_time, eta = eta_by_seconds((total_steps - global_step - 1) * ave_time_onestep)
                 logger.info(
                     f'step '
                     f'{step_idx}/{steps_one_epoch - 1} of epoch {epoch}/{cfg.train.epochs - 1}, '
                     f'speed: '
-                    f'{totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/epoch, '
-                    f'eta(current): '
+                    f'{totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/e, '
+                    f'eta(cur): '
                     f'{eta_by_seconds((steps_one_epoch - step_idx - 1) * ave_time_onestep)[1]}, '
                     f'eta(total): '
                     f'{eta} in {expected_total_time}'
@@ -403,7 +417,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             global_step += 1
 
             if cfg.train.cuda_empty_cache_frequency != 0 and \
-                    (step_idx + 1) % cfg.train.cuda_empty_cache_frequency == 0:
+                    global_step % cfg.train.cuda_empty_cache_frequency == 0:
                 logger.info(f'torch.cuda.max_memory_reserved(): {torch.cuda.max_memory_reserved()}. '
                             f'Call torch.cuda.empty_cache() now')
                 torch.cuda.empty_cache()
@@ -420,8 +434,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             model.eval()  # Set training = False before saving, which is necessary for entropy models.
             ckpt_name = 'epoch_{}.pt'.format(epoch)
             ckpt = {
-                'state_dict':
-                    model.module.state_dict() if is_parallel(model) else model.state_dict(),
+                'state_dict': unwrap_ddp(model).state_dict(),
                 'optimizer_state_dict': [
                     optimizer.state_dict() if optimizer is not None else None
                     for optimizer in optimizer_list],
@@ -429,15 +442,21 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                     scheduler.state_dict() if scheduler is not None else None
                     for scheduler in scheduler_list]
             }
+            if cfg.train.ema:
+                ckpt['ema_state_dict'] = ema.module.state_dict()
             torch.save(ckpt, ckpts_dir / ckpt_name)
             del ckpt
 
         # Model test
         if global_rank in (-1, 0) and cfg.train.test_frequency > 0 and (epoch + 1) % cfg.train.test_frequency == 0 and \
-                (not getattr(model.module if is_parallel(model) else model, 'warmup_forward', False)):
+                (not getattr(unwrap_ddp(model), 'warmup_forward', False)):
             test_items = test(cfg, logger, run_dir, model)
             for item_name, item in test_items.items():
                 tb_writer.add_scalar('Test/' + item_name, item, global_step - 1)
+            if cfg.train.ema:
+                test_items = test(cfg, logger, run_dir, ema.module)
+                for item_name, item in test_items.items():
+                    tb_writer.add_scalar('TestEma/' + item_name, item, global_step - 1)
             torch.cuda.empty_cache()
 
     if tb_writer is not None: tb_writer.close()

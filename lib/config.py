@@ -12,13 +12,20 @@ class TrainConfig(SimpleConfig):
     rundir_name: str = 'train_<autoindex>'
     device: Union[int, str] = '0'  # 0 or 0,1,2 or cpu
     more_reproducible: bool = False
-    amp: bool = False
     find_unused_parameters: bool = False
     batch_size: int = 2
     shuffle: bool = True
     num_workers: int = 4
     epochs: int = 100
     pin_memory: bool = True
+
+    ema: bool = False
+    ema_decay: float = 0.9999
+    ema_warmup: bool = False
+    ema_warmup_gamma: float = 1.0
+    ema_warmup_power: float = 3/4
+    ema_foreach: bool = True
+    amp: bool = False
 
     optimizer: str_or_seq = ('SGD', 'SGD')
     learning_rate: float_or_seq = 0.05
@@ -36,7 +43,7 @@ class TrainConfig(SimpleConfig):
     resume_items: Tuple[str, ...] = ('state_dict',)
 
     tensorboard_port: int = 6006
-    log_frequency: int = 10  # (steps) used for both logging and tensorboard
+    log_frequency: int = 20  # (steps) used for both logging and tensorboard
     ckpt_frequency: int = 2  # (epochs)
     test_frequency: int = 0  # (epochs) 0 means no test in training phase
     cuda_empty_cache_frequency: int = 0  # (steps)

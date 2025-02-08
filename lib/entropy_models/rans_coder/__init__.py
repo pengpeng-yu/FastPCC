@@ -31,14 +31,13 @@ def _bin_test(BinCoder):
 
 def _load_and_test():
     current_file_dir = osp.dirname(osp.abspath(__file__))
-    print(current_file_dir)
     build_directory = osp.join(current_file_dir, 'build')
     os.makedirs(build_directory, exist_ok=True)
     rans_ext_cpp = load(
         name='rans_ext_cpp',
         extra_include_paths=[current_file_dir],
         sources=[osp.join(
-            current_file_dir, 'rans_coder_wrapper.cpp'
+            current_file_dir, 'rans_wrapper.cpp'
         )],
         extra_cflags=['-fopenmp', '-Wall', '-Wextra', '-Wconversion', '-O3'],
         # '-DNDEBUG'

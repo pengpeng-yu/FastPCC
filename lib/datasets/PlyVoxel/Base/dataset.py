@@ -30,7 +30,7 @@ class PlyVoxel(torch.utils.data.Dataset):
         filelist_paths = get_collections(cfg.filelist_path, len(roots))
         file_path_patterns = get_collections(cfg.file_path_pattern, len(roots))
         resolutions = get_collections(cfg.resolution, len(roots))
-        test_time_coord_scaler = get_collections(cfg.test_time_coord_scaler, len(roots))
+        coord_scaler = get_collections(cfg.coord_scaler, len(roots))
         partition_max_points_num = get_collections(cfg.kd_tree_partition_max_points_num, len(roots))
 
         # define files list path
@@ -49,7 +49,7 @@ class PlyVoxel(torch.utils.data.Dataset):
         self.file_coord_scaler_list = []
         self.file_partition_max_points_num_list = []
         for root, filelist_path, resolution, scaler, par_num in \
-                zip(roots, filelist_paths, resolutions, test_time_coord_scaler, partition_max_points_num):
+                zip(roots, filelist_paths, resolutions, coord_scaler, partition_max_points_num):
             filelist_abs_path = osp.join(root, filelist_path)
             logger.info(f'using filelist: "{filelist_abs_path}"')
             with open(filelist_abs_path) as f:
@@ -82,7 +82,7 @@ class PlyVoxel(torch.utils.data.Dataset):
             xyz -= xyz.min(0)
 
         coord_scaler = self.file_coord_scaler_list[index]
-        if not self.is_training and coord_scaler != 1:
+        if coord_scaler != 1:
             xyz = (xyz * coord_scaler).round()
         xyz = xyz.astype(np.int32)
 

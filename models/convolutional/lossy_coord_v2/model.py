@@ -196,11 +196,13 @@ class PCC(nn.Module):
         with Timer() as encoder_t, TorchCudaMaxMemoryAllocated() as encoder_m:
             compressed_bytes = self.compress(pc_data.xyz) if not_part else \
                 self.compress_partitions(pc_data.xyz)
+            torch.cuda.synchronize()
         ME.clear_global_coordinate_manager()
         torch.cuda.empty_cache()
         with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
             coord_recon = self.decompress(compressed_bytes) if not_part else \
                 self.decompress_partitions(compressed_bytes)
+            torch.cuda.synchronize()
         ME.clear_global_coordinate_manager()
         # A quick fix for LiDAR datasets.
         if pc_data.inv_transform is not None:

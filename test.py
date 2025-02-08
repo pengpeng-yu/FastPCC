@@ -4,14 +4,13 @@ import sys
 import pathlib
 import importlib
 from tqdm import tqdm
-from copy import deepcopy
 
 import torch
 import torch.utils.data
 
 from lib.config import Config
 from lib.utils import autoindex_obj
-from lib.torch_utils import select_device, is_parallel
+from lib.torch_utils import select_device, unwrap_ddp
 from lib.data_utils import SampleData
 
 
@@ -82,8 +81,14 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
             ckpt_path = autoindex_obj(cfg.test.from_ckpt)
             logger.info(f'loading weights from {ckpt_path}')
             try:
-                incompatible_keys = model.load_state_dict(
-                    torch.load(ckpt_path, map_location=torch.device('cpu'))['state_dict'], strict=False)
+                ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
+                if 'ema_state_dict' in ckpt:
+                    logger.info('using EMA stat_dict')
+                    state_dict = ckpt['ema_state_dict']
+                else:
+                    state_dict = ckpt['state_dict']
+                del ckpt
+                incompatible_keys = model.load_state_dict(state_dict, strict=False)
             except RuntimeError as e:
                 logger.error('error when loading model_state_dict')
                 raise e
@@ -125,10 +130,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
             logger.info(f'test step {step_idx}/{steps_one_epoch - 1}')
 
     try:
-        if is_parallel(model):
-            metric_results = model.module.evaluator.show(results_dir)
-        else:
-            metric_results = model.evaluator.show(results_dir)
+        metric_results = unwrap_ddp(model).evaluator.show(results_dir)
     except AttributeError:
         metric_results = {}
 

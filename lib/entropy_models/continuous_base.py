@@ -178,11 +178,7 @@ class ContinuousEntropyModelBase(nn.Module):
         self.coding_ndim = coding_ndim
 
     def perturb(self, x: torch.Tensor) -> torch.Tensor:
-        if not hasattr(self, "_noise"):
-            setattr(self, "_noise", torch.empty(x.shape, dtype=torch.float, device=x.device))
-        self._noise.resize_(x.shape)
-        self._noise.uniform_(-0.5, 0.5)
-        x = x + self._noise
+        x = x + torch.empty_like(x).uniform_(-0.5, 0.5)
         return x
 
     def process(self, x: torch.Tensor) -> torch.Tensor:

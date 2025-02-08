@@ -8,10 +8,12 @@ def keep_state_dict_in_ckpt(dir_path):
     for file in files:
         ckpt = torch.load(file, map_location='cpu')
         if len(ckpt.keys()) != 1:
-            ckpt = {'state_dict': ckpt['state_dict']}
-            torch.save(ckpt, file)
+            key = 'ema_state_dict'
+            if key not in ckpt: key = 'state_dict'
+            torch.save({key: ckpt[key]}, file)
         else:
-            assert list(ckpt.keys())[0] == 'state_dict'
+            key = list(ckpt.keys())[0]
+            assert key == 'state_dict' or key == 'ema_state_dict', file
 
 
 if __name__ == '__main__':

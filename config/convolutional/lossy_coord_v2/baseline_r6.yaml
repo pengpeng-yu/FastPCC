@@ -5,4 +5,4 @@ model:
 
 test:
   dataset:
-    test_time_coord_scaler: [0.125, 1.0, 1.0, 1.0, 1.0]
+    coord_scaler: [0.125, 1.0, 1.0, 1.0, 1.0]

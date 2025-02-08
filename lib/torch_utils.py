@@ -48,10 +48,6 @@ def select_device(logger, local_rank, device='', batch_size=None) -> Tuple[torch
     return torch_device, cuda_ids
 
 
-def is_parallel(model):
-    return type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
-
-
 def concat_loss_dicts(loss_dict_a: Dict[str, torch.Tensor],
                       loss_dict_b: Dict[str, torch.Tensor],
                       b_key_to_a_key_f: Callable[[str], str] = lambda x: x,
@@ -73,6 +69,38 @@ class TorchCudaMaxMemoryAllocated:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.max_memory_allocated_kb = torch.cuda.max_memory_allocated(device=None) / 1024
         return False
+
+
+def unwrap_ddp(model):
+    return model.module if isinstance(model, nn.parallel.DistributedDataParallel) else model
+
+
+def load_loose_state_dict(model: nn.Module, state_dict: Dict[str, nn.Parameter]) -> \
+        Tuple[List[Tuple[str, torch.Size, torch.Size]], List[Tuple[str, torch.Size]], List[Tuple[str, torch.Size]]]:
+    model = unwrap_ddp(model)
+    compatible_state_dict = {}
+    missing_keys = []
+    existing_keys = []
+    incompatible_keys = []
+    for key, param in model.named_parameters():
+        if key in state_dict:
+            existing_keys.append(key)
+            cur_shape = param.shape
+            new_shape = state_dict[key].shape
+            if cur_shape == new_shape:
+                compatible_state_dict[key] = state_dict[key]
+            elif len(cur_shape) == len(new_shape) and all([_c <= _n for _c, _n in zip(cur_shape, new_shape)]):
+                print(f'\nExperimentally load {key} (shape: {cur_shape}) from shape {new_shape}')
+                compatible_state_dict[key] = state_dict[key][tuple(slice(0, s) for s in cur_shape)]
+            else:
+                incompatible_keys.append((key, param.shape, state_dict[key].shape))
+        else:
+            missing_keys.append((key, param.shape))
+    unexpected_keys = [(key, state_dict[key].shape) for key in state_dict if key not in existing_keys]
+    missing_keys_, unexpected_keys_ = model.load_state_dict(compatible_state_dict, strict=False)
+    assert set(k[0] for k in incompatible_keys) == set(missing_keys_)
+    assert len(unexpected_keys_) == 0
+    return incompatible_keys, missing_keys, unexpected_keys
 
 
 if __name__ == '__main__':

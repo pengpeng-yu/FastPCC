@@ -1,5 +1,5 @@
 #include <torch/extension.h>
-#include "rans_coder_wrapper.h"
+#include "rans_wrapper.h"
 #include "cdf_ops.cpp"
 
 

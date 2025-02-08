@@ -1,5 +1,5 @@
-#ifndef RANS_CODER_WRAPPER_H_
-#define RANS_CODER_WRAPPER_H_
+#ifndef RANS_WRAPPER_H_
+#define RANS_WRAPPER_H_
 
 #include <torch/extension.h>
 #include <pybind11/numpy.h>
@@ -106,4 +106,4 @@ private:
     std::vector<uint8_t *> enc_ptrs;
 };
 
-#endif  // RANS_CODER_WRAPPER_H_
+#endif  // RANS_WRAPPER_H_
