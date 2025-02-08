@@ -1,4 +1,4 @@
-This project contains an implementation of our ICME 2023 paper "Sparse Representation based Deep Residual Geometry Compression Network for Large-scale Point Clouds" [1] and other improvements (Accepted by TMM).
+This project contains an implementation of our ICME 2023 paper "Sparse Representation based Deep Residual Geometry Compression Network for Large-scale Point Clouds" [1] and some improvements (accepted by TMM [2]).
 Contact me for any reproduction issue: <yupp5@mail2.sysu.edu.cn>
 
 
@@ -7,9 +7,9 @@ See our detailed experimental results on Intel Xeon Gold 5118 and NVIDIA 2080Ti 
 
 
 ## Models
-- `config/convolutional/lossy_coord_v3/baseline_r*.yaml`: Improved geometry lossy compression (under development). 
-- `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression. 
-- `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression. 
+- `config/convolutional/lossy_coord_v3/*.yaml`: Improved geometry compression (under development). 
+- `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression in [2]. 
+- `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression in [2]. 
 - `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model in [1] (Deprecated).
 - `config/convolutional/lossy_coord/baseline.yaml`: A reimplementation of PCGCv2.
 
@@ -138,5 +138,11 @@ If this work is helpful to your research, please consider citing:
   title={Sparse Representation based Deep Residual Geometry Compression Network for Large-scale Point Clouds}, 
   year={2023},
   pages={2555-2560}
+}
+@inproceedings{yu2025hierarchical,
+  author={Yu, Pengpeng and Zhang, Ye and Liang, Fan and Li, Haoran and Guo, Yulan},
+  booktitle={IEEE Transactions on Multimedia}, 
+  title={Hierarchical Distortion Learning for Fast Lossy Compression of Point Clouds}, 
+  year={2025},
 }
 ````
