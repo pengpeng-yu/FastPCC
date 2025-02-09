@@ -145,8 +145,7 @@ class OneScalePredictor(nn.Module):
             cur_rec = SparseTensor(
                 cur_rec.F.reshape(cur_rec.F.shape[0], 8, cur_rec.F.shape[1] // 8)[pred_bin],
                 new_c,
-                tuple(_ // 2 for _ in cur_rec.stride),
-                (batch_size, *(_ * 2 for _ in cur_rec.spatial_range[1:])))
+                tuple(_ // 2 for _ in cur_rec.stride))
             if self.if_pred_oct_lossl:
                 cur_rec._caches = cur_ref._caches
             else:
@@ -182,8 +181,7 @@ class OneScalePredictor(nn.Module):
                 cur_rec = SparseTensor(
                     cur_rec.F.reshape(cur_rec.F.shape[0], 8, cur_rec.F.shape[1] // 8)[pred_bin],
                     up_ref.C,
-                    tuple(_ // 2 for _ in cur_rec.stride),
-                    (1, *(_ * 2 for _ in cur_rec.spatial_range[1:])))
+                    tuple(_ // 2 for _ in cur_rec.stride))
                 cur_rec._caches = cur_ref._caches
 
         else:
@@ -246,8 +244,7 @@ class OneScalePredictor(nn.Module):
             cur_rec = SparseTensor(
                 cur_rec.F.reshape(cur_rec.F.shape[0], 8, cur_rec.F.shape[1] // 8)[cur_bin],
                 (new_c + unfold_kernel)[cur_bin],
-                tuple(_ // 2 for _ in cur_rec.stride),
-                (1, *(_ * 2 for _ in cur_rec.spatial_range[1:])))
+                tuple(_ // 2 for _ in cur_rec.stride))
             return cur_rec
         else:
             new_c = cur_rec.C[:, None, 1:]
@@ -424,8 +421,7 @@ class Model(nn.Module):
     def get_init_pc(xyz: torch.Tensor, batch_size: int, stride: int = 1) -> SparseTensor:
         # Input coordinates are assumed to be Morton-sorted with unique points.
         sparse_pc_feature = torch.ones((xyz.shape[0], 1), dtype=torch.float, device=xyz.device)
-        # The range limit of 131072 should be OK for cases where the spatial range is smaller.
-        sparse_pc = SparseTensor(sparse_pc_feature, xyz, (stride,) * 3, (batch_size, 131072, 131072, 131072))
+        sparse_pc = SparseTensor(sparse_pc_feature, xyz, (stride,) * 3)
         return sparse_pc
 
     def train_forward(self, xyz: torch.Tensor, points_num: List[int], batch_size: int, training_step: int):
@@ -441,8 +437,7 @@ class Model(nn.Module):
 
         cur_rec = SparseTensor(
             org.F[:strided_list[-1].C.shape[0]], strided_list[-1].C,
-            (2 ** self.max_downsample_times,) * 3,
-            (org.spatial_range[0], *(_ // (2 ** self.max_downsample_times) for _ in org.spatial_range[1:])))
+            (2 ** self.max_downsample_times,) * 3)
         cur_rec._caches = org._caches
 
         loss_dict = {}
@@ -491,13 +486,9 @@ class Model(nn.Module):
             coord_recon = coord_recon * inv_trans[3]
             coord_recon += inv_trans[None, :3]
             compressed_bytes = pc_data.inv_transform[0].numpy().astype('<f4').tobytes() + compressed_bytes
-        if pc_data.org_xyz is not None:
-            target_xyz = pc_data.org_xyz[0]
-        else:
-            target_xyz = (pc_data.xyz[:, 1:] if not_part else pc_data.xyz[0])
         ret = self.evaluator.log(
             pred=coord_recon,
-            target=target_xyz,
+            org_points_num=pc_data.org_points_num[0],
             compressed_bytes=compressed_bytes,
             file_path=pc_data.file_path[0],
             resolution=pc_data.resolution[0],
@@ -585,8 +576,7 @@ class Model(nn.Module):
 
         cur_rec = SparseTensor(
             org.F[:strided_list[-1].C.shape[0]], strided_list[-1].C,
-            (2 ** self.max_downsample_times,) * 3,
-            (org.spatial_range[0], *(_ // (2 ** self.max_downsample_times) for _ in org.spatial_range[1:])))
+            (2 ** self.max_downsample_times,) * 3)
         cur_rec._caches = org._caches
 
         cached_list = []

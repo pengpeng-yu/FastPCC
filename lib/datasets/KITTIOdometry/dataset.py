@@ -58,7 +58,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
     def __getitem__(self, index):
         file_path = self.file_list[index]
         xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
-        org_xyz = xyz.copy()
+        org_points_num = xyz.shape[0]
 
         # For calculating distortion metrics
         if not self.is_training:
@@ -102,7 +102,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
         return PCData(
             xyz=xyz,
             file_path=cache_path if not self.is_training else file_path,
-            org_xyz=(torch.from_numpy(org_xyz)),
+            org_points_num=org_points_num,
             resolution=resolution,  # For the peak value in pc_error
             inv_transform=inv_trans
         )

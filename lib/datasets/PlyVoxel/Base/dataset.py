@@ -39,7 +39,7 @@ class PlyVoxel(torch.utils.data.Dataset):
             # generate files list
             if not osp.exists(filelist_abs_path):
                 logger.warning(f'no filelist of {root} is given. Trying to generate using {file_path_pattern}...')
-                file_list = pathlib.Path(root).glob(file_path_pattern)
+                file_list = sorted(pathlib.Path(root).glob(file_path_pattern))
                 with open(filelist_abs_path, 'w') as f:
                     f.write('\n'.join([str(_.relative_to(root)) for _ in file_list]))
 
@@ -76,19 +76,21 @@ class PlyVoxel(torch.utils.data.Dataset):
 
         # xyz
         xyz = np.asarray(point_cloud.points)
-
-        if self.is_training and self.cfg.random_rotation:
-            xyz = R.random().apply(xyz)
-            xyz -= xyz.min(0)
+        org_points_num = xyz.shape[0]
+        org_point = xyz.min(0)
+        xyz -= org_point
 
         coord_scaler = self.file_coord_scaler_list[index]
         if coord_scaler != 1:
             xyz = (xyz * coord_scaler).round()
-        xyz = xyz.astype(np.int32)
+            xyz = np.unique(xyz.astype(np.int32), axis=0)
+        else:
+            xyz = xyz.astype(np.int32)
 
         if self.cfg.with_color:
             color = np.asarray(point_cloud.colors)
             assert color.size != 0
+            assert color.shape[0] == xyz.shape[0]
             color *= 255
             np.round(color, out=color)
             color = color.astype(np.float32)
@@ -108,8 +110,6 @@ class PlyVoxel(torch.utils.data.Dataset):
                     xyz[:, 0] = -xyz[:, 0] + xyz[:, 0].max()
                 if np.random.rand() > 0.5:
                     xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max()
-                if np.random.rand() > 0.5:
-                    xyz[:, 2] = -xyz[:, 2] + xyz[:, 2].max()
 
             if self.cfg.random_rgb_offset != 0:
                 color += np.random.randint(
@@ -128,21 +128,27 @@ class PlyVoxel(torch.utils.data.Dataset):
             if color is not None:
                 color = color[order]
 
-        return PCData(
+        inv_trans = torch.from_numpy(np.concatenate((org_point.reshape(-1), (1 / coord_scaler,)), 0, dtype=np.float32))
+        pc_data = PCData(
             xyz=xyz,
             color=color,
             file_path=file_path,
-            class_idx=par_num,  # I use class_idx to transmit par_num to collate_fn
             resolution=None if self.is_training else self.file_resolutions[index],
-            inv_transform=torch.tensor((0, 0, 0, 1 / coord_scaler), dtype=torch.float32) if coord_scaler != 1 else None
+            org_points_num=org_points_num,
+            inv_transform=inv_trans
         )
+        if not self.is_training:
+            pc_data.tmp_par_num = par_num
+        return pc_data
 
     def collate_fn(self, batch):
-        return pc_data_collate_fn(
-            batch,
-            kd_tree_partition_max_points_num=batch[0].class_idx
-            if not self.is_training else 0  # Test-time partitioning
-        )
+        if not self.is_training:
+            assert len(batch) == 1
+            par_num = batch[0].tmp_par_num
+            del batch[0].tmp_par_num
+            return pc_data_collate_fn(batch, kd_tree_partition_max_points_num=par_num)
+        else:
+            return pc_data_collate_fn(batch)
 
 
 if __name__ == '__main__':

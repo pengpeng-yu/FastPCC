@@ -12,8 +12,8 @@ import torch
 
 
 def batched_coordinates(coords):
-    N = np.array([len(cs) for cs in coords])
-    bcoords = torch.zeros((N.sum(), 4), dtype=torch.int32)
+    N = [len(cs) for cs in coords]
+    bcoords = torch.zeros((sum(N), 4), dtype=torch.int32)
     s = 0
     for b, cs in enumerate(coords):
         cn = len(cs)
@@ -50,29 +50,26 @@ class IMData(SampleData):
 
 class PCData(SampleData):
     tensor_to_tensor_items = ('color', 'normal')
-    list_to_tensor_items = ('class_idx',)
 
     def __init__(self,
                  xyz: Union[torch.Tensor, List[torch.Tensor]],
                  color: Union[torch.Tensor, List[torch.Tensor]] = None,
                  normal: Union[torch.Tensor, List[torch.Tensor]] = None,
-                 class_idx: Union[int, torch.Tensor] = None,
                  resolution: Union[float, List[float]] = None,
                  file_path: Union[str, List[str]] = None,
                  batch_size: int = 0,
                  points_num: List[int] = None,
-                 org_xyz: Union[torch.Tensor, List[torch.Tensor]] = None,
+                 org_points_num: Union[int, List[int]] = None,
                  inv_transform: Union[torch.Tensor, List[torch.Tensor]] = None):
         super(PCData, self).__init__()
         self.xyz = xyz
         self.color = color
         self.normal = normal
-        self.class_idx = class_idx
         self.resolution = resolution
         self.file_path = file_path
         self.batch_size = batch_size
         self.points_num = points_num
-        self.org_xyz = org_xyz
+        self.org_points_num = org_points_num
         self.inv_transform = inv_transform
 
     def to(self, device, non_blocking=False):
@@ -115,8 +112,6 @@ def pc_data_collate_fn(data_list: List[PCData],
                 batched_data_dict[key], batched_data_dict['points_num'] = batched_coordinates(value)
             elif key in PCData.tensor_to_tensor_items:
                 batched_data_dict[key] = torch.cat(value, dim=0)
-            elif key in PCData.list_to_tensor_items:
-                batched_data_dict[key] = torch.tensor(value)
             elif key != 'batch_size':
                 batched_data_dict[key] = value
 
@@ -154,8 +149,6 @@ def pc_data_collate_fn(data_list: List[PCData],
                 batched_data_dict[key] = tmp_ls
             elif key in PCData.tensor_to_tensor_items:
                 pass
-            elif key in PCData.list_to_tensor_items:
-                batched_data_dict[key] = torch.tensor(value)
             elif key != 'batch_size':
                 batched_data_dict[key] = value
 

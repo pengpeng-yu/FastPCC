@@ -46,7 +46,6 @@ train:
     filelist_path: ['list_longdress_solider.txt', 'list_exercise_model.txt']
     kd_tree_partition_max_points_num: 200000
     with_color: True
-    random_rotation: False
     random_flip: True
     random_rgb_perm: False
     resolution: [1024, 2048]

@@ -349,13 +349,9 @@ class PCC(nn.Module):
             compressed_bytes = pc_data.inv_transform[0].numpy().astype('<f4').tobytes() + compressed_bytes
         else:
             pred_xyz = coord_recon
-        if pc_data.org_xyz is not None:
-            target_xyz = pc_data.org_xyz[0]
-        else:
-            target_xyz = (pc_data.xyz[:, 1:] if not_part else pc_data.xyz[0])
         ret = self.evaluator.log(
             pred=pred_xyz,
-            target=target_xyz,
+            org_points_num=pc_data.org_points_num[0],
             compressed_bytes=compressed_bytes,
             file_path=pc_data.file_path[0],
             resolution=pc_data.resolution[0],

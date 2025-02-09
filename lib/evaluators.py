@@ -45,32 +45,32 @@ class PCCEvaluator(Evaluator):
     @torch.no_grad()
     def log(self,
             pred: torch.Tensor,
-            target: torch.Tensor,
+            org_points_num: int,
             compressed_bytes: bytes,
             file_path: str,
             resolution: float,
             results_dir: str = None,
             pred_color: torch.Tensor = None,
-            target_color: torch.Tensor = None,
             extra_info_dict: Dict[str, Union[str, int, float]] = None):
         """
-        "pred" and "target" are coordinates with a specified resolution.
-        "pred_color" and "target_color" are RGB colors. (0 ~ 255).
+        "pred" is the reconstructed coordinates with a specified resolution.
+        "file_path" stores the original point cloud.
+        "pred_color" are RGB colors. (0 ~ 255).
         """
         if not self.working:
             self.reset()
             self.mpeg_pc_error_pool = self.mp_ctx.Pool(self.mpeg_pc_error_processes)
             self.working = True
 
-        have_color = pred_color is not None and target_color is not None
-        assert pred.ndim == target.ndim == 2
-        assert pred.shape[1] == target.shape[1] == 3
+        have_color = pred_color is not None
+        assert pred.ndim == 2
+        assert pred.shape[1] == 3
 
         file_info_dict = {
-            'input_points_num': target.shape[0],
+            'input_points_num': org_points_num,
             'output_points_num': pred.shape[0],
             'compressed_bytes': len(compressed_bytes),
-            'bpp': len(compressed_bytes) * 8 / target.shape[0]
+            'bpp': len(compressed_bytes) * 8 / org_points_num
         }
         if extra_info_dict is not None:
             file_info_dict.update(extra_info_dict)

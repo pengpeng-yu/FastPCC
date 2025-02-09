@@ -194,7 +194,7 @@ class PCC(nn.Module):
 
         ret = self.evaluator.log(
             pred=coord_recon,
-            target=pc_data.xyz[:, 1:],
+            org_points_num=pc_data.org_points_num[0],
             compressed_bytes=compressed_bytes,
             file_path=pc_data.file_path[0],
             resolution=pc_data.resolution[0],
