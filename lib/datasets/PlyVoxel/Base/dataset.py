@@ -3,7 +3,6 @@ import pathlib
 
 import open3d as o3d
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 import torch
 import torch.utils.data
 
@@ -53,7 +52,7 @@ class PlyVoxel(torch.utils.data.Dataset):
             filelist_abs_path = osp.join(root, filelist_path)
             logger.info(f'using filelist: "{filelist_abs_path}"')
             with open(filelist_abs_path) as f:
-                for line in f:
+                for line in f.readlines()[::cfg.list_sampling_interval]:
                     line = line.strip()
                     self.file_list.append(osp.join(root, line))
                     self.file_resolutions.append(resolution)

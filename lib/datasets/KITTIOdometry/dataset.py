@@ -43,7 +43,7 @@ class KITTIOdometry(torch.utils.data.Dataset):
     def load_filelist(self, filelist_abs_path):
         self.logger.info(f'using filelist: "{filelist_abs_path}"')
         with open(filelist_abs_path) as f:
-            file_list = [osp.join(self.cfg.root, line.strip()) for line in f]
+            file_list = [osp.join(self.cfg.root, line.strip()) for line in f.readlines()[::self.cfg.list_sampling_interval]]
         return file_list
 
     @staticmethod

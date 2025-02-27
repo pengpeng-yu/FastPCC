@@ -32,7 +32,6 @@ class TrainConfig(SimpleConfig):
     momentum: float_or_seq = 0.9
     weight_decay: float_or_seq = 0.0
     max_grad_norm: float_or_seq = 0.0
-    max_grad_value: float_or_seq = 0.0
     grad_acc_steps: int = 1
 
     scheduler: str_or_seq = 'Step'
@@ -73,7 +72,6 @@ class TrainConfig(SimpleConfig):
                     'momentum',
                     'weight_decay',
                     'max_grad_norm',
-                    'max_grad_value',
                     'scheduler',
                     'lr_step_size',
                     'lr_step_gamma']:

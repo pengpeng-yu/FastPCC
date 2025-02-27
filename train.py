@@ -72,8 +72,8 @@ def main():
         tb_writer = SummaryWriter(str(tb_logdir))
         tb_port = cfg.train.tensorboard_port
         if tb_port == -1:
-            logger.warning(f'disable launching Tensorboard due to train.tensorboard_port=-1\n'
-                           f'set a valid value, e.g., train.tensorboard_port=6006, to enable it.')
+            logger.warning(f'disable launching Tensorboard due to train.tensorboard_port=-1.\n'
+                           f'Set a valid value, e.g., train.tensorboard_port=6006, to enable it.')
             tb_proc = None
         else:
             try:
@@ -238,6 +238,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         pin_memory=cfg.train.pin_memory, collate_fn=dataset.collate_fn
     )
     steps_one_epoch = len(dataloader)
+    total_steps = cfg.train.epochs * steps_one_epoch
 
     # Initialize optimizers and schedulers
     params_list: List[List[torch.nn.Parameter]] = [[] for _ in range(len(cfg.train.optimizer))]
@@ -300,36 +301,35 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         ckpt_path = autoindex_obj(cfg.train.from_ckpt)
         ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
         if 'state_dict' in cfg.train.resume_items:
-            incompatible_keys, missing_keys, unexpected_keys = load_loose_state_dict(model, ckpt['state_dict'])
+            incompatible_keys, missing_keys, unexpected_keys = load_loose_state_dict(
+                model, ckpt['state_dict'] if 'state_dict' in ckpt else ckpt['ema_state_dict'])
             logger.info('resumed model_state_dict from checkpoint "{}"'.format(ckpt_path))
             if len(incompatible_keys) != 0:
                 logger.warning(f'incompatible keys:\n{incompatible_keys}')
             if len(missing_keys) != 0:
                 logger.warning(f'missing keys:\n{missing_keys}')
-            if len(incompatible_keys) != 0:
+            if len(unexpected_keys) != 0:
                 logger.warning(f'unexpected keys:\n{unexpected_keys}')
             if cfg.train.ema:
-                assert ckpt['ema_state_dict'].keys() == ckpt['state_dict'].keys()
-                load_loose_state_dict(ema.module, ckpt['ema_state_dict'])
+                load_loose_state_dict(
+                    ema.module, ckpt['ema_state_dict'] if 'ema_state_dict' in ckpt else ckpt['state_dict'])
                 logger.info('resumed ema_state_dict from checkpoint "{}"'.format(ckpt_path))
         if 'scheduler_state_dict' in cfg.train.resume_items:
-            start_epoch = int(ckpt['scheduler_state_dict'][0]['last_epoch'])
             for idx, scheduler in enumerate(scheduler_list):
                 scheduler.load_state_dict(ckpt['scheduler_state_dict'][idx])
-                assert scheduler.last_epoch == start_epoch
-            logger.warning('resuming scheduler_state_dict, '
+            logger.warning('resumed scheduler_state_dict, '
                            'hyperparameters of scheduler defined in yaml file will be overridden')
+            start_epoch = ckpt['last_epoch'] + 1
             logger.info('start training from epoch {}'.format(start_epoch))
         if 'optimizer_state_dict' in cfg.train.resume_items:
             for idx, optimizer in enumerate(optimizer_list):
                 optimizer.load_state_dict(ckpt['optimizer_state_dict'][idx])
-            logger.warning('resuming optimizer_state_dict, '
+            logger.warning('resumed optimizer_state_dict, '
                            'hyperparameters of optimizer defined in yaml file will be overridden')
-        del ckpt
+        del ckpt_path, incompatible_keys, missing_keys, unexpected_keys, ckpt
 
     # Training loop
     logger.info('start training...')
-    total_steps = cfg.train.epochs * steps_one_epoch
     global_step = steps_one_epoch * start_epoch
     ave_time_onestep = None
     scaler = amp.GradScaler(enabled=cfg.train.amp)
@@ -352,7 +352,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 batch_data = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                               for k, v in batch_data.items()}
             elif isinstance(batch_data, SampleData):
-                batch_data.training_step = global_step // cfg.train.grad_acc_steps  # backward steps
+                batch_data.training_step = global_step // cfg.train.grad_acc_steps  # Optimization steps
                 batch_data.to(device=device, non_blocking=True)
             else: raise NotImplementedError
 
@@ -371,11 +371,6 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                                 optimizer.param_groups[0]['params'],
                                 cfg.train.max_grad_norm[idx],
                                 error_if_nonfinite=True
-                            )
-                        if cfg.train.max_grad_value[idx] != 0:
-                            torch.nn.utils.clip_grad_value_(
-                                optimizer.param_groups[0]['params'],
-                                cfg.train.max_grad_value[idx]
                             )
                         scaler.step(optimizer)
                 scaler.update()
@@ -409,6 +404,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                             optimizer.param_groups[0]['lr'], global_step
                         )
                     for item_name, item in loss_dict.items():
+                        if isinstance(item, (torch.Tensor, np.ndarray)):
+                            item = item.item()
                         if item_name != 'loss':
                             item_category = item_name.rsplit("_", 1)[-1].capitalize()
                             tb_writer.add_scalar(f'Train/{item_category}/{item_name}', item, global_step)
@@ -440,7 +437,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                     for optimizer in optimizer_list],
                 'scheduler_state_dict': [
                     scheduler.state_dict() if scheduler is not None else None
-                    for scheduler in scheduler_list]
+                    for scheduler in scheduler_list],
+                'last_epoch': epoch
             }
             if cfg.train.ema:
                 ckpt['ema_state_dict'] = ema.module.state_dict()

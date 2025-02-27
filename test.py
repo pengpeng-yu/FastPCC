@@ -10,7 +10,7 @@ import torch.utils.data
 
 from lib.config import Config
 from lib.utils import autoindex_obj
-from lib.torch_utils import select_device, unwrap_ddp
+from lib.torch_utils import select_device, unwrap_ddp, load_loose_state_dict
 from lib.data_utils import SampleData
 
 
@@ -80,21 +80,18 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         if cfg.test.from_ckpt != '':
             ckpt_path = autoindex_obj(cfg.test.from_ckpt)
             logger.info(f'loading weights from {ckpt_path}')
-            try:
-                ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
-                if 'ema_state_dict' in ckpt:
-                    logger.info('using EMA stat_dict')
-                    state_dict = ckpt['ema_state_dict']
-                else:
-                    state_dict = ckpt['state_dict']
-                del ckpt
-                incompatible_keys = model.load_state_dict(state_dict, strict=False)
-            except RuntimeError as e:
-                logger.error('error when loading model_state_dict')
-                raise e
-            logger.info('resumed weights in checkpoint "{}"'.format(ckpt_path))
-            if incompatible_keys[0] != [] or incompatible_keys[1] != []:
-                logger.warning(incompatible_keys)
+            ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
+            sd_key = 'ema_state_dict' if cfg.test.ema and 'ema_state_dict' in ckpt else 'state_dict'
+            incompatible_keys, missing_keys, unexpected_keys = load_loose_state_dict(model, ckpt[sd_key])
+            del ckpt
+            logger.info('resumed model_state_dict from checkpoint "{}"'.format(ckpt_path))
+            if len(incompatible_keys) != 0:
+                logger.warning(f'incompatible keys:\n{incompatible_keys}')
+            if len(missing_keys) != 0:
+                logger.warning(f'missing keys:\n{missing_keys}')
+            if len(unexpected_keys) != 0:
+                logger.warning(f'unexpected keys:\n{unexpected_keys}')
+            del incompatible_keys, missing_keys, unexpected_keys
         else:
             logger.warning(f'no weight is loaded')
         device, cuda_ids = select_device(

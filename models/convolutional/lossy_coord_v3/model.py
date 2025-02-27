@@ -22,7 +22,7 @@ from .model_config import Config
 from .rans_coder import RansEncoder, RansDecoder
 
 
-ln2 = math.log(2)
+log2_e = math.log2(math.e)
 
 
 class OneScalePredictor(nn.Module):
@@ -90,9 +90,7 @@ class OneScalePredictor(nn.Module):
             cur_ref.F = torch.cat((cur_ref_f, cur_rec.F), 1)
             cur_ref = transform1(cur_ref)
             noisy_f, fea_loss = em(cur_ref.F)
-            fea_loss = (fea_loss / scattered_points_num[:, None]).sum() / batch_size
-            if warmup:
-                fea_loss *= 0.01
+            fea_loss = (fea_loss / scattered_points_num[:, None]).sum() * ((0.01 if warmup else 1) / batch_size)
             fea_loss_list.append(fea_loss)
             cur_ref.F = noisy_f
             cur_rec.F = torch.cat((cur_rec.F, transform2(cur_ref).F), 1)
@@ -102,7 +100,7 @@ class OneScalePredictor(nn.Module):
         if self.if_pred_oct_lossl:
             cur_oct = (cur_bin.to(torch.int32) << bin2oct_kernel).sum(1, dtype=torch.int64).add_(-1)
             cur_geo_loss = (F.cross_entropy(cur_pred.F, cur_oct, reduction='none')
-                            / scattered_points_num).sum() / (batch_size * ln2)
+                            / scattered_points_num).sum() * (log2_e / batch_size)
             if self.if_upsample:
                 pred_bin = cur_bin.bool()
                 new_c = up_ref.C
@@ -118,7 +116,7 @@ class OneScalePredictor(nn.Module):
                 for b in range(batch_size):
                     up_scattered_points_num[divider[b]: divider[b + 1]] = up_points_num[b]
             cur_geo_loss = (F.binary_cross_entropy_with_logits(cur_pred.F, cur_bin, reduction='none').sum(1)
-                            / up_scattered_points_num).sum() * (self.coord_recon_loss_factor / batch_size / ln2)
+                            / up_scattered_points_num).sum() * (self.coord_recon_loss_factor * log2_e / batch_size)
 
             if self.if_upsample:
                 cur_pred_f = cur_pred.F
@@ -749,4 +747,4 @@ class EntropyModel(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         x = x + torch.empty_like(x).uniform_(-0.5, 0.5)
         log_probs = self.prior.log_prob(x)
-        return x, log_probs / -ln2
+        return x, log_probs * -log2_e

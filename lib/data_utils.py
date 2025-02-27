@@ -31,21 +31,13 @@ class SampleData:
     def to(self, device, non_blocking=False):
         for key, value in self.__dict__.items():
             if isinstance(value, torch.Tensor):
-                self.__dict__[key] = value.to(device, non_blocking=non_blocking)
+                self.__dict__[key] = value.to(device, non_blocking=non_blocking, memory_format=torch.contiguous_format)
 
     def pin_memory(self):
         for key, value in self.__dict__.items():
             if isinstance(value, torch.Tensor):
                 self.__dict__[key] = value.pin_memory()
         return self
-
-
-class IMData(SampleData):
-    def __init__(self, im, file_path, valid_range=None):
-        super(IMData, self).__init__()
-        self.im = im
-        self.file_path = file_path
-        self.valid_range = valid_range
 
 
 class PCData(SampleData):
