@@ -98,7 +98,7 @@ def load_loose_state_dict(model: nn.Module, state_dict: Dict[str, nn.Parameter])
             missing_keys.append((key, param.shape))
     unexpected_keys = [(key, state_dict[key].shape) for key in state_dict if key not in existing_keys]
     missing_keys_, unexpected_keys_ = model.load_state_dict(compatible_state_dict, strict=False)
-    assert set(k[0] for k in incompatible_keys) < set(missing_keys_)
+    assert set(k[0] for k in incompatible_keys) <= set(missing_keys_), f"{incompatible_keys}\n {missing_keys_}"
     assert len(unexpected_keys_) == 0
     return incompatible_keys, missing_keys, unexpected_keys
 

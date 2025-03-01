@@ -81,7 +81,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
             ckpt_path = autoindex_obj(cfg.test.from_ckpt)
             logger.info(f'loading weights from {ckpt_path}')
             ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
-            sd_key = 'ema_state_dict' if cfg.test.ema and 'ema_state_dict' in ckpt else 'state_dict'
+            sd_key = 'ema_state_dict' if 'ema_state_dict' in ckpt else 'state_dict'
             incompatible_keys, missing_keys, unexpected_keys = load_loose_state_dict(model, ckpt[sd_key])
             del ckpt
             logger.info('resumed model_state_dict from checkpoint "{}"'.format(ckpt_path))
