@@ -1,4 +1,4 @@
-This project contains an implementation of our ICME 2023 paper "Sparse Representation based Deep Residual Geometry Compression Network for Large-scale Point Clouds" [1] and some improvements (accepted by TMM [2]).
+This project contains an implementation of our ICME 2023 and TMM papers on learning-based point cloud compression.
 Contact me for any reproduction issue: <yupp5@mail2.sysu.edu.cn>
 
 
@@ -7,7 +7,7 @@ See our detailed experimental results on Intel Xeon Gold 5118 and NVIDIA 2080Ti 
 
 
 ## Models
-- `config/convolutional/lossy_coord_v3/*.yaml`: Improved geometry compression (under development). 
+- `config/convolutional/lossy_coord_v3/*.yaml`: Improved geometry compression (under development, based on torchsparse). 
 - `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression in [2]. 
 - `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression in [2]. 
 - `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model in [1] (Deprecated).
