@@ -183,6 +183,10 @@ class PCC(nn.Module):
         feature, points_num_list = self.encoder(self.get_sparse_pc(pc_data.xyz))
         feature_recon, em_bytes = self.em_lossless_based(feature, 1)
         coord_recon = self.decoder(feature_recon, points_num_list)
+        if pc_data.inv_transform is not None:
+            inv_trans = pc_data.inv_transform[0].to(coord_recon.device)
+            coord_recon = coord_recon * inv_trans[3]
+            coord_recon += inv_trans[None, :3]
 
         with io.BytesIO() as bs:
             if self.cfg.adaptive_pruning:
@@ -190,6 +194,7 @@ class PCC(nn.Module):
                     (_[0].to_bytes(3, 'little', signed=False) for _ in points_num_list)
                 ))
             bs.write(em_bytes)
+            bs.write(pc_data.inv_transform[0].numpy().astype('<f4').tobytes())
             compressed_bytes = bs.getvalue()
 
         ret = self.evaluator.log(

@@ -2,18 +2,8 @@ import platform
 from typing import List, Tuple, Dict, Callable
 
 import torch
-import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.distributed
-
-
-def init_torch_seeds(seed=0):
-    # Speed-reproducibility tradeoff https://pytorch.org/docs/stable/notes/randomness.html
-    if seed == 0:  # slower, more reproducible
-        torch.manual_seed(seed)
-        cudnn.benchmark, cudnn.deterministic = False, True
-    else:  # faster, less reproducible
-        cudnn.benchmark, cudnn.deterministic = True, False
 
 
 def select_device(logger, local_rank, device='', batch_size=None) -> Tuple[torch.device, List[int]]:
@@ -96,7 +86,7 @@ def load_loose_state_dict(model: nn.Module, state_dict: Dict[str, nn.Parameter])
                 incompatible_keys.append((key, param.shape, state_dict[key].shape))
         else:
             missing_keys.append((key, param.shape))
-    unexpected_keys = [(key, state_dict[key].shape) for key in state_dict if key not in existing_keys]
+    unexpected_keys = [(key, getattr(state_dict[key], 'shape', None)) for key in state_dict if key not in existing_keys]
     missing_keys_, unexpected_keys_ = model.load_state_dict(compatible_state_dict, strict=False)
     assert set(k[0] for k in incompatible_keys) <= set(missing_keys_), f"{incompatible_keys}\n {missing_keys_}"
     assert len(unexpected_keys_) == 0

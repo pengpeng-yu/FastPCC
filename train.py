@@ -22,12 +22,13 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.cuda import amp
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.modules.module import _EXTRA_STATE_KEY_SUFFIX as MODULE_EXTRA_STATE_KEY_SUFFIX
+import torch.backends.cudnn as cudnn
 from lib.model_ema import ModelEmaV3
 
 from test import test
 from lib.config import Config
 from lib.utils import autoindex_obj, make_new_dirs, eta_by_seconds, totaltime_by_seconds
-from lib.torch_utils import select_device, init_torch_seeds, unwrap_ddp, load_loose_state_dict
+from lib.torch_utils import select_device, unwrap_ddp, load_loose_state_dict
 from lib.data_utils import SampleData
 
 
@@ -142,12 +143,10 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     logger.info(f'world_size: {world_size}, global_rank: {global_rank}, '
                 f'local_world_size: {local_world_size}, local_rank: {local_rank}')
 
-    # Initialize random number generator (RNG) seeds
     if not cfg.train.more_reproducible:
-        init_torch_seeds(1)
+        cudnn.benchmark, cudnn.deterministic = True, False
     else:
-        np.random.seed(0)
-        init_torch_seeds(0)
+        cudnn.benchmark, cudnn.deterministic = False, True
 
     # Initialize model
     try:

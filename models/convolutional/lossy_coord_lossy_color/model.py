@@ -223,6 +223,11 @@ class PCC(nn.Module):
         with Timer() as decoder_t, TorchCudaMaxMemoryAllocated() as decoder_m:
             coord_recon, color_recon = self.decompress(compressed_bytes) if not_part else \
                 self.decompress_partitions(compressed_bytes)
+        if pc_data.inv_transform is not None:
+            inv_trans = pc_data.inv_transform[0].to(coord_recon.device)
+            coord_recon = coord_recon * inv_trans[3]
+            coord_recon += inv_trans[None, :3]
+            compressed_bytes = pc_data.inv_transform[0].numpy().astype('<f4').tobytes() + compressed_bytes
         ME.clear_global_coordinate_manager()
         ret = self.evaluator.log(
             pred=coord_recon,
