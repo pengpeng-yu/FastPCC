@@ -16,21 +16,28 @@ class PlyVoxel(torch.utils.data.Dataset):
         super(PlyVoxel, self).__init__()
         self.is_training = is_training
 
-        def get_collections(x, repeat):
-            if isinstance(x, tuple) or isinstance(x, list):
-                assert len(x) == repeat, \
-                    f'Unexpected length ({len(x)}) of a dataset config item,' \
-                    f'which is expected to have a length of {repeat}.'
-                return x
-            else:
-                return (x,) * repeat
+        def get_collections(*items):
+            subsets_num = -1
+            for x in items:
+                if isinstance(x, tuple) or isinstance(x, list):
+                    if subsets_num == -1:
+                        subsets_num = len(x)
+                    else:
+                        assert len(x) == subsets_num, \
+                            f'Unexpected length ({len(x)}) of a dataset config item,' \
+                            f'which is expected to have a length of {subsets_num}.'
+            if subsets_num == -1: subsets_num = 1
+            ret = []
+            for x in items:
+                if isinstance(x, tuple) or isinstance(x, list):
+                    ret.append(x)
+                else:
+                    ret.append((x,) * subsets_num)
+            return ret
 
-        roots = (cfg.root,) if isinstance(cfg.root, str) else cfg.root
-        filelist_paths = get_collections(cfg.filelist_path, len(roots))
-        file_path_patterns = get_collections(cfg.file_path_pattern, len(roots))
-        resolutions = get_collections(cfg.resolution, len(roots))
-        coord_scaler = get_collections(cfg.coord_scaler, len(roots))
-        partition_max_points_num = get_collections(cfg.kd_tree_partition_max_points_num, len(roots))
+        roots, filelist_paths, file_path_patterns, resolutions, coord_scaler, partition_max_points_num = \
+            get_collections(cfg.root, cfg.filelist_path, cfg.file_path_pattern, cfg.resolution,
+                            cfg.coord_scaler, cfg.kd_tree_partition_max_points_num)
 
         # define files list path
         for root, filelist_path, file_path_pattern in zip(roots, filelist_paths, file_path_patterns):
@@ -60,11 +67,15 @@ class PlyVoxel(torch.utils.data.Dataset):
                     self.file_partition_max_points_num_list.append(par_num)
 
         self.cfg = cfg
+        self.random_batch_coord_scaler_log2 = tuple((_, 2 ** _) for _ in self.cfg.random_batch_coord_scaler_log2)
 
     def __len__(self):
         return len(self.file_list)
 
     def __getitem__(self, index):
+        return index
+
+    def getitem(self, index, batch_coord_scaler: float = 1.0):
         # load
         file_path = self.file_list[index]
         try:
@@ -79,11 +90,11 @@ class PlyVoxel(torch.utils.data.Dataset):
         org_point = xyz.min(0)
         xyz -= org_point
 
-        coord_scaler = self.file_coord_scaler_list[index]
-        if coord_scaler != 1:
+        coord_scaler = self.file_coord_scaler_list[index] * batch_coord_scaler
+        if coord_scaler != 1:  # Assume no attributes
             xyz = (xyz * coord_scaler).round()
             xyz = np.unique(xyz.astype(np.int32), axis=0)
-        else:
+        else:  # Assume no duplicated points
             xyz = xyz.astype(np.int32)
 
         if self.cfg.with_color:
@@ -136,18 +147,20 @@ class PlyVoxel(torch.utils.data.Dataset):
             org_points_num=org_points_num,
             inv_transform=inv_trans
         )
-        if not self.is_training:
-            pc_data.tmp_par_num = par_num
         return pc_data
 
     def collate_fn(self, batch):
+        batch_coord_scaler_log2, batch_coord_scaler = self.random_batch_coord_scaler_log2[
+            np.random.randint(0, len(self.random_batch_coord_scaler_log2))]
+        par_num = self.file_partition_max_points_num_list[batch[0]]
+        batch = [self.getitem(index, batch_coord_scaler) for index in batch]
         if not self.is_training:
             assert len(batch) == 1
-            par_num = batch[0].tmp_par_num
-            del batch[0].tmp_par_num
-            return pc_data_collate_fn(batch, kd_tree_partition_max_points_num=par_num)
+            ret = pc_data_collate_fn(batch, kd_tree_partition_max_points_num=par_num)
         else:
-            return pc_data_collate_fn(batch)
+            ret = pc_data_collate_fn(batch)
+        ret.batch_coord_scaler_log2 = batch_coord_scaler_log2 or None
+        return ret
 
 
 if __name__ == '__main__':

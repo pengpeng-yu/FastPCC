@@ -88,12 +88,12 @@ class TrainConfig(SimpleConfig):
 class TestConfig(SimpleConfig):
     rundir_name: str = 'test_<autoindex>'
     device: Union[int, str] = '0'  # 0 or 1 or cpu (only single gpu supported)
-    batch_size: int = 8
+    batch_size: int = 1
     num_workers: int = 0
     pin_memory: bool = False
     from_ckpt: str = ''
-    log_frequency: int = 50  # (steps) used for logging
-    save_results: bool = False  # save the outputs of the model in runs/rundir_name/results
+    log_frequency: int = 1  # (steps) used for logging
+    save_results: bool = True  # save the outputs of the model in runs/rundir_name/results
 
     dataset_module_path: str = ''
     dataset: SimpleConfig = None

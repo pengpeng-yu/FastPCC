@@ -18,8 +18,6 @@ model:
 train:
   rundir_name: 'train_convolutional_<autoindex>'
   more_reproducible: True
-  amp: False
-  find_unused_parameters: False
   batch_size: 8
   num_workers: 4
   optimizer: AdamW
@@ -49,10 +47,7 @@ train:
 
 
 test:
-  batch_size: 1
   num_workers: 4
-  log_frequency: 1
-  save_results: True
   dataset_module_path:
     'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_DenseVox14_Solid_MVUB'
   dataset:

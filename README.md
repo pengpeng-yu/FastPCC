@@ -7,7 +7,7 @@ See our detailed experimental results on Intel Xeon Gold 5118 and NVIDIA 2080Ti 
 
 
 ## Models
-- `config/convolutional/lossy_coord_v3/*.yaml`: Improved geometry compression (under development, based on torchsparse). 
+- `config/convolutional/lossy_coord_v3/*.yaml`: Improved geometry compression (coming soon). 
 - `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression in [2]. 
 - `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression in [2]. 
 - `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model in [1] (Deprecated).

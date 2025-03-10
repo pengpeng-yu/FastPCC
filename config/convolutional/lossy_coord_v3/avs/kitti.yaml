@@ -12,10 +12,6 @@ train:
 
 
 test:
-  batch_size: 1
-  num_workers: 4
-  log_frequency: 1
-  save_results: True
   dataset_module_path: 'lib.datasets.PlyVoxel.Base'
   dataset:
     root: 'datasets/AVC_PCC_CfE_N3908/upload/Cat2B-1/kitti11-21_test'

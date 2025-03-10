@@ -13,6 +13,7 @@ class DatasetConfig(SimpleConfig):
 
     kd_tree_partition_max_points_num: Union[int, Tuple[int, ...]] = 0
     coord_scaler: Union[float, Tuple[float, ...]] = 1.0
+    random_batch_coord_scaler_log2: Tuple[int, ...] = (0,)
     with_color: bool = False
     random_flip: bool = False
     random_rgb_offset: int = 0

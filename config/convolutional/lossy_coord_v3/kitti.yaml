@@ -1,14 +1,13 @@
 model_module_path: models.convolutional.lossy_coord_v3
 model:
-  num_latents: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  lossl_geo_upsample: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-  max_stride: 2048
+  num_latents: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  lossl_geo_upsample: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  max_stride: 16384
 
 
 train:
   rundir_name: 'train_convolutional_<autoindex>'
   more_reproducible: True
-  find_unused_parameters: False
   batch_size: 8
   num_workers: 8
   optimizer: AdamW
@@ -20,13 +19,12 @@ train:
   ema_warmup: True
   ema_warmup_gamma: 1.0
   ema_warmup_power: 0.8
-  amp: False
 
   learning_rate: 0.0001
-  epochs: 50
+  epochs: 80
 
   scheduler: Step
-  lr_step_size: 30
+  lr_step_size: 80
   lr_step_gamma: 0.3
 
   ckpt_frequency: 5
@@ -41,10 +39,7 @@ train:
 
 
 test:
-  batch_size: 1
-  num_workers: 4
-  log_frequency: 1
-  save_results: True
+  num_workers: 8
   dataset_module_path: 'lib.datasets.KITTIOdometry'
   dataset:
     morton_sort: False

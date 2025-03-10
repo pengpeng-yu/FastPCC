@@ -10,7 +10,6 @@ model:
 train:
   rundir_name: 'train_convolutional_<autoindex>'
   more_reproducible: True
-  find_unused_parameters: False
   batch_size: 8
   num_workers: 8
   optimizer: AdamW
@@ -22,7 +21,6 @@ train:
   ema_warmup: True
   ema_warmup_gamma: 1.0
   ema_warmup_power: 0.75
-  amp: False
 
   learning_rate: 0.0001
   epochs: 50
@@ -48,10 +46,7 @@ train:
 
 
 test:
-  batch_size: 1
   num_workers: 4
-  log_frequency: 1
-  save_results: True
   dataset_module_path:
     'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_Solid_MVUB'
   dataset:

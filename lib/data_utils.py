@@ -52,7 +52,8 @@ class PCData(SampleData):
                  batch_size: int = 0,
                  points_num: List[int] = None,
                  org_points_num: Union[int, List[int]] = None,
-                 inv_transform: Union[torch.Tensor, List[torch.Tensor]] = None):
+                 inv_transform: Union[torch.Tensor, List[torch.Tensor]] = None,
+                 batch_coord_scaler_log2: int = None):
         super(PCData, self).__init__()
         self.xyz = xyz
         self.color = color
@@ -63,6 +64,7 @@ class PCData(SampleData):
         self.points_num = points_num
         self.org_points_num = org_points_num
         self.inv_transform = inv_transform
+        self.batch_coord_scaler_log2 = batch_coord_scaler_log2
 
     def to(self, device, non_blocking=False):
         super(PCData, self).to(device, non_blocking)
