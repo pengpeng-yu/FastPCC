@@ -15,7 +15,6 @@ model:
 
 train:
   rundir_name: 'train_convolutional_<autoindex>'
-  more_reproducible: True
   batch_size: 8
   num_workers: 4
   optimizer: [AdamW, AdamW]

@@ -15,3 +15,5 @@ class Config(SimpleConfig):
     # Loss items
     coord_recon_loss_factor: float = 1.0
     warmup_steps: int = 0
+
+    skip_top_scales_num: int = 0  # Test phase

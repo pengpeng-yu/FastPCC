@@ -58,7 +58,9 @@ def main():
                         ' <level>{message}</level>'
         logger.add(sys.stderr, colorize=True, format=loguru_format, level='DEBUG')
         os.makedirs('runs', exist_ok=True)
-        run_dir = pathlib.Path(autoindex_obj(osp.join('runs', cfg.train.rundir_name)))
+        run_dir = pathlib.Path(autoindex_obj(
+            osp.join('runs', cfg.train.rundir_name) if not osp.isabs(cfg.train.rundir_name)
+            else cfg.train.rundir_name))
         ckpts_dir = run_dir / 'ckpts'
         make_new_dirs(run_dir, logger)
         make_new_dirs(ckpts_dir, logger)
@@ -143,7 +145,13 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     logger.info(f'world_size: {world_size}, global_rank: {global_rank}, '
                 f'local_world_size: {local_world_size}, local_rank: {local_rank}')
 
-    if not cfg.train.more_reproducible:
+    if hasattr(torch, 'set_float32_matmul_precision'):
+        torch.set_float32_matmul_precision(cfg.float32_matmul_precision)
+    else:
+        logger.warning(f'ignore config "float32_matmul_precision={cfg.float32_matmul_precision}" '
+                       f'since torch.set_float32_matmul_precision is not available')
+
+    if not cfg.more_reproducible:
         cudnn.benchmark, cudnn.deterministic = True, False
     else:
         cudnn.benchmark, cudnn.deterministic = False, True
@@ -194,7 +202,8 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 dpp_params_and_buffers_to_ignore.append(state_name)
         DDP._set_params_and_buffers_to_ignore_for_model(model, dpp_params_and_buffers_to_ignore)
         model = DDP(model.to(device), device_ids=[local_rank], output_device=local_rank,
-                    find_unused_parameters=cfg.train.find_unused_parameters)
+                    find_unused_parameters=cfg.train.find_unused_parameters,
+                    bucket_cap_mb=cfg.train.bucket_cap_mb or None)
         if not cfg.train.shuffle:
             logger.warning('ignore cfg.train.shuffle == False due to DDP mode')
     else: logger.info('using CPU')
@@ -234,7 +243,9 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         dataset, process_batch_size,
         cfg.train.shuffle if dataset_sampler is None else None,
         sampler=dataset_sampler, num_workers=cfg.train.num_workers, drop_last=True,
-        pin_memory=cfg.train.pin_memory, collate_fn=dataset.collate_fn
+        pin_memory=cfg.train.pin_memory, persistent_workers=cfg.train.num_workers != 0,
+        prefetch_factor=cfg.train.prefetch_factor if cfg.train.num_workers != 0 else None,
+        collate_fn=getattr(dataset, 'collate_fn', None)
     )
     steps_one_epoch = len(dataloader)
     total_steps = cfg.train.epochs * steps_one_epoch

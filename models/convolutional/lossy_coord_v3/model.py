@@ -72,7 +72,7 @@ class OneScalePredictor(nn.Module):
 
     def forward(self, cur_rec: SparseTensor, cur_ref: SparseTensor, up_ref: SparseTensor, cur_bin: torch.FloatTensor,
                 batch_size: int, device, points_num: List[int], em, bin2oct_kernel, unfold_kernel,
-                warmup: bool = False):
+                warmup: bool):
         if not self.if_upsample: assert up_ref.stride[0] == 1
         divider = torch.searchsorted(
             cur_rec.C[:, 0].contiguous(), torch.arange(batch_size + 1, device=device, dtype=torch.int32))
@@ -153,7 +153,7 @@ class OneScalePredictor(nn.Module):
         return cur_rec, fea_loss_list, cur_geo_loss
 
     def compress(self, cur_rec: SparseTensor, cur_ref: SparseTensor, up_ref: SparseTensor, cur_bin: torch.FloatTensor,
-                 bin2oct_kernel):
+                 bin2oct_kernel, if_upsample):
         if cur_rec.F.shape[1] == 1:
             cur_rec = self.dec_init(cur_rec)
         cur_rec = self.dec(cur_rec)
@@ -172,7 +172,7 @@ class OneScalePredictor(nn.Module):
         if self.if_pred_oct_lossl:
             cur_pred = self.pred(cur_rec).F
             cur_oct = (cur_bin.to(torch.int32) << bin2oct_kernel).sum(1, dtype=torch.int32).add_(-1)
-            if self.if_upsample:
+            if if_upsample:
                 pred_bin = cur_bin.bool()
                 cur_rec.F = torch.cat((cur_rec.F, cur_bin), 1)
                 cur_rec = self.upsample(cur_rec)
@@ -188,7 +188,7 @@ class OneScalePredictor(nn.Module):
         return cur_rec, rounded_f_list, cur_pred, cur_oct
 
     def decompress(self, cur_rec: SparseTensor, cached_points_num, device, bin2oct_kernel, unfold_kernel,
-                   rans_decode_fea, rans_decode_oct):
+                   rans_decode_fea, rans_decode_oct, if_upsample):
         if cur_rec.F.shape[1] == 1:
             cur_rec = self.dec_init(cur_rec)
         cur_rec = self.dec(cur_rec)
@@ -234,7 +234,7 @@ class OneScalePredictor(nn.Module):
                 mask |= cur_pred_f > kth_v
             cur_bin = mask
 
-        if self.if_upsample:
+        if if_upsample:
             cur_rec.F = torch.cat((cur_rec.F, cur_bin), 1)
             cur_rec = self.upsample(cur_rec)
             new_c = cur_rec.C[:, None]
@@ -416,14 +416,14 @@ class Model(nn.Module):
             return self.test_forward(pc_data)
 
     @staticmethod
-    def get_init_pc(xyz: torch.Tensor, batch_size: int, stride: int = 1) -> SparseTensor:
+    def get_init_pc(xyz: torch.Tensor, stride: int = 1) -> SparseTensor:
         # Input coordinates are assumed to be Morton-sorted with unique points.
         sparse_pc_feature = torch.ones((xyz.shape[0], 1), dtype=torch.float, device=xyz.device)
         sparse_pc = SparseTensor(sparse_pc_feature, xyz, (stride,) * 3)
         return sparse_pc
 
     def train_forward(self, xyz: torch.Tensor, points_num: List[int], batch_size: int, training_step: int):
-        org = self.get_init_pc(xyz, batch_size)
+        org = self.get_init_pc(xyz)
         device = org.F.device
 
         strided_list = [org]
@@ -554,11 +554,14 @@ class Model(nn.Module):
         xyz = xyz[torch.argsort(morton_encode_magicbits(xyz[:, 1:], inverse=True))]
         org = self.get_init_pc(xyz, 1)
 
+        blocks_enc = self.blocks_enc[self.cfg.skip_top_scales_num:]
+        blocks_dec = self.blocks_dec[self.cfg.skip_top_scales_num:]
+
         strided_list = [org]
-        for block_enc in self.blocks_enc:
+        for block_enc in blocks_enc:
             strided_list.append(block_enc(strided_list[-1]))
 
-        for _ in range(len(self.blocks_enc), self.max_downsample_times):
+        for _ in range(len(blocks_enc), self.max_downsample_times - self.cfg.skip_top_scales_num):
             strided_list.append(self.get_bin(strided_list[-1], org.F))
 
         cached_points_num = []
@@ -574,16 +577,16 @@ class Model(nn.Module):
 
         cur_rec = SparseTensor(
             org.F[:strided_list[-1].C.shape[0]], strided_list[-1].C,
-            (2 ** self.max_downsample_times,) * 3)
+            (2 ** (self.max_downsample_times - self.cfg.skip_top_scales_num),) * 3)
         cur_rec._caches = org._caches
 
         cached_list = []
-        for idx in range(self.max_downsample_times, 0, -1):
-            if idx > len(self.blocks_dec):
+        for idx in range(self.max_downsample_times - self.cfg.skip_top_scales_num, 0, -1):
+            if idx > len(blocks_dec):
                 block_dec = self.block_dec_recurrent
             else:
-                block_dec = self.blocks_dec[idx - 1]
-            if (idx == 1 and self.cfg.lossl_geo_upsample[idx]) or idx > len(self.blocks_enc):
+                block_dec = blocks_dec[idx - 1]
+            if (idx == 1 and self.cfg.lossl_geo_upsample[idx]) or idx > len(blocks_enc):
                 cur_bin = strided_list[idx].F
             else:
                 if cur_rec._caches is not org._caches:
@@ -592,7 +595,7 @@ class Model(nn.Module):
                 cur_bin = self.get_bin(strided_list[idx - 1], org.F).F
                 self.tmp_custom_coord = None
             cur_rec, rounded_f_list, cur_pred, cur_oct = block_dec.compress(
-                cur_rec, strided_list[idx], strided_list[idx - 1], cur_bin, self.bin2oct_kernel)
+                cur_rec, strided_list[idx], strided_list[idx - 1], cur_bin, self.bin2oct_kernel, if_upsample=idx != 1,)
             strided_list.pop()
             if cur_rec is None:
                 break
@@ -658,16 +661,17 @@ class Model(nn.Module):
         cur_rec = self.get_init_pc(
             F.pad(self.rans_decode_fea(
                 bottom_points_num * 3, device, torch.int32, decode_rounded_min=False).reshape(-1, 3), (1, 0, 0, 0)),
-            1, 2 ** self.max_downsample_times)
+            2 ** (self.max_downsample_times - self.cfg.skip_top_scales_num))
 
-        for idx in range(self.max_downsample_times, 0, -1):
-            if idx > len(self.blocks_dec):
+        blocks_dec = self.blocks_dec[self.cfg.skip_top_scales_num:]
+        for idx in range(self.max_downsample_times - self.cfg.skip_top_scales_num, 0, -1):
+            if idx > len(blocks_dec):
                 block_dec = self.block_dec_recurrent
             else:
-                block_dec = self.blocks_dec[idx - 1]
+                block_dec = blocks_dec[idx - 1]
             cur_rec = block_dec.decompress(
                 cur_rec, cached_points_num, device, self.bin2oct_kernel, self.unfold_kernel,
-                self.rans_decode_fea, self.rans_decode_oct)
+                self.rans_decode_fea, self.rans_decode_oct, if_upsample=idx != 1)
 
         cur_rec += coord_offset
         return cur_rec

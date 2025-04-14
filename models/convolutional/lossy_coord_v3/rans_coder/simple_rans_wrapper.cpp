@@ -65,7 +65,7 @@ uint64_t RansEncoder::encode_with_precomp(
 }
 
 uint64_t RansEncoder::encode(
-    const PyArrayUint16 &cdf_arr, const PyArrayUint16 &symbol_arr)
+    const PyArrayUint16 &cdf_arr, const PyArrayUint16 &symbol_arr)  // TODO: gather
 {
     const py::buffer_info cdf_arr_buf = cdf_arr.request();
     const size_t cdfs_num = cdf_arr_buf.shape[0];

@@ -14,5 +14,5 @@ class DatasetConfig(SimpleConfig):
     random_flip: bool = False
     morton_sort: bool = False
     morton_sort_inverse: bool = False
-    resolution: int = 4096
+    resolution: Union[int, float] = 4096
     flag_sparsepcgc: bool = False

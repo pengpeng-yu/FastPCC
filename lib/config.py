@@ -11,13 +11,14 @@ str_or_seq = Union[str, Tuple[str, ...]]
 class TrainConfig(SimpleConfig):
     rundir_name: str = 'train_<autoindex>'
     device: Union[int, str] = '0'  # 0 or 0,1,2 or cpu
-    more_reproducible: bool = False
     find_unused_parameters: bool = False
     batch_size: int = 2
     shuffle: bool = True
     num_workers: int = 4
+    prefetch_factor: int = 2
     epochs: int = 100
     pin_memory: bool = True
+    bucket_cap_mb: Union[int, float] = 0
 
     ema: bool = False
     ema_decay: float = 0.9999
@@ -93,7 +94,6 @@ class TestConfig(SimpleConfig):
     pin_memory: bool = False
     from_ckpt: str = ''
     log_frequency: int = 1  # (steps) used for logging
-    save_results: bool = True  # save the outputs of the model in runs/rundir_name/results
 
     dataset_module_path: str = ''
     dataset: SimpleConfig = None
@@ -107,6 +107,10 @@ class TestConfig(SimpleConfig):
 class Config(SimpleConfig):
     model_module_path: str = ''  # Classes model_module_path.Config and model_module_path.Model are required
     model: SimpleConfig = None
+
+    float32_matmul_precision: str = 'high'  # or highest or medium
+    more_reproducible: bool = False
+
     train: TrainConfig = field(default_factory=TrainConfig)
     test: TestConfig = field(default_factory=TestConfig)
 
