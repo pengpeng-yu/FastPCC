@@ -11,7 +11,9 @@ def _load_and_test():
     os.makedirs(build_directory, exist_ok=True)
     simple_rans_ext_cpp = load(
         name='simple_rans_ext_cpp',
-        extra_include_paths=[current_file_dir, osp.join(os.getcwd(), 'lib', 'entropy_models', 'rans_coder')],
+        extra_include_paths=[
+            current_file_dir,
+            osp.join(current_file_dir, '../../../../lib/entropy_models/rans_coder')],
         sources=[osp.join(
             current_file_dir, 'simple_rans_wrapper.cpp'
         )],

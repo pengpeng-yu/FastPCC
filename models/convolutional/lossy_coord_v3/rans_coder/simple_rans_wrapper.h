@@ -10,6 +10,7 @@
 #define PRECISION (16u)
 #define PROB_SCALE (1u << 16u)
 typedef py::array_t<uint16_t, py::array::c_style | py::array::forcecast> PyArrayUint16;
+typedef py::array_t<bool, py::array::c_style | py::array::forcecast> PyArrayBool;
 
 
 class RansEncoder
@@ -27,6 +28,9 @@ public:
     uint64_t encode(
         const PyArrayUint16 &cdf_arr,
         const PyArrayUint16 &symbol_arr);
+    uint64_t encode_bin(
+        const PyArrayUint16 &cdf_arr,
+        const PyArrayBool &symbol_arr);
     py::bytes flush();
 
 private:
@@ -53,6 +57,9 @@ public:
     int decode(
         PyArrayUint16 &cdf_arr,
         PyArrayUint16 &symbol_array);
+    int decode_bin(
+        PyArrayUint16 &cdf_arr,
+        PyArrayBool &symbol_arr);
 
 private:
     RansState rans;

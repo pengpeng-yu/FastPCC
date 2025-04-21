@@ -31,7 +31,7 @@ class OneScalePredictor(nn.Module):
         super(OneScalePredictor, self).__init__()
         self.compressed_channels = 1
         if allow_single_ch is True:
-            self.dec_init = spnn.Conv3d(1, channels, kernel_size=3, stride=1, bias=True)
+            self.dec_init = spnn.Conv3d(1, channels, 3, 1, 1, bias=True)
         self.dec = Block(channels)
 
         self.transforms = nn.ModuleList()
@@ -40,8 +40,8 @@ class OneScalePredictor(nn.Module):
             transforms = nn.ModuleList((
                 SparseSequential(
                     nn.Linear(channels * 2, channels, bias=True), nn.PReLU(),
-                    spnn.Conv3d(channels, channels, kernel_size=3, stride=1, padding=1, bias=True), nn.PReLU(),
-                    spnn.Conv3d(channels, self.compressed_channels, kernel_size=3, stride=1, padding=1, bias=True)),
+                    spnn.Conv3d(channels, channels, 3, 1, 1, bias=True), nn.PReLU(),
+                    spnn.Conv3d(channels, self.compressed_channels, 3, 1, 1, bias=True)),
                 SparseSequential(
                     nn.Linear(self.compressed_channels, channels, bias=True), nn.PReLU()),
                 SparseSequential(
@@ -62,7 +62,7 @@ class OneScalePredictor(nn.Module):
             assert max_lossy_stride is not None
             self.pred = SparseSequential(
                 Block(channels),
-                spnn.Conv3d(channels, 8, kernel_size=3, stride=1, padding=1, bias=True))
+                spnn.Conv3d(channels, 8, 3, 1, 1, bias=True))
         if self.if_upsample:
             self.upsample = SparseSequential(
                 Block(channels + 8),
@@ -71,9 +71,10 @@ class OneScalePredictor(nn.Module):
             self.upsample = None
 
     def forward(self, cur_rec: SparseTensor, cur_ref: SparseTensor, up_ref: SparseTensor, cur_bin: torch.FloatTensor,
-                batch_size: int, device, points_num: List[int], em, bin2oct_kernel, unfold_kernel,
+                device, points_num: List[int], em, bin2oct_kernel, unfold_kernel,
                 warmup: bool):
         if not self.if_upsample: assert up_ref.stride[0] == 1
+        batch_size = len(points_num)
         divider = torch.searchsorted(
             cur_rec.C[:, 0].contiguous(), torch.arange(batch_size + 1, device=device, dtype=torch.int32))
         scattered_points_num = torch.empty((cur_rec.C.shape[0],), device=device, dtype=torch.float)
@@ -96,13 +97,13 @@ class OneScalePredictor(nn.Module):
             cur_rec.F = torch.cat((cur_rec.F, transform2(cur_ref).F), 1)
             cur_rec = dec(cur_rec)
 
-        cur_pred = self.pred(cur_rec)
+        cur_pred = self.pred(cur_rec).F
         if self.if_pred_oct_lossl:
             cur_oct = (cur_bin.to(torch.int32) << bin2oct_kernel).sum(1, dtype=torch.int64).add_(-1)
-            cur_geo_loss = (F.cross_entropy(cur_pred.F, cur_oct, reduction='none')
+            cur_geo_loss = (F.cross_entropy(cur_pred, cur_oct, reduction='none')
                             / scattered_points_num).sum() * (log2_e / batch_size)
             if self.if_upsample:
-                pred_bin = cur_bin.bool()
+                pred_bin = cur_bin
                 new_c = up_ref.C
 
         else:
@@ -115,14 +116,13 @@ class OneScalePredictor(nn.Module):
                     up_ref.C[:, 0].contiguous(), torch.arange(batch_size + 1, device=device, dtype=torch.int32)))
                 for b in range(batch_size):
                     up_scattered_points_num[divider[b]: divider[b + 1]] = up_points_num[b]
-            cur_geo_loss = (F.binary_cross_entropy_with_logits(cur_pred.F, cur_bin, reduction='none').sum(1)
+            cur_geo_loss = (F.binary_cross_entropy_with_logits(cur_pred, cur_bin, reduction='none').sum(1)
                             / up_scattered_points_num).sum() * (self.coord_recon_loss_factor * log2_e / batch_size)
 
             if self.if_upsample:
-                cur_pred_f = cur_pred.F
                 mask_list = []
                 for b in range(batch_size):
-                    sample = cur_pred_f[divider[b]: divider[b + 1]]
+                    sample = cur_pred[divider[b]: divider[b + 1]]
                     sample_ = sample.reshape(-1, 8)
                     mask = sample_ == sample_.amax(1, keepdim=True)
                     mask = mask.reshape(-1, 8)
@@ -141,7 +141,7 @@ class OneScalePredictor(nn.Module):
             cur_rec.F = torch.cat((cur_rec.F, pred_bin), 1)
             cur_rec = self.upsample(cur_rec)
             cur_rec = SparseTensor(
-                cur_rec.F.reshape(cur_rec.F.shape[0], 8, cur_rec.F.shape[1] // 8)[pred_bin],
+                cur_rec.F.reshape(cur_rec.F.shape[0], 8, cur_rec.F.shape[1] // 8)[pred_bin.bool()],
                 new_c,
                 tuple(_ // 2 for _ in cur_rec.stride))
             if self.if_pred_oct_lossl:
@@ -173,11 +173,10 @@ class OneScalePredictor(nn.Module):
             cur_pred = self.pred(cur_rec).F
             cur_oct = (cur_bin.to(torch.int32) << bin2oct_kernel).sum(1, dtype=torch.int32).add_(-1)
             if if_upsample:
-                pred_bin = cur_bin.bool()
                 cur_rec.F = torch.cat((cur_rec.F, cur_bin), 1)
                 cur_rec = self.upsample(cur_rec)
                 cur_rec = SparseTensor(
-                    cur_rec.F.reshape(cur_rec.F.shape[0], 8, cur_rec.F.shape[1] // 8)[pred_bin],
+                    cur_rec.F.reshape(cur_rec.F.shape[0], 8, cur_rec.F.shape[1] // 8)[cur_bin.bool()],
                     up_ref.C,
                     tuple(_ // 2 for _ in cur_rec.stride))
                 cur_rec._caches = cur_ref._caches
@@ -282,45 +281,43 @@ class Fold2(Fold):
             self.kernel.reshape(8 * 8, 8 * 8)[...] = torch.eye(64)
 
 
-class Model(nn.Module):
+tmp_custom_coord: Optional[torch.Tensor] = None
 
-    @staticmethod
-    def params_divider(s: str) -> int:
-        return 0
 
-    # >>>> Monkey Patching
-    def custom_spdownsample(
-            self,
-            _coords: torch.Tensor,
-            stride: Union[int, Tuple[int, ...]] = 2,
-            kernel_size: Union[int, Tuple[int, ...]] = 2,
-            padding: torch.Tensor = 0,
-            spatial_range: Optional[Tuple[int]] = None,
-            downsample_mode: str = "spconv",
-    ) -> torch.Tensor:
-        assert downsample_mode in ["spconv", "minkowski"], downsample_mode
-        assert (padding == 0).all(), padding
+# >>>> Monkey Patching
+def custom_spdownsample(
+        _coords: torch.Tensor,
+        stride: Union[int, Tuple[int, ...]] = 2,
+        kernel_size: Union[int, Tuple[int, ...]] = 2,
+        padding: torch.Tensor = 0,
+        spatial_range: Optional[Tuple[int]] = None,
+        downsample_mode: str = "spconv",
+) -> torch.Tensor:
+    assert downsample_mode in ["spconv", "minkowski"], downsample_mode
+    assert (padding == 0).all(), padding
+    global tmp_custom_coord
+    if tmp_custom_coord is not None:
+        return tmp_custom_coord
+    else:
         assert all((_ == 2 for _ in kernel_size)), kernel_size
         assert all((_ == 2 for _ in stride)), stride
+        coords = _coords.clone()
+        coords[:, 1:] >>= 1
+        coords = torch.unique_consecutive(coords, dim=0)
+        return coords
 
-        if self.tmp_custom_coord is not None:
-            return self.tmp_custom_coord
-        else:
-            coords = _coords.clone()
-            coords[:, 1:] >>= 1
-            coords = torch.unique_consecutive(coords, dim=0)
-            return coords
 
+SF.spdownsample = custom_spdownsample
+# Monkey Patching <<<<
+
+
+class Model(nn.Module):
     def __init__(self, cfg: Config):
         super(Model, self).__init__()
-        self.tmp_custom_coord = None
-
-        SF.spdownsample = self.custom_spdownsample
         conv_config = SF.conv_config.get_default_conv_config(conv_mode=SF.get_conv_mode())
         conv_config['dataflow'] = getattr(SF.conv_config.Dataflow, cfg.torchsparse_dataflow)  # tune?
         conv_config.kmap_mode = 'hashmap'
         SF.conv_config.set_global_conv_config(conv_config)
-        # Monkey Patching <<<<
 
         self.cfg = cfg
         self.evaluator = PCCEvaluator()
@@ -347,7 +344,7 @@ class Model(nn.Module):
                     Fold2(), nn.Linear(64, cfg.channels, bias=True), nn.PReLU(), Block(cfg.channels))
             else:
                 block_enc = SparseSequential(
-                    spnn.Conv3d(cfg.channels, cfg.channels, kernel_size=2, stride=2, bias=True), Block(cfg.channels))
+                    spnn.Conv3d(cfg.channels, cfg.channels, 2, 2, bias=True), Block(cfg.channels))
             self.blocks_enc.append(block_enc)
 
         self.block_dec_recurrent = OneScalePredictor(cfg.channels, 0, True, True, True)
@@ -380,7 +377,6 @@ class Model(nn.Module):
         if mode is False and self.flag_init_coder is False:
             self.rans_encoder = RansEncoder(32 * 1024 * 1024)  # 32MB
             self.rans_decoder = RansDecoder()
-            self.oct_side_info_cdf = np.array([[4000, 65535]], dtype=np.uint16)
             self.fea_side_info_cdf1 = np.arange(2, 65537, dtype=np.uint16)[None]
             self.fea_side_info_cdf2 = np.arange(1, 129, dtype=np.uint16)[None] * 512
             self.fea_side_info_cdf1[:, -1] = 65535
@@ -406,11 +402,12 @@ class Model(nn.Module):
             training=False,
         )
         sp.F = sp_f
+        # assert (ret.F == ret.F.round()).all()
         return ret
 
     def forward(self, pc_data: PCData):
         if self.training:
-            return self.train_forward(pc_data.xyz, pc_data.points_num, pc_data.batch_size, pc_data.training_step)
+            return self.train_forward(pc_data.xyz, pc_data.points_num, pc_data.training_step)
         else:
             assert pc_data.batch_size == 1, 'Only supports batch size == 1 during testing.'
             return self.test_forward(pc_data)
@@ -422,7 +419,7 @@ class Model(nn.Module):
         sparse_pc = SparseTensor(sparse_pc_feature, xyz, (stride,) * 3)
         return sparse_pc
 
-    def train_forward(self, xyz: torch.Tensor, points_num: List[int], batch_size: int, training_step: int):
+    def train_forward(self, xyz: torch.Tensor, points_num: List[int], training_step: int):
         org = self.get_init_pc(xyz)
         device = org.F.device
 
@@ -438,6 +435,7 @@ class Model(nn.Module):
             (2 ** self.max_downsample_times,) * 3)
         cur_rec._caches = org._caches
 
+        global tmp_custom_coord
         loss_dict = {}
         for idx in range(self.max_downsample_times, 0, -1):
             if idx > len(self.blocks_dec):
@@ -448,13 +446,13 @@ class Model(nn.Module):
                 cur_bin = strided_list[idx].F
             else:
                 if cur_rec._caches is not org._caches:
-                    self.tmp_custom_coord = cur_rec.C
+                    tmp_custom_coord = cur_rec.C
                     strided_list[idx - 1]._caches = TensorCache()
                 cur_bin = self.get_bin(strided_list[idx - 1], org.F).F
-                self.tmp_custom_coord = None
+                tmp_custom_coord = None
             cur_rec, fea_loss_list, geo_bpp_loss = block_dec(
                 cur_rec, strided_list[idx], strided_list[idx - 1],
-                cur_bin, batch_size, device, points_num, self.em, self.bin2oct_kernel, self.unfold_kernel,
+                cur_bin, device, points_num, self.em, self.bin2oct_kernel, self.unfold_kernel,
                 warmup=training_step < self.cfg.warmup_steps)
             loss_dict[f'stride{2 ** idx}_geo_loss'] = geo_bpp_loss
             for i, fea_loss in enumerate(fea_loss_list):
@@ -510,6 +508,7 @@ class Model(nn.Module):
         return pmfs
 
     def rans_encode_oct(self, quantized_cdfs: torch.Tensor, values: torch.Tensor) -> int:
+        assert values.dtype == torch.uint16
         encoded_size = self.rans_encoder.encode(quantized_cdfs.numpy(), values.numpy())
         return encoded_size
 
@@ -522,13 +521,13 @@ class Model(nn.Module):
 
     def rans_encode_fea(self, quantized_cdf: torch.Tensor, rounded: torch.Tensor, rounded_min: torch.Tensor = None):
         quantized_cdf = quantized_cdf.numpy()
-        encoded_size = self.rans_encoder.encode(quantized_cdf[None], rounded.numpy())
+        self.rans_encoder.encode(quantized_cdf[None], rounded.numpy())
         self.rans_encoder.encode(self.fea_side_info_cdf1, quantized_cdf[:-1] - 1)
         assert len(quantized_cdf) - 2 <= self.fea_side_info_cdf2.shape[1], len(quantized_cdf)
         self.rans_encoder.encode(self.fea_side_info_cdf2, np.array((len(quantized_cdf) - 2,), dtype=np.uint16))
         if rounded_min is not None:
             self.rans_encoder.encode(self.fea_side_info_cdf2, rounded_min[None].numpy())
-        return encoded_size
+        return True
 
     def rans_decode_fea(self, length: int, device, dtype, decode_rounded_min: bool = True) -> torch.Tensor:
         if decode_rounded_min:
@@ -580,6 +579,7 @@ class Model(nn.Module):
             (2 ** (self.max_downsample_times - self.cfg.skip_top_scales_num),) * 3)
         cur_rec._caches = org._caches
 
+        global tmp_custom_coord
         cached_list = []
         for idx in range(self.max_downsample_times - self.cfg.skip_top_scales_num, 0, -1):
             if idx > len(blocks_dec):
@@ -590,12 +590,12 @@ class Model(nn.Module):
                 cur_bin = strided_list[idx].F
             else:
                 if cur_rec._caches is not org._caches:
-                    self.tmp_custom_coord = cur_rec.C
+                    tmp_custom_coord = cur_rec.C
                     strided_list[idx - 1]._caches = TensorCache()
                 cur_bin = self.get_bin(strided_list[idx - 1], org.F).F
-                self.tmp_custom_coord = None
+                tmp_custom_coord = None
             cur_rec, rounded_f_list, cur_pred, cur_oct = block_dec.compress(
-                cur_rec, strided_list[idx], strided_list[idx - 1], cur_bin, self.bin2oct_kernel, if_upsample=idx != 1,)
+                cur_rec, strided_list[idx], strided_list[idx - 1], cur_bin, self.bin2oct_kernel, if_upsample=idx != 1)
             strided_list.pop()
             if cur_rec is None:
                 break
@@ -694,9 +694,9 @@ class Block(nn.Module):
     def __init__(self, ch):
         super(Block, self).__init__()
         self.ch = ch
-        self.conv = spnn.Conv3d(ch, ch, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv = spnn.Conv3d(ch, ch, 3, 1, 1, bias=True)
         self.act = nn.PReLU()
-        self.conv2 = spnn.Conv3d(ch, ch, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv2 = spnn.Conv3d(ch, ch, 3, 1, 1, bias=True)
         self.act2 = nn.PReLU()
 
     def forward(self, org: SparseTensor):

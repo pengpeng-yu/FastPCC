@@ -94,6 +94,35 @@ uint64_t RansEncoder::encode(
     return enc_buf_ptr + enc_buf_size - enc_ptr;
 }
 
+uint64_t RansEncoder::encode_bin(
+    const PyArrayUint16 &cdf_arr, const PyArrayBool &symbol_arr)
+{
+    const py::buffer_info cdf_arr_buf = cdf_arr.request();
+    const size_t cdfs_num = cdf_arr_buf.shape[0];
+    assert(cdf_arr_buf.ndim == 1 || cdf_arr_buf.shape[1] == 1);
+    uint16_t * cdf_arr_ptr = reinterpret_cast<uint16_t *>(cdf_arr_buf.ptr);
+    if (cdfs_num != 1)
+        cdf_arr_ptr += cdfs_num;
+
+    const py::buffer_info symbol_arr_buf = symbol_arr.request();
+    const size_t symbols_num = symbol_arr_buf.shape[0];
+    assert(symbols_num == cdfs_num || (cdfs_num == 1));
+    bool * symbol_ptr = reinterpret_cast<bool *>(symbol_arr_buf.ptr) + symbols_num;
+
+    for (size_t idx = 0; idx < symbols_num; ++idx)
+    {
+        if (cdfs_num != 1)
+            cdf_arr_ptr -= 1;
+        --symbol_ptr;
+        const bool &sym = *symbol_ptr;
+        const uint32_t &cur = sym ? cdf_arr_ptr[0]: 0;
+        const uint32_t &next = sym ? PROB_SCALE : cdf_arr_ptr[0];
+        RansEncPut(&rans, &enc_ptr, cur, next - cur, PRECISION);
+    }
+
+    return enc_buf_ptr + enc_buf_size - enc_ptr;
+}
+
 py::bytes RansEncoder::flush()
 {
     RansEncFlush(&rans, &enc_ptr);
@@ -209,16 +238,49 @@ int RansDecoder::decode(
     return 0;
 }
 
+int RansDecoder::decode_bin(
+    PyArrayUint16 &cdf_arr, PyArrayBool &symbol_arr)
+{
+    const py::buffer_info cdf_arr_buf = cdf_arr.request();
+    const size_t cdfs_num = cdf_arr_buf.shape[0];
+    assert(cdf_arr_buf.ndim == 1 || cdf_arr_buf.shape[1] == 1);
+    uint16_t * cdf_arr_ptr = reinterpret_cast<uint16_t *>(cdf_arr_buf.ptr);
+
+    const py::buffer_info symbol_arr_buf = symbol_arr.request();
+    const size_t symbols_num = symbol_arr_buf.shape[0];
+    assert(symbol_arr.writeable());
+    assert(symbols_num == cdfs_num || (cdfs_num == 1));
+    bool * symbol_ptr = reinterpret_cast<bool *>(symbol_arr_buf.ptr);
+
+    for (size_t idx = 0; idx < symbols_num; ++idx)
+    {
+        auto cf = RansDecGet(&rans, PRECISION);
+        const bool sym = cf >= cdf_arr_ptr[0];
+
+        const uint32_t &cur = sym ? cdf_arr_ptr[0]: 0;
+        const uint32_t &next = sym ? PROB_SCALE : cdf_arr_ptr[0];
+        RansDecAdvance(&rans, &ptr, cur, next - cur, PRECISION);
+        *symbol_ptr = sym;
+        ++symbol_ptr;
+        if (cdfs_num != 1)
+            cdf_arr_ptr += 1;
+    }
+
+    return 0;
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     py::class_<RansEncoder>(m, "RansEncoder")
         .def(py::init<size_t>(), py::arg_v("enc_buf_size", DEFAULT_ENC_BUF_SIZE))
         .def("encode_with_precomp", &RansEncoder::encode_with_precomp)
         .def("encode", &RansEncoder::encode)
+        .def("encode_bin", &RansEncoder::encode_bin)
         .def("flush", &RansEncoder::flush);
     py::class_<RansDecoder>(m, "RansDecoder")
         .def(py::init())
         .def("flush", &RansDecoder::flush)
         .def("decode_with_precomp", &RansDecoder::decode_with_precomp)
-        .def("decode", &RansDecoder::decode);
+        .def("decode", &RansDecoder::decode)
+        .def("decode_bin", &RansDecoder::decode_bin);
 }
