@@ -99,7 +99,7 @@ class OneScalePredictor(nn.Module):
 
         cur_pred = self.pred(cur_rec).F
         if self.if_pred_oct_lossl:
-            cur_oct = (cur_bin.to(torch.int32) << bin2oct_kernel).sum(1, dtype=torch.int64).add_(-1)
+            cur_oct = (cur_bin.to(torch.uint8) << bin2oct_kernel).sum(1, dtype=torch.int64).add_(-1)
             cur_geo_loss = (F.cross_entropy(cur_pred, cur_oct, reduction='none')
                             / scattered_points_num).sum() * (log2_e / batch_size)
             if self.if_upsample:
@@ -171,7 +171,7 @@ class OneScalePredictor(nn.Module):
 
         if self.if_pred_oct_lossl:
             cur_pred = self.pred(cur_rec).F
-            cur_oct = (cur_bin.to(torch.int32) << bin2oct_kernel).sum(1, dtype=torch.int32).add_(-1)
+            cur_oct = (cur_bin.to(torch.uint8) << bin2oct_kernel).sum(1, dtype=torch.int16).add_(-1)
             if if_upsample:
                 cur_rec.F = torch.cat((cur_rec.F, cur_bin), 1)
                 cur_rec = self.upsample(cur_rec)
@@ -204,7 +204,7 @@ class OneScalePredictor(nn.Module):
 
         cur_pred = self.pred(cur_rec)
         if self.if_pred_oct_lossl:
-            cur_oct = rans_decode_oct(cur_pred.F, cur_rec.C.shape[0], device, torch.int32)
+            cur_oct = rans_decode_oct(cur_pred.F, cur_rec.C.shape[0], device, torch.int16)
             cur_bin = ((cur_oct[:, None] + 1) >> bin2oct_kernel).bitwise_and_(1).bool()
         else:
             cur_pred_f = cur_pred.F
@@ -366,7 +366,7 @@ class Model(nn.Module):
         self.register_buffer('fold2bin_kernel', torch.empty(8, 1, 1 * 8, dtype=torch.float), persistent=False)
         with torch.no_grad():
             self.fold2bin_kernel.reshape(8, 8)[...] = torch.eye(8)
-        self.register_buffer('bin2oct_kernel', torch.arange(7, -1, -1, dtype=torch.int32), persistent=False)
+        self.register_buffer('bin2oct_kernel', torch.arange(7, -1, -1, dtype=torch.uint8), persistent=False)
         self.register_buffer('unfold_kernel', torch.tensor(
             ((0, 0, 0, 0), (0, 0, 0, 1), (0, 0, 1, 0), (0, 0, 1, 1),
              (0, 1, 0, 0), (0, 1, 0, 1), (0, 1, 1, 0), (0, 1, 1, 1)), dtype=torch.int32)[None], persistent=False)
