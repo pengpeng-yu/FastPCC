@@ -1,0 +1,10 @@
+# include "config/convolutional/lossl_coord/kitti.yaml"
+
+model:
+  skip_top_scales_num: 0
+
+
+test:
+  from_ckpt: weights/convolutional/lossl_coord/kitti.pt
+  dataset:
+    resolution: 65536

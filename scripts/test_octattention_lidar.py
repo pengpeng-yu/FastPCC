@@ -104,7 +104,7 @@ def data_loader(args):
     oct_data_list = []
     for rate_flag in range(1, 7, 1):
         # Same quantization as test_tmc3.py
-        scale_for_kitti = (2 ** (int(rate_flag) + 9) - 1) / 400
+        scale_for_kitti = (2 ** (int(rate_flag) + 10) - 1) / 400
         temp_xyz_q = org_xyz * scale_for_kitti
         temp_xyz_q.round(out=temp_xyz_q)
         temp_xyz_q = np.unique(temp_xyz_q, axis=0)

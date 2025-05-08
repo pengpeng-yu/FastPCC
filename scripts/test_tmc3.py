@@ -11,6 +11,7 @@ import json
 import multiprocessing as mp
 
 import numpy as np
+import open3d as o3d
 
 sys.path.append(osp.dirname(osp.dirname(__file__)))
 from lib.metrics.pc_error_wrapper import mpeg_pc_error
@@ -38,13 +39,14 @@ if single_frame_only:  # ↓ Check your paths below ↓
         "datasets/MVUB/list.txt",
         'datasets/KITTI/sequences/test_list.txt',
         'datasets/KITTI/sequences/test_list_SparsePCGC110.txt',
+        'datasets/Ford/test_list.txt',
     )
     # ↑ Two different calculation of distortion metrics on KITTI.
     # I put them in a single json file since they have different reconstruction targets (*_n.ply / *_q1mm_n.ply)
     #   and won't cause key conflicts.
     # I look for keywords ('MVUB'/'KITTI'/'SparsePCGC') in the paths of file lists
     #   to flag whether special handling is needed.
-    resolutions = (16384, 4096, 2048, 1024, 512, 59.70 + 1, 30000 + 1,)
+    resolutions = (16384, 4096, 2048, 1024, 512, 59.70 + 1, 30000 + 1, 30000 + 1,)
 else:
     file_lists = (
         'datasets/Owlii/list_basketball_player_dancer.txt',
@@ -164,6 +166,9 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             if 'SparsePCGC' in file_list:
                 flag_sparsepcgc = True
             config_paths = default_config_paths
+        elif 'Ford' in file_list:
+            flag_ford = True
+            config_paths = default_config_paths
         else:
             assert single_frame_only is False
             # e.g., filename: basketball_player_vox11_xxx -> config: basketball_player_vox11
@@ -182,6 +187,8 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
     os.makedirs(sub_output_dir, exist_ok=True)
     if flag_kitti:
         org_xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
+    elif flag_ford:
+        org_xyz = np.asarray(o3d.io.read_point_cloud(file_path).points)
 
     for config_path in config_paths:
         rate_flag = osp.split(osp.split(config_path)[0])[1]
@@ -205,7 +212,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             else:
                 raise NotImplementedError
         if flag_kitti:
-            scale_for_kitti = (2 ** (int(rate_flag[1:]) + 9) - 1) / 400
+            scale_for_kitti = (2 ** (int(rate_flag[1:]) + 10) - 1) / 400
             temp_xyz_q = org_xyz * scale_for_kitti
             temp_xyz_q.round(out=temp_xyz_q)
             temp_xyz_q = np.unique(temp_xyz_q, axis=0)
@@ -221,6 +228,14 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
                 if not osp.isfile(org_pc_for_pc_error):
                     write_ply_file(np.unique((org_xyz * 1000).round(), axis=0),
                                    org_pc_for_pc_error, estimate_normals=True)
+        if flag_ford:
+            scale_for_ford = 2 ** (int(rate_flag[1:]) - 7)
+            temp_xyz_q = org_xyz * scale_for_ford
+            temp_xyz_q.round(out=temp_xyz_q)
+            temp_xyz_q = np.unique(temp_xyz_q, axis=0)
+            temp_file_path_for_ford = osp.join(sub_output_dir, f"{rate_flag}_scaled_input.ply")
+            write_ply_file(temp_xyz_q, temp_file_path_for_ford)
+            command_enc += f' --uncompressedDataPath={temp_file_path_for_ford} --positionQuantizationScale=1'
 
         subp_enc = subprocess.run(
             command_enc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -232,6 +247,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
             sub_metric_dict,
             log_extractor.extract_enc_log(subp_enc.stdout), False
         )
+
         command_dec = \
             f'{tmc3_path}' \
             f' --mode=1' \
@@ -245,12 +261,18 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
                 command_dec += f' --outputUnitLength={scale_for_kitti}'
             else:
                 command_dec += f' --outputUnitLength={scale_for_kitti / 1000}'
+        if flag_ford:
+            os.remove(temp_file_path_for_ford)
+            command_dec += ' --outputScaling=1'
+            command_dec += f' --outputUnitLength={scale_for_ford}'
+
         subp_dec = subprocess.run(
             command_dec, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             shell=True, check=True, text=True
         )
         with open(osp.join(sub_output_dir, f'log_{rate_flag}_dec.txt'), 'w') as f:
             f.write(subp_dec.stdout)
+
         sub_metric_dict = concat_values_for_dict(
             sub_metric_dict,
             log_extractor.extract_dec_log(subp_dec.stdout), False

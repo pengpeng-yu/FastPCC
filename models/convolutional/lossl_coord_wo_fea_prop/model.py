@@ -23,32 +23,16 @@ log2_e = math.log2(math.e)
 
 
 class OneScalePredictor(nn.Module):
-    def __init__(self, channels, if_upsample=True, allow_single_ch=False):
+    def __init__(self, channels, if_upsample):
         super(OneScalePredictor, self).__init__()
-        if allow_single_ch is True:
-            self.dec_init = spnn.Conv3d(1, channels, 3, 1, 1, bias=True)
-        self.dec = Block(channels)
-
         self.pred = SparseSequential(
-            spnn.Conv3d(channels, channels, 3, 1, 1, bias=True), nn.PReLU(),
+            spnn.Conv3d(1, channels, 3, 1, 1, bias=True), nn.PReLU(),
             nn.Linear(channels, 255, bias=True))
-
         self.if_upsample = if_upsample
-        if self.if_upsample:
-            self.upsample = SparseSequential(
-                nn.Linear(channels + 8, channels, bias=True), nn.PReLU(),
-                Block(channels),
-                nn.Linear(channels, channels * 8, bias=True))
-        else:
-            self.upsample = None
 
     def forward(self, cur_rec: SparseTensor, up_ref: SparseTensor, cur_bin: torch.FloatTensor,
-                device, points_num: List[int], bin2oct_kernel):
+                device, points_num: List[int], bin2oct_kernel, ones):
         batch_size = len(points_num)
-
-        if cur_rec.F.shape[1] == 1:
-            cur_rec = self.dec_init(cur_rec)
-        cur_rec = self.dec(cur_rec)
 
         cur_pred = self.pred(cur_rec).F
         cur_oct = (cur_bin.to(torch.uint8) << bin2oct_kernel).sum(1, dtype=torch.int64).add_(-1)
@@ -65,54 +49,38 @@ class OneScalePredictor(nn.Module):
                             * (log2_e / batch_size / points_num[0])
 
         if self.if_upsample:
-            cur_rec.F = torch.cat((cur_rec.F, cur_bin), 1)
-            cur_rec = self.upsample(cur_rec)
             cur_rec = SparseTensor(
-                cur_rec.F.reshape(cur_rec.F.shape[0], 8, cur_rec.F.shape[1] // 8)[cur_bin.bool()],
-                up_ref.C,
+                ones[:up_ref.C.shape[0]], up_ref.C,
                 tuple(_ // 2 for _ in cur_rec.stride))
             cur_rec._caches = up_ref._caches
         return cur_rec, cur_geo_loss
 
     def compress(self, cur_rec: SparseTensor, up_ref: SparseTensor, cur_bin: torch.FloatTensor,
-                 bin2oct_kernel, if_upsample):
-        if cur_rec.F.shape[1] == 1:
-            cur_rec = self.dec_init(cur_rec)
-        cur_rec = self.dec(cur_rec)
-
+                 bin2oct_kernel, if_upsample, ones):
         cur_pred = self.pred(cur_rec).F
         cur_oct = (cur_bin.to(torch.uint8) << bin2oct_kernel).sum(1, dtype=torch.int16).add_(-1)
 
         if if_upsample:
-            cur_rec.F = torch.cat((cur_rec.F, cur_bin), 1)
-            cur_rec = self.upsample(cur_rec)
             cur_rec = SparseTensor(
-                cur_rec.F.reshape(cur_rec.F.shape[0], 8, cur_rec.F.shape[1] // 8)[cur_bin.bool()],
-                up_ref.C,
+                ones[:up_ref.C.shape[0]], up_ref.C,
                 tuple(_ // 2 for _ in cur_rec.stride))
             cur_rec._caches = up_ref._caches
         return cur_rec, cur_pred, cur_oct
 
     def decompress(self, cur_rec: SparseTensor, device, bin2oct_kernel, unfold_kernel,
                    rans_decode_oct, if_upsample):
-        if cur_rec.F.shape[1] == 1:
-            cur_rec = self.dec_init(cur_rec)
-        cur_rec = self.dec(cur_rec)
-
         cur_pred = self.pred(cur_rec).F
         cur_oct = rans_decode_oct(cur_pred, cur_rec.C.shape[0], device, torch.int16)
         del cur_pred
         cur_bin = ((cur_oct[:, None] + 1) >> bin2oct_kernel).bitwise_and_(1).bool()
 
         if if_upsample:
-            cur_rec.F = torch.cat((cur_rec.F, cur_bin.to(cur_rec.F.dtype)), 1)
-            cur_rec = self.upsample(cur_rec)
             new_c = cur_rec.C[:, None]
             new_c[..., 1:] <<= 1
             cur_rec = SparseTensor(
-                cur_rec.F.reshape(cur_rec.F.shape[0], 8, cur_rec.F.shape[1] // 8)[cur_bin],
-                (new_c + unfold_kernel)[cur_bin],
+                None, (new_c + unfold_kernel)[cur_bin],
                 tuple(_ // 2 for _ in cur_rec.stride))
+            cur_rec.F = torch.ones((cur_rec.C.shape[0], 1), device=device, dtype=torch.float32)
         return cur_rec, cur_bin
 
 
@@ -124,22 +92,22 @@ class OneScaleMultiStepPredictor(nn.Module):
             self.embed = SparseSequential()
             out_ch = channels
             self.dec = SparseSequential(
-                nn.Linear(channels + 8, out_ch), nn.PReLU(),
+                nn.Linear(8, out_ch), nn.PReLU(),
                 Block(out_ch))
         elif pred_steps == 3:
             self.embed = SparseSequential(
                 spnn.Conv3d(8, 64, 2, 2, bias=True), nn.PReLU())
             out_ch = round(channels * 1.25)
             self.dec = SparseSequential(
-                nn.Linear(channels + 64, out_ch), nn.PReLU(),
-                Block(out_ch)) if channels + 64 != out_ch else Block(out_ch)
+                nn.Linear(64, out_ch), nn.PReLU(),
+                Block(out_ch)) if 64 != out_ch else Block(out_ch)
         elif pred_steps == 4:
             self.embed = SparseSequential(
                 spnn.Conv3d(8, 512, kernel_size=4, stride=4, bias=True), nn.PReLU())
             out_ch = channels * 2
             self.dec = SparseSequential(
-                nn.Linear(round(channels * 1.25) + 512, out_ch), nn.PReLU(),
-                Block(out_ch)) if round(channels * 1.25) + 512 != out_ch else Block(out_ch)
+                nn.Linear(512, out_ch), nn.PReLU(),
+                Block(out_ch)) if 512 != out_ch else Block(out_ch)
         else: raise NotImplementedError
 
         self.pred = nn.ModuleList()
@@ -166,7 +134,7 @@ class OneScaleMultiStepPredictor(nn.Module):
         tmp_custom_coord = cur_rec.C
         embed_f = self.embed(cur_bins[1]).F
         tmp_custom_coord = None
-        cur_rec.F = torch.cat([cur_rec.F, embed_f], 1)
+        cur_rec.F = embed_f
         cur_rec = self.dec(cur_rec)
 
         cur_pred = self.pred[0](cur_rec)
@@ -200,7 +168,7 @@ class OneScaleMultiStepPredictor(nn.Module):
         tmp_custom_coord = cur_rec.C
         embed_f = self.embed(cur_bins[1]).F
         tmp_custom_coord = None
-        cur_rec.F = torch.cat([cur_rec.F, embed_f], 1)
+        cur_rec.F = embed_f
         cur_rec = self.dec(cur_rec)
 
         cur_pred = self.pred[0](cur_rec)
@@ -239,7 +207,7 @@ class OneScaleMultiStepPredictor(nn.Module):
         embed_in._caches = cur_rec._caches
         embed_f = self.embed(embed_in).F
         tmp_custom_coord = None
-        cur_rec.F = torch.cat([cur_rec.F, embed_f], 1)
+        cur_rec.F = embed_f
         cur_rec = self.dec(cur_rec)
 
         cur_pred = self.pred[0](cur_rec)
@@ -306,12 +274,12 @@ class Model(nn.Module):
         for idx in range(self.max_downsample_times_wo_recurrent):
             pred_steps = int(np.log2(cfg.fea_stride)) - idx
             if pred_steps < 1:
-                self.blocks_dec.append(OneScalePredictor(cfg.channels, True, False))
+                self.blocks_dec.append(OneScalePredictor(cfg.channels, True))
             elif pred_steps == 1:
-                self.blocks_dec.append(OneScalePredictor(cfg.channels, False, False))
+                self.blocks_dec.append(OneScalePredictor(cfg.channels, False))
             else:
                 self.blocks_dec.append(OneScaleMultiStepPredictor(cfg.channels, pred_steps))
-        self.block_dec_recurrent = OneScalePredictor(cfg.channels, True, True)
+        self.block_dec_recurrent = OneScalePredictor(cfg.channels, True)
 
         self.register_buffer('fold2bin_kernel', torch.empty(8, 1, 1 * 8, dtype=torch.float), persistent=False)
         with torch.no_grad():
@@ -392,7 +360,7 @@ class Model(nn.Module):
             if isinstance(block_dec, OneScalePredictor):
                 cur_rec, geo_bpp_loss = block_dec(
                     cur_rec, strided_list[idx - 1], strided_list[idx].F,
-                    device, points_num, self.bin2oct_kernel)
+                    device, points_num, self.bin2oct_kernel, org.F)
             else:
                 assert isinstance(block_dec, OneScaleMultiStepPredictor)
                 cur_rec, geo_bpp_loss = block_dec(
@@ -520,7 +488,7 @@ class Model(nn.Module):
             if isinstance(block_dec, OneScalePredictor):
                 cur_rec, cur_pred, cur_oct = block_dec.compress(
                     cur_rec, strided_list[idx - 1], strided_list[idx].F, self.bin2oct_kernel,
-                    if_upsample=idx != 1 and block_dec.if_upsample)
+                    if_upsample=idx != 1 and block_dec.if_upsample, ones=org.F)
             else:
                 assert isinstance(block_dec, OneScaleMultiStepPredictor)
                 cur_rec, cur_pred, cur_oct = block_dec.compress(

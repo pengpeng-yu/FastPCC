@@ -23,7 +23,8 @@ def main():
         lambda s: 'loot' in s and '8iVFBv2' in s: 'loot_vox10',
         lambda s: 'redandblack' in s and '8iVFBv2' in s: 'redandblack_vox10',
         lambda s: 'KITTI' in s and 'q1mm' not in s: 'KITTI',
-        lambda s: 'KITTI' in s and 'q1mm' in s: 'KITTI q1mm'
+        lambda s: 'KITTI' in s and 'q1mm' in s: 'KITTI q1mm',
+        lambda s: 'Ford' in s: 'Ford'
     }
     input_files = (
         f'{test_dir}/convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*/{metric_dict_filename}',

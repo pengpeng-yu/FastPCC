@@ -1,5 +1,5 @@
 """
-This script is based on commit cac62382472adbbf23fb11ec70c43636c7622e48 of ADLPCC.
+This script is based on the commit cac62382472adbbf23fb11ec70c43636c7622e48 of ADLPCC.
 """
 import os
 import os.path as osp

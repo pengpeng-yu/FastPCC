@@ -1,0 +1,9 @@
+# include "config/convolutional/lossl_coord/kitti_test_only_r1.yaml"
+
+model:
+  skip_top_scales_num: 1
+
+
+test:
+  dataset:
+    resolution: 32768
