@@ -6,6 +6,7 @@ import shutil
 from glob import glob
 from typing import Dict, List, Union, Tuple
 
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import MultipleLocator
 
@@ -13,6 +14,9 @@ sys.path.append(osp.dirname(osp.dirname(__file__)))
 from scripts.log_extract_utils import all_file_metric_dict_type, concat_values_for_dict, concat_values_for_dict_2
 from scripts.script_config import metric_dict_filename, test_dir
 from lib.metrics.bjontegaard import bdrate, bdsnr
+
+
+matplotlib.rcParams['font.family'] = 'Times New Roman'
 
 
 def compute_bd(info_dicts_a, info_dicts_b, samples_name: List[str],
@@ -80,10 +84,11 @@ def plot_rd(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_
 
     sample_names = next(iter(method_to_json.values())).keys()
     for sample_name in sample_names:
-        fig = plt.figure(figsize=(4.5, 3.5))
+        fig = plt.figure(figsize=(4.0, 3.0))
         ax = fig.add_subplot(111)
         if not pcqm and not graphsim:
-            ax.yaxis.set_major_locator(MultipleLocator(2))
+            ax.yaxis.set_major_locator(MultipleLocator(5))
+            ax.xaxis.set_major_locator(MultipleLocator(1))
         elif graphsim:
             ax.yaxis.set_major_locator(MultipleLocator(0.05))
         elif pcqm:
@@ -93,7 +98,7 @@ def plot_rd(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_
         ax.tick_params(pad=0.5)
         ax.set_xlabel('bpp (bits per input point)', labelpad=-1)
         ax.set_ylabel(y_label, labelpad=0)
-        ax.set_title(osp.splitext(osp.split(sample_name)[1])[0])
+        ax.set_title(f'Bitrate vs. {y_label.rsplit("(")[0]} ({osp.splitext(osp.split(sample_name)[1])[0]})')
         for method_name, method_json in method_to_json.items():
             plt_config = method_to_plt_cfg[method_name]
             if sample_name not in method_json: continue
@@ -123,7 +128,61 @@ def plot_rd(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_
             ax.legend(loc='upper right', **legend_args)
         ax.figure.savefig(osp.join(
             output_dir, f'{y_label} {osp.splitext(osp.split(sample_name)[1])[0]}.pdf'
-        ))
+        ), bbox_inches="tight")
+        plt.close(ax.figure)
+    print(f'Plot "{y_label}" Done')
+
+
+def plot_time(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_cfg,
+              output_dir, d1=True, enc=True, hook=None, tight_legend=True):
+    x_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
+    x_label = 'D1 PSNR (dB)' if d1 else 'D2 PSNR (dB)'
+    y_key = 'encode time' if enc else 'decode time'
+    y_label = 'Encoding Time(s)' if enc else 'Decoding Time(s)'
+    output_dir = osp.join(output_dir, f'sample-wise {y_label}')
+    if osp.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir)
+
+    sample_names = next(iter(method_to_json.values())).keys()
+    for sample_name in sample_names:
+        fig = plt.figure(figsize=(4.0, 3.0))
+        ax = fig.add_subplot(111)
+        ax.yaxis.set_major_locator(MultipleLocator(0.05))
+        ax.xaxis.set_major_locator(MultipleLocator(5))
+        ax.grid()
+        ax.tick_params(pad=0.5)
+        ax.set_xlabel(x_label, labelpad=-1)
+        ax.set_ylabel(y_label, labelpad=0)
+        ax.set_title(f'{x_label.split("(")[0]} vs. {y_label.split("(")[0]}'
+                     f' ({osp.splitext(osp.split(sample_name)[1])[0]})')
+        for method_name, method_json in method_to_json.items():
+            plt_config = method_to_plt_cfg[method_name]
+            if sample_name not in method_json: continue
+            tmp_x_axis = method_json[sample_name][x_key]
+            if y_key not in method_json[sample_name]:
+                print(f'Skip plotting "{y_label}" due to the missing of '
+                      f'{method_name}: {sample_name}: {y_key}')
+                shutil.rmtree(output_dir)
+                return
+            tmp_y_axis = method_json[sample_name][y_key]
+            if hook is not None:
+                tmp_x_axis, tmp_y_axis = hook(tmp_x_axis, tmp_y_axis, method_name)
+            if len(tmp_x_axis) and len(tmp_y_axis):
+                if isinstance(plt_config, str):
+                    ax.plot(tmp_x_axis, tmp_y_axis, plt_config, label=method_name)
+                else:
+                    ax.plot(tmp_x_axis, tmp_y_axis, **plt_config, label=method_name)
+        if tight_legend:
+            legend_args = dict(
+                fontsize=10, labelspacing=0.1, borderpad=0.2,
+                handlelength=1.3, handletextpad=0.2, borderaxespad=0.1)
+        else:
+            legend_args = {}
+        ax.legend(loc='lower right', **legend_args)
+        ax.figure.savefig(osp.join(
+            output_dir, f'{y_label} {osp.splitext(osp.split(sample_name)[1])[0]}.pdf'
+        ), bbox_inches="tight")
         plt.close(ax.figure)
     print(f'Plot "{y_label}" Done')
 
@@ -135,7 +194,15 @@ def list_mean(ls: List):
 def remove_non_overlapping_points(method_name, sample_name, sorted_indices):
     # Change the numbers below as needed.
     if method_name == 'G-PCC octree':
-        slice_val = (1, -1)
+        slice_val = (None, -1)
+    elif method_name == 'Baseline + GRED + XFP':
+        slice_val = (1, None)
+    elif method_name == 'RENO':
+        slice_val = (1, None)
+    elif method_name == 'OctAttention':
+        slice_val = (1, None)
+    elif method_name == 'Unicorn':
+        slice_val = (1, -2)
     elif method_name == 'ADLPCC':
         slice_val = (None, -2)
     elif method_name == 'SparsePCGC':
@@ -162,9 +229,31 @@ def compute_multiple_bdrate():
     anchor_name = 'Ours'
     anchor_secondly = True
     if_plot_rd = True
+    if_plot_dt = True
     tight_legend = False
     method_configs = {
-        'Ours': ('convolutional/lossy_coord_v2/baseline_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Ours': ('convolutional/lossl_coord/kitti_test_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'EHEM': ('EHEM', {'color': '#2ca02c', 'marker': '.'}),
+        # 'Light EHEM': ('Light-EHEM', {'color': '#ff7f0e', 'marker': '.'}),
+        # 'OctAttention': ('OctAttention-lidar', {'color': '#e377c2', 'marker': '.'}),
+        # 'RENO': ('RENO', {'color': '#9467bd', 'marker': '.'}),
+        # 'G-PCC octree': ('tmc3_geo/octree', {'color': '#8c564b', 'marker': '.'}),
+
+        # 'Ours': ('convolutional/lossl_coord_unicorn_test_cond/*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Unicorn': ('Unicorn/intra', {'color': '#d62728', 'marker': '.'}),
+
+        # 'Baseline + GRED + XFP': ('convolutional/lossl_coord/kitti_test_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Baseline + GRED': ('convolutional/lossl_coord/kitti_wo_fea_prop_r*', {'color': '#2ca02c', 'marker': '.'}),
+        # 'Baseline': ('convolutional/lossl_coord/kitti_wo_fea_prop_wo_redens_r*', {'color': '#ff7f0e', 'marker': '.'}),
+
+        # 'Ours': ('convolutional/lossl_coord/ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'EHEM': ('EHEM', {'color': '#2ca02c', 'marker': '.'}),
+        # 'Light EHEM': ('Light-EHEM', {'color': '#ff7f0e', 'marker': '.'}),
+        # 'Unicorn': ('Unicorn/intra', {'color': '#d62728', 'marker': '.'}),
+        # 'RENO': ('RENO', {'color': '#9467bd', 'marker': '.'}),
+        # 'G-PCC octree': (['tmc3_geo/octree', 'tmc3_geo/octree/*/'], {'color': '#8c564b', 'marker': '.'}),
+
+        # 'Ours': ('convolutional/lossy_coord_v2/baseline_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Ours w/o geometry residual':
         #     ('convolutional/lossy_coord_v2/gpcc_based_r*', {'color': '#ff7f0e', 'marker': '.'}),
         # 'Ours w/o feature residual':
@@ -186,12 +275,12 @@ def compute_multiple_bdrate():
         # 'Ours': ('convolutional/lossy_coord_v2/baseline_kitti_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Ours': ('convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*', {'color': '#1f77b4', 'marker': '.'}),
 
-        'SparsePCGC': ('SparsePCGC/dense_lossy', {'color': '#ff7f0e', 'marker': '.'}),
+        # 'SparsePCGC': ('SparsePCGC/dense_lossy', {'color': '#ff7f0e', 'marker': '.'}),
         # 'SparsePCGC': ('SparsePCGC/kitti_q1mm', {'color': '#ff7f0e', 'marker': '.'}),
-        'PCGCv2': ('convolutional/lossy_coord/baseline/*', {'color': '#2ca02c', 'marker': '.'}),
-        'V-PCC': ('tmc2_geo', {'color': '#d62728', 'marker': '.'}),
-        'ADLPCC': ('ADLPCC', {'color': '#9467bd', 'marker': '.'}),
-        'G-PCC octree': ('tmc3_geo/octree', {'color': '#8c564b', 'marker': '.'}),
+        # 'PCGCv2': ('convolutional/lossy_coord/baseline/*', {'color': '#2ca02c', 'marker': '.'}),
+        # 'V-PCC': ('tmc2_geo', {'color': '#d62728', 'marker': '.'}),
+        # 'ADLPCC': ('ADLPCC', {'color': '#9467bd', 'marker': '.'}),
+        # 'G-PCC octree': ('tmc3_geo/octree', {'color': '#8c564b', 'marker': '.'}),
         # 'OctAttention': ('OctAttention-lidar', {'color': '#e377c2', 'marker': '.'}),
         # 'EHEM': ('EHEM', {'color': '#bcbd22', 'marker': '.'}),
         # 'Light EHEM': ('Light-EHEM', {'color': '#17becf', 'marker': '.'}),
@@ -371,6 +460,9 @@ def compute_multiple_bdrate():
         plot_rd(method_to_json, method_to_plt_cfg, output_dir, c=3, tight_legend=tight_legend)
         plot_rd(method_to_json, method_to_plt_cfg, output_dir, pcqm=True, tight_legend=tight_legend)
         plot_rd(method_to_json, method_to_plt_cfg, output_dir, graphsim=True, tight_legend=tight_legend)
+    if if_plot_dt:
+        plot_time(method_to_json, method_to_plt_cfg, output_dir, tight_legend=tight_legend)
+        plot_time(method_to_json, method_to_plt_cfg, output_dir, enc=False, tight_legend=tight_legend)
     print('All Done')
 
 

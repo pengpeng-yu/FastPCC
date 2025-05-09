@@ -19,25 +19,25 @@ def convert_intra_kitti_ford_lossy():
         'encode time': 'enc_time',
         'decode time': 'dec_time',
         'mseF,PSNR (p2point)': 'mseF,PSNR (p2point)',
-        'mseF,PSNR (p2plane)': 'mseF,PSNR (p2point)',
+        'mseF,PSNR (p2plane)': 'mseF,PSNR (p2plane)',
         'bpp': 'bpp'
     }
     df = pd.read_csv(osp.join(Unicorn_path, 'results/Unicorn_v1/PCGC/csvfiles/lidar/intra/kitti1mm.csv'))
     kitti = {k: [] for k in key_maps}
     for key, tgt_key in key_maps.items():
-        kitti[key] = df[tgt_key].values.tolist()
+        kitti[key] = df[tgt_key].values.tolist()[1:]
 
     df = pd.read_csv(osp.join(Unicorn_path, 'results/Unicorn_v1/PCGC/csvfiles/lidar/intra/ford1mm.csv'))
     ford = {k: [] for k in key_maps}
     for key, tgt_key in key_maps.items():
-        ford[key] = df[tgt_key].values.tolist()
+        ford[key] = df[tgt_key].values.tolist()[1:]
 
 
     os.makedirs('runs/tests/Unicorn/intra', exist_ok=True)
     with open(f'runs/tests/Unicorn/intra/{metric_dict_filename}', 'w') as f:
         f.write(json.dumps(
             {
-                'KITTI q1mm Unicorn1100': kitti,
+                'KITTI q1mm': kitti,
                 'Ford': ford
             }, indent=2, sort_keys=False))
     print('Done')

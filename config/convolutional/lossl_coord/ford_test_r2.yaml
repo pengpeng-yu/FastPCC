@@ -1,0 +1,9 @@
+# include "config/convolutional/lossl_coord/ford_test_r1.yaml"
+
+model:
+  skip_top_scales_num: 1
+
+
+test:
+  dataset:
+    coord_scaler: 0.125

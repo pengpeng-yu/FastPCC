@@ -1,0 +1,48 @@
+# include "config/convolutional/lossl_coord/kitti.yaml"
+
+model:
+  max_stride_wo_recurrent: 32
+  max_stride: 8192
+
+
+train:
+  rundir_name: 'train_convolutional_<autoindex>'
+  batch_size: 8
+  num_workers: 8
+  optimizer: AdamW
+  momentum: 0.9
+  weight_decay: 0.0001
+  max_grad_norm: 1.0
+
+  ema: False
+
+  learning_rate: 0.0001
+  epochs: 60
+
+  scheduler: Step
+  lr_step_size: 60
+  lr_step_gamma: 0.3
+
+  ckpt_frequency: 5
+  test_frequency: 0
+
+  dataset_module_path: 'lib.datasets.PlyVoxel.Base'
+  dataset:
+    root: 'datasets/Ford'
+    filelist_path: 'train_list.txt'
+    coord_scaler: 0.25
+    random_flip: True
+    morton_sort: True
+    morton_sort_inverse: True
+    resolution: 30001
+
+
+test:
+  num_workers: 8
+  dataset_module_path: 'lib.datasets.PlyVoxel.Base'
+  dataset:
+    root: 'datasets/Ford'
+    filelist_path: 'test_list.txt'
+    coord_scaler: 0.25
+    morton_sort: False
+    resolution: 30001
