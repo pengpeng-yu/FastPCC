@@ -7,7 +7,7 @@ See our detailed experimental results on Intel Xeon Gold 5118 and NVIDIA 2080Ti 
 
 
 ## Models
-- `config/convolutional/lossy_coord_v3/*.yaml`: Improved geometry compression (coming soon). 
+- `config/convolutional/lossl_coord/*.yaml`: Geometry lossless compression of LiDAR point clouds (coming soon). 
 - `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression in [2]. 
 - `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression in [2]. 
 - `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model in [1] (Deprecated).
@@ -144,5 +144,6 @@ If this work is helpful to your research, please consider citing:
   booktitle={IEEE Transactions on Multimedia}, 
   title={Hierarchical Distortion Learning for Fast Lossy Compression of Point Clouds}, 
   year={2025},
+  pages={1-16}
 }
 ````

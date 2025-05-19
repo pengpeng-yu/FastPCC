@@ -67,7 +67,7 @@ def write_metric_to_csv(titles: Tuple[Union[List[str], Tuple[str, ...]], ...],
 
 
 def plot_rd(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_cfg,
-            output_dir, d1=True, c=-1, pcqm=False, graphsim=False, hook=None, tight_legend=True):
+            output_dir, d1=True, c=-1, pcqm=False, graphsim=False, hook=None, chamfer=False, tight_legend=True):
     distortion_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
     y_label = 'D1 PSNR (dB)' if d1 else 'D2 PSNR (dB)'
     if c != -1:
@@ -77,6 +77,9 @@ def plot_rd(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_
         distortion_key = y_label = 'PCQM'
     if graphsim is True:
         distortion_key = y_label = 'GraphSIM'
+    if chamfer is True:
+        distortion_key = 'mse1+mse2/2(p2point)'
+        y_label = 'Chamfer Distance (M)'
     output_dir = osp.join(output_dir, f'sample-wise {y_label}')
     if osp.exists(output_dir):
         shutil.rmtree(output_dir)
@@ -86,19 +89,21 @@ def plot_rd(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_
     for sample_name in sample_names:
         fig = plt.figure(figsize=(4.0, 3.0))
         ax = fig.add_subplot(111)
-        if not pcqm and not graphsim:
-            ax.yaxis.set_major_locator(MultipleLocator(5))
-            ax.xaxis.set_major_locator(MultipleLocator(1))
-        elif graphsim:
+        if graphsim:
             ax.yaxis.set_major_locator(MultipleLocator(0.05))
         elif pcqm:
             ax.yaxis.set_major_locator(MultipleLocator(0.005))
             fig.subplots_adjust(left=0.15)
+        elif chamfer:
+            ax.xaxis.set_major_locator(MultipleLocator(1))
+        else:
+            ax.yaxis.set_major_locator(MultipleLocator(5))
+            ax.xaxis.set_major_locator(MultipleLocator(1))
         ax.grid()
         ax.tick_params(pad=0.5)
-        ax.set_xlabel('bpp (bits per input point)', labelpad=-1)
+        ax.set_xlabel('BPP (Bits Per Input Point)', labelpad=-1)
         ax.set_ylabel(y_label, labelpad=0)
-        ax.set_title(f'Bitrate vs. {y_label.rsplit("(")[0]} ({osp.splitext(osp.split(sample_name)[1])[0]})')
+        ax.set_title(f'{y_label.rsplit("(")[0]} vs. BPP ({osp.splitext(osp.split(sample_name)[1])[0]})')
         for method_name, method_json in method_to_json.items():
             plt_config = method_to_plt_cfg[method_name]
             if sample_name not in method_json: continue
@@ -122,10 +127,10 @@ def plot_rd(method_to_json: Dict[str, all_file_metric_dict_type], method_to_plt_
                 handlelength=1.3, handletextpad=0.2, borderaxespad=0.1)
         else:
             legend_args = {}
-        if not pcqm:
-            ax.legend(loc='lower right', **legend_args)
-        else:
+        if pcqm or chamfer:
             ax.legend(loc='upper right', **legend_args)
+        else:
+            ax.legend(loc='lower right', **legend_args)
         ax.figure.savefig(osp.join(
             output_dir, f'{y_label} {osp.splitext(osp.split(sample_name)[1])[0]}.pdf'
         ), bbox_inches="tight")
@@ -138,7 +143,7 @@ def plot_time(method_to_json: Dict[str, all_file_metric_dict_type], method_to_pl
     x_key = 'mseF,PSNR (p2point)' if d1 else 'mseF,PSNR (p2plane)'
     x_label = 'D1 PSNR (dB)' if d1 else 'D2 PSNR (dB)'
     y_key = 'encode time' if enc else 'decode time'
-    y_label = 'Encoding Time(s)' if enc else 'Decoding Time(s)'
+    y_label = 'Encoding Time (s)' if enc else 'Decoding Time (s)'
     output_dir = osp.join(output_dir, f'sample-wise {y_label}')
     if osp.exists(output_dir):
         shutil.rmtree(output_dir)
@@ -154,7 +159,7 @@ def plot_time(method_to_json: Dict[str, all_file_metric_dict_type], method_to_pl
         ax.tick_params(pad=0.5)
         ax.set_xlabel(x_label, labelpad=-1)
         ax.set_ylabel(y_label, labelpad=0)
-        ax.set_title(f'{x_label.split("(")[0]} vs. {y_label.split("(")[0]}'
+        ax.set_title(f'{y_label.split("(")[0]} vs. {x_label.split("(")[0]}'
                      f' ({osp.splitext(osp.split(sample_name)[1])[0]})')
         for method_name, method_json in method_to_json.items():
             plt_config = method_to_plt_cfg[method_name]
@@ -233,9 +238,8 @@ def compute_multiple_bdrate():
     tight_legend = False
     method_configs = {
         # 'Ours': ('convolutional/lossl_coord/kitti_test_r*', {'color': '#1f77b4', 'marker': '.'}),
-        # 'EHEM': ('EHEM', {'color': '#2ca02c', 'marker': '.'}),
         # 'Light EHEM': ('Light-EHEM', {'color': '#ff7f0e', 'marker': '.'}),
-        # 'OctAttention': ('OctAttention-lidar', {'color': '#e377c2', 'marker': '.'}),
+        # 'OctAttention': ('OctAttention-lidar', {'color': '#2ca02c', 'marker': '.'}),
         # 'RENO': ('RENO', {'color': '#9467bd', 'marker': '.'}),
         # 'G-PCC octree': ('tmc3_geo/octree', {'color': '#8c564b', 'marker': '.'}),
 
@@ -247,7 +251,6 @@ def compute_multiple_bdrate():
         # 'Baseline': ('convolutional/lossl_coord/kitti_wo_fea_prop_wo_redens_r*', {'color': '#ff7f0e', 'marker': '.'}),
 
         # 'Ours': ('convolutional/lossl_coord/ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
-        # 'EHEM': ('EHEM', {'color': '#2ca02c', 'marker': '.'}),
         # 'Light EHEM': ('Light-EHEM', {'color': '#ff7f0e', 'marker': '.'}),
         # 'Unicorn': ('Unicorn/intra', {'color': '#d62728', 'marker': '.'}),
         # 'RENO': ('RENO', {'color': '#9467bd', 'marker': '.'}),
