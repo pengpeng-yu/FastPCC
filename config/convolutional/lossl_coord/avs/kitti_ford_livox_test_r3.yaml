@@ -1,0 +1,9 @@
+# include "config/convolutional/lossl_coord/avs/kitti_ford_livox_test_r1.yaml"
+
+model:
+  skip_top_scales_num: 2
+
+
+test:
+  dataset:
+    coord_scaler: 0.0625

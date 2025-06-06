@@ -22,10 +22,16 @@ config_paths = [
     'lossy_coord_lossy_color/baseline_r*.yaml',
     'lossy_coord_v2/baseline_kitti_r*.yaml',
     'lossy_coord_v2/baseline_kitti_q1mm_r*.yaml',
+    'lossl_coord/kitti_test_r*.yaml',
+    'lossl_coord/ford_test_r*.yaml',
+    'lossl_coord/avs/kitti_ford_livox_test_r*.yaml'
 ]
 sub_config_to_weight_path_maps = {
     'lossy_coord_v2/part6e5_r*.yaml': lambda _: _.replace('part6e5', 'baseline', 1),
-    'lossy_coord_v2/baseline_kitti_q1mm_r*.yaml': lambda _: _.replace('_q1mm', '', 1)
+    'lossy_coord_v2/baseline_kitti_q1mm_r*.yaml': lambda _: _.replace('_q1mm', '', 1),
+    'lossl_coord/kitti_test_r*.yaml': lambda _: 'lossl_coord/kitti',
+    'lossl_coord/ford_test_r*.yaml': lambda _: 'lossl_coord/ford',
+    'lossl_coord/avs/kitti_ford_livox_test_r*.yaml': lambda _: 'lossl_coord/avs/kitti_ford_livox',
 }
 
 
@@ -35,7 +41,7 @@ def test():
         glob_config_path = osp.join(config_prefix, glob_config_path)
         sub_config_paths = sorted(glob(glob_config_path))
         for config_path in sub_config_paths:
-            config_name = config_path[len(config_prefix)+1: -5]
+            config_name = config_path[len(config_prefix)+1: -5]  # remove ".yaml"
             sub_run_dir = osp.join(output_prefix, config_name)
             all_file_metric_dict = {}
 
