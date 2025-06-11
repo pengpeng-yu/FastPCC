@@ -1,11 +1,11 @@
 # include "config/convolutional/lossl_coord/kitti.yaml"
 
 model:
-  channels: 128
-  max_stride_wo_recurrent: 16384
-  max_stride: 65536
-  fea_stride: 32
-  use_more_ch_for_multi_step_pred: False
+  channels: 256
+  max_stride_wo_recurrent: 4096
+  max_stride: 16384
+  fea_stride: 8
+  use_more_ch_for_multi_step_pred: True
 
 
 train:
@@ -16,7 +16,7 @@ train:
       - 'datasets/AVS_AIPCC_CfE/Cat2A-1/Ford_01_AVS_1mm'
       - 'datasets/AVS_AIPCC_CfE/Cat2A-1/Ford_02_AVS_1mm'
       - 'datasets/AVS_AIPCC_CfE/Cat2A-1/Livox_01_all_in_one_1mm'
-    coord_scaler: 1.0
+    coord_scaler: 0.25
     random_flip: True
     morton_sort: True
     morton_sort_inverse: True
@@ -30,6 +30,6 @@ test:
       - 'datasets/AVS_AIPCC_CfE/Cat2B-1/kitti'
       - 'datasets/AVS_AIPCC_CfE/Cat2B-1/Ford_03_AVS_1mm'
       - 'datasets/AVS_AIPCC_CfE/Cat2B-1/Livox_02_all_in_one_1mm'
-    coord_scaler: 1.0
+    coord_scaler: 0.25
     morton_sort: False
     resolution: 30001

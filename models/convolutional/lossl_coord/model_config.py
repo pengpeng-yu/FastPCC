@@ -11,5 +11,6 @@ class Config(SimpleConfig):
     max_stride_wo_recurrent: int = 2048
     max_stride: int = 8192
     fea_stride: int = 16
+    use_more_ch_for_multi_step_pred: bool = True
 
     skip_top_scales_num: int = 0  # Test phase

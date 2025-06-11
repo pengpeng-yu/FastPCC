@@ -6,4 +6,4 @@ model:
 
 test:
   dataset:
-    coord_scaler: 0.015625
+    coord_scaler: 0.0625

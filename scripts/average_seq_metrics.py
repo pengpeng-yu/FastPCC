@@ -59,7 +59,7 @@ def main():
         lambda s: 'AVS' in s and 'kitti' in s and '/18/' in s: 'AVS KITTI 18',
         lambda s: 'AVS' in s and 'kitti' in s and '/19/' in s: 'AVS KITTI 19',
         lambda s: 'AVS' in s and 'kitti' in s and '/20/' in s: 'AVS KITTI 20',
-        lambda s: 'AVS' in s and 'kitti' in s and '/11/' in s: 'AVS KITTI 21',
+        lambda s: 'AVS' in s and 'kitti' in s and '/21/' in s: 'AVS KITTI 21',
         lambda s: 'AVS' in s and 'Ford_03' in s: 'AVS Ford 03',
         lambda s: 'AVS' in s and 'Livox_02' in s: 'AVS Livox 02',
     }

@@ -117,7 +117,7 @@ class OneScalePredictor(nn.Module):
 
 
 class OneScaleMultiStepPredictor(nn.Module):
-    def __init__(self, channels, pred_steps=2):
+    def __init__(self, channels, pred_steps=2, use_more_ch_for_multi_step_pred=True):
         super(OneScaleMultiStepPredictor, self).__init__()
         self.pred_steps = pred_steps
         if pred_steps == 2:
@@ -126,21 +126,30 @@ class OneScaleMultiStepPredictor(nn.Module):
             self.dec = SparseSequential(
                 nn.Linear(channels + 8, out_ch), nn.PReLU(),
                 Block(out_ch))
-        elif pred_steps == 3:
+        elif use_more_ch_for_multi_step_pred:
+            if pred_steps == 3:
+                self.embed = SparseSequential(
+                    spnn.Conv3d(8, 64, 2, 2, bias=True), nn.PReLU())
+                out_ch = round(channels * 1.25)
+                self.dec = SparseSequential(
+                    nn.Linear(channels + 64, out_ch), nn.PReLU(),
+                    Block(out_ch)) if channels + 64 != out_ch else Block(out_ch)
+            elif pred_steps == 4:
+                self.embed = SparseSequential(
+                    spnn.Conv3d(8, 512, kernel_size=4, stride=4, bias=True), nn.PReLU())
+                out_ch = channels * 2
+                self.dec = SparseSequential(
+                    nn.Linear(round(channels * 1.25) + 512, out_ch), nn.PReLU(),
+                    Block(out_ch)) if round(channels * 1.25) + 512 != out_ch else Block(out_ch)
+            else: raise NotImplementedError
+        else:
+            assert pred_steps >= 3
             self.embed = SparseSequential(
-                spnn.Conv3d(8, 64, 2, 2, bias=True), nn.PReLU())
-            out_ch = round(channels * 1.25)
+                spnn.Conv3d(8, 64, 2 ** (pred_steps - 2), 2 ** (pred_steps - 2), bias=True), nn.PReLU())
             self.dec = SparseSequential(
-                nn.Linear(channels + 64, out_ch), nn.PReLU(),
-                Block(out_ch)) if channels + 64 != out_ch else Block(out_ch)
-        elif pred_steps == 4:
-            self.embed = SparseSequential(
-                spnn.Conv3d(8, 512, kernel_size=4, stride=4, bias=True), nn.PReLU())
-            out_ch = channels * 2
-            self.dec = SparseSequential(
-                nn.Linear(round(channels * 1.25) + 512, out_ch), nn.PReLU(),
-                Block(out_ch)) if round(channels * 1.25) + 512 != out_ch else Block(out_ch)
-        else: raise NotImplementedError
+                nn.Linear(channels + 64, channels), nn.PReLU(),
+                Block(channels))
+            out_ch = channels
 
         self.pred = nn.ModuleList()
         for idx in range(pred_steps):
@@ -310,7 +319,8 @@ class Model(nn.Module):
             elif pred_steps == 1:
                 self.blocks_dec.append(OneScalePredictor(cfg.channels, False, False))
             else:
-                self.blocks_dec.append(OneScaleMultiStepPredictor(cfg.channels, pred_steps))
+                self.blocks_dec.append(OneScaleMultiStepPredictor(
+                    cfg.channels, pred_steps, cfg.use_more_ch_for_multi_step_pred))
         self.block_dec_recurrent = OneScalePredictor(cfg.channels, True, True)
 
         self.register_buffer('fold2bin_kernel', torch.empty(8, 1, 1 * 8, dtype=torch.float), persistent=False)
