@@ -41,12 +41,12 @@ class SampleData:
 
 
 class PCData(SampleData):
-    tensor_to_tensor_items = ('color', 'normal')
+    tensor_to_tensor_items = ('color', 'reflectance')
 
     def __init__(self,
                  xyz: Union[torch.Tensor, List[torch.Tensor]],
                  color: Union[torch.Tensor, List[torch.Tensor]] = None,
-                 normal: Union[torch.Tensor, List[torch.Tensor]] = None,
+                 reflectance: Union[torch.Tensor, List[torch.Tensor]] = None,
                  resolution: Union[float, List[float]] = None,
                  file_path: Union[str, List[str]] = None,
                  batch_size: int = 0,
@@ -57,7 +57,7 @@ class PCData(SampleData):
         super(PCData, self).__init__()
         self.xyz = xyz
         self.color = color
-        self.normal = normal
+        self.reflectance = reflectance
         self.resolution = resolution
         self.file_path = file_path
         self.batch_size = batch_size

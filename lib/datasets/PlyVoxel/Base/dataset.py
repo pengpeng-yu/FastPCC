@@ -79,13 +79,13 @@ class PlyVoxel(torch.utils.data.Dataset):
         # load
         file_path = self.file_list[index]
         try:
-            point_cloud = o3d.io.read_point_cloud(file_path)  # colors are normalized by 255!
+            point_cloud = o3d.t.io.read_point_cloud(file_path)
         except Exception as e:
             print(f'Error when loading {file_path}')
             raise e
 
         # xyz
-        xyz = np.asarray(point_cloud.points)
+        xyz = point_cloud.point.positions.numpy()
         org_points_num = xyz.shape[0]
         org_point = xyz.min(0)
         xyz -= org_point
@@ -98,20 +98,26 @@ class PlyVoxel(torch.utils.data.Dataset):
             xyz = xyz.astype(np.int32)
 
         if self.cfg.with_color:
-            color = np.asarray(point_cloud.colors)
+            color = point_cloud.point['colors'].numpy()
             assert color.size != 0
             assert color.shape[0] == xyz.shape[0]
-            color *= 255
-            np.round(color, out=color)
             color = color.astype(np.float32)
         else:
             color = None
 
+        if self.cfg.with_reflectance:
+            refl = point_cloud.point['reflectance'].numpy()
+            assert refl.size != 0
+            assert refl.shape[0] == xyz.shape[0]
+            refl = refl.astype(np.float32)
+        else:
+            refl = None
+
         par_num = self.file_partition_max_points_num_list[index]
         if self.is_training:
             if par_num != 0 and xyz.shape[0] > par_num:
-                xyz, (color,) = kd_tree_partition_randomly(
-                    xyz, par_num, (color,)
+                xyz, (color, refl) = kd_tree_partition_randomly(
+                    xyz, par_num, (color, refl)
                 )
                 xyz -= xyz.min(0)
 
@@ -132,16 +138,20 @@ class PlyVoxel(torch.utils.data.Dataset):
 
         xyz = torch.from_numpy(xyz)
         color = torch.from_numpy(color) if color is not None else None
+        refl = torch.from_numpy(refl) if refl is not None else None
         if self.cfg.morton_sort:
             order = torch.argsort(morton_encode_magicbits(xyz, inverse=self.cfg.morton_sort_inverse))
             xyz = xyz[order]
             if color is not None:
                 color = color[order]
+            if refl is not None:
+                refl = refl[order]
 
         inv_trans = torch.from_numpy(np.concatenate((org_point.reshape(-1), (1 / coord_scaler,)), 0, dtype=np.float32))
         pc_data = PCData(
             xyz=xyz,
             color=color,
+            reflectance=refl,
             file_path=file_path,
             resolution=None if self.is_training else self.file_resolutions[index],
             org_points_num=org_points_num,

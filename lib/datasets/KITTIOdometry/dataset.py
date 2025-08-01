@@ -2,10 +2,11 @@ import os.path as osp
 import pathlib
 
 import numpy as np
+import open3d as o3d
 import torch
 import torch.utils.data
 
-from lib.data_utils import PCData, pc_data_collate_fn, write_ply_file
+from lib.data_utils import PCData, pc_data_collate_fn, write_ply_file, kd_tree_partition_randomly
 from lib.morton_code import morton_encode_magicbits
 from lib.datasets.KITTIOdometry.dataset_config import DatasetConfig
 
@@ -19,13 +20,18 @@ class KITTIOdometry(torch.utils.data.Dataset):
 
         if is_training:
             filelist_abs_path = osp.join(cfg.root, cfg.train_filelist_path)
+            ply_file_abs_path = osp.join(cfg.ply_file_root, cfg.ply_file_train_filelist_path)
         else:
             filelist_abs_path = osp.join(cfg.root, cfg.test_filelist_path)
+            ply_file_abs_path = osp.join(cfg.ply_file_root, cfg.ply_file_test_filelist_path)
 
         if not osp.exists(filelist_abs_path):
-            self.file_list = [osp.join(self.cfg.root, _) for _ in self.gen_filelist(filelist_abs_path)]
+            self.file_list = [osp.join(cfg.root, _) for _ in self.gen_filelist(filelist_abs_path)]
         else:
-            self.file_list = self.load_filelist(filelist_abs_path)
+            self.file_list = self.load_filelist(cfg.root, filelist_abs_path)
+
+        if osp.exists(ply_file_abs_path):
+            self.file_list.extend(self.load_filelist(cfg.ply_file_root, ply_file_abs_path))
 
     def gen_filelist(self, filelist_abs_path):
         self.logger.info('no filelist is given. Trying to generate...')
@@ -40,10 +46,10 @@ class KITTIOdometry(torch.utils.data.Dataset):
             f.writelines((_ + '\n' for _ in file_list))
         return file_list
 
-    def load_filelist(self, filelist_abs_path):
+    def load_filelist(self, root, filelist_abs_path):
         self.logger.info(f'using filelist: "{filelist_abs_path}"')
         with open(filelist_abs_path) as f:
-            file_list = [osp.join(self.cfg.root, line.strip()) for line in f.readlines()[::self.cfg.list_sampling_interval]]
+            file_list = [osp.join(root, line.strip()) for line in f.readlines()[::self.cfg.list_sampling_interval]]
         return file_list
 
     @staticmethod
@@ -57,11 +63,16 @@ class KITTIOdometry(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         file_path = self.file_list[index]
-        xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
+        flag_kitti_bin_file = file_path.endswith('bin')
+        if flag_kitti_bin_file:
+            xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
+        else:
+            assert file_path.endswith('ply')
+            xyz = o3d.t.io.read_point_cloud(file_path).point.positions.numpy().astype('<f4')
         org_points_num = xyz.shape[0]
 
         # For calculating distortion metrics
-        if not self.is_training:
+        if not self.is_training and flag_kitti_bin_file:
             p, n = osp.split(file_path)
             if not self.cfg.flag_sparsepcgc:
                 cache_path = osp.join(p, n.replace('.bin', '_n.ply'))
@@ -75,9 +86,14 @@ class KITTIOdometry(torch.utils.data.Dataset):
 
         org_point = xyz.min(0)
         xyz -= org_point
-        scale = 400 / (self.cfg.resolution - 1)
-        xyz /= scale
-        xyz.round(out=xyz)
+        if flag_kitti_bin_file:
+            scale = (self.cfg.resolution - 1) / 400
+            inv_scale = 400 / (self.cfg.resolution - 1)
+        else:
+            scale = self.cfg.ply_file_coord_scaler
+            inv_scale = 1 / self.cfg.ply_file_coord_scaler
+        xyz *= scale
+        xyz = xyz.round().astype(np.int32)
 
         if self.cfg.random_flip:
             if np.random.rand() > 0.5:
@@ -85,23 +101,30 @@ class KITTIOdometry(torch.utils.data.Dataset):
             if np.random.rand() > 0.5:
                 xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max()
 
+        par_num = self.cfg.kd_tree_partition_max_points_num
+        if par_num != 0 and xyz.shape[0] > par_num:
+            xyz = kd_tree_partition_randomly(xyz, par_num)
+            xyz -= xyz.min(0)
+
         if not self.cfg.morton_sort:
-            xyz = np.unique(xyz.astype(np.int32), axis=0)
+            xyz = np.unique(xyz, axis=0)
             xyz = torch.from_numpy(xyz)
         else:
-            xyz = xyz.astype(np.int32)
             xyz = torch.from_numpy(xyz)
             xyz = xyz[torch.argsort(morton_encode_magicbits(xyz, inverse=self.cfg.morton_sort_inverse))]
             xyz = torch.unique_consecutive(xyz, dim=0)
 
-        resolution = 59.70 + 1
-        inv_trans = torch.from_numpy(np.concatenate((org_point.reshape(-1), (scale,)), 0, dtype=np.float32))
-        if self.cfg.flag_sparsepcgc:
+        inv_trans = torch.from_numpy(np.concatenate((org_point.reshape(-1), (inv_scale,)), 0, dtype=np.float32))
+        if flag_kitti_bin_file and not self.cfg.flag_sparsepcgc:
+            resolution = 59.70 + 1
+        elif flag_kitti_bin_file and self.cfg.flag_sparsepcgc:
             resolution = 30000 + 1
             inv_trans *= 1000
+        else:
+            resolution = self.cfg.ply_file_resolution
         return PCData(
             xyz=xyz,
-            file_path=cache_path if not self.is_training else file_path,
+            file_path=cache_path if (not self.is_training and flag_kitti_bin_file) else file_path,
             org_points_num=org_points_num,
             resolution=resolution,  # For the peak value in pc_error
             inv_transform=inv_trans
