@@ -1,0 +1,10 @@
+# include "config/convolutional/lossl_coord/avs/kitti_ford_livox_kitti_det.yaml"
+
+model:
+  skip_top_scales_num: 0
+
+
+test:
+  from_ckpt: weights/convolutional/lossl_coord/avs/kitti_ford_livox_kitti_det.pt
+  dataset:
+    coord_scaler: 1.0

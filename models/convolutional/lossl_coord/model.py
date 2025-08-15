@@ -305,7 +305,8 @@ class Model(nn.Module):
         SF.conv_config.set_global_conv_config(conv_config)
 
         self.cfg = cfg
-        self.evaluator = PCCEvaluator()
+        self.evaluator = PCCEvaluator(
+            cal_mpeg_pc_error=not cfg.cal_avs_pc_evalue, cal_avs_pc_evalue=cfg.cal_avs_pc_evalue)
 
         self.max_downsample_times_wo_recurrent = int(np.log2(cfg.max_stride_wo_recurrent))
         self.max_downsample_times = int(np.log2(cfg.max_stride))

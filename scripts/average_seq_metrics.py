@@ -62,6 +62,7 @@ def main():
         lambda s: 'AVS' in s and 'kitti' in s and '/21/' in s: 'AVS KITTI 21',
         lambda s: 'AVS' in s and 'Ford_03' in s: 'AVS Ford 03',
         lambda s: 'AVS' in s and 'Livox_02' in s: 'AVS Livox 02',
+        lambda s: 'AVS' in s and 'kitti_det_val' in s: 'AVS KITTI VAL',
     }
     input_files = (
         f'{test_dir}/convolutional/lossy_coord_v2/baseline_kitti_q1mm_r*/{metric_dict_filename}',
@@ -113,11 +114,14 @@ def main():
             for k, v in counts.items():
                 if k not in new_metric_dict: continue
                 for metric_key, metric_values in new_metric_dict[k].items():
+                    if metric_key == 'compressed_bytes':
+                        tmp_compressed_bytes = deepcopy(new_metric_dict[k][metric_key])
                     if isinstance(new_metric_dict[k][metric_key], List):
                         for i in range(len(new_metric_dict[k][metric_key])):
                             new_metric_dict[k][metric_key][i] /= v
                     else:
                         new_metric_dict[k][metric_key] /= v
+                new_metric_dict[k]['total_compressed_bytes'] = tmp_compressed_bytes
             if not osp.isfile(outfile):
                 os.rename(infile, outfile)
             with open(file, 'w') as f:

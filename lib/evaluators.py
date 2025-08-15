@@ -8,7 +8,7 @@ import multiprocessing as mp
 import torch
 
 from lib.data_utils import write_ply_file
-from lib.metrics.pc_error_wrapper import mpeg_pc_error
+from lib.metrics.pc_error_wrapper import mpeg_pc_error, avs_pc_evalue
 
 
 class Evaluator:
@@ -31,10 +31,13 @@ class Evaluator:
 class PCCEvaluator(Evaluator):
     def __init__(self,
                  cal_mpeg_pc_error: bool = True,
+                 cal_avs_pc_evalue: bool = False,
                  mpeg_pc_error_processes: int = 8):
         super(PCCEvaluator, self).__init__()
         self.cal_mpeg_pc_error = cal_mpeg_pc_error
-        self.mpeg_pc_error_processes = mpeg_pc_error_processes
+        self.cal_avs_pc_evalue = cal_avs_pc_evalue
+        assert cal_mpeg_pc_error + cal_avs_pc_evalue == 1, f'{cal_mpeg_pc_error}, {cal_avs_pc_evalue}'
+        self.pc_error_processes = mpeg_pc_error_processes
         self.working = False
         self.mp_ctx = mp.get_context('forkserver')
 
@@ -59,7 +62,7 @@ class PCCEvaluator(Evaluator):
         """
         if not self.working:
             self.reset()
-            self.mpeg_pc_error_pool = self.mp_ctx.Pool(self.mpeg_pc_error_processes)
+            self.pc_error_pool = self.mp_ctx.Pool(self.pc_error_processes)
             self.working = True
 
         have_color = pred_color is not None
@@ -88,9 +91,15 @@ class PCCEvaluator(Evaluator):
 
             if self.cal_mpeg_pc_error:
                 assert file_path.endswith('.ply'), file_path
-                self.file_path_to_info_run_res[file_path] = self.mpeg_pc_error_pool.apply_async(
+                self.file_path_to_info_run_res[file_path] = self.pc_error_pool.apply_async(
                     mpeg_pc_error,
                     (osp.abspath(file_path), osp.abspath(reconstructed_path), resolution, '', False, have_color)
+                )
+            elif self.cal_avs_pc_evalue:
+                assert file_path.endswith('.ply'), file_path
+                self.file_path_to_info_run_res[file_path] = self.pc_error_pool.apply_async(
+                    avs_pc_evalue,
+                    (osp.abspath(file_path), osp.abspath(reconstructed_path), resolution, have_color)
                 )
 
         if file_path in self.file_path_to_info:
@@ -132,7 +141,7 @@ class PCCEvaluator(Evaluator):
                 f.write(json.dumps(mean_dict, indent=2, sort_keys=False))
 
         self.reset()
-        self.mpeg_pc_error_pool.close()
-        self.mpeg_pc_error_pool.join()
+        self.pc_error_pool.close()
+        self.pc_error_pool.join()
         self.working = False
         return mean_dict

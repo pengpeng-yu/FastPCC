@@ -164,8 +164,11 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     model = Model(cfg.model).to(device)
     if cfg.train.ema is True:
         ema = ModelEmaV3(
-            model, decay=cfg.train.ema_decay, use_warmup=cfg.train.ema_warmup, foreach=cfg.train.ema_foreach,
+            torch.nn.Sequential(),
+            decay=cfg.train.ema_decay, use_warmup=cfg.train.ema_warmup, foreach=cfg.train.ema_foreach,
             warmup_gamma=cfg.train.ema_warmup_gamma, warmup_power=cfg.train.ema_warmup_power)
+        ema.module = Model(cfg.model).to(device).eval()
+        ema.module.load_state_dict(model.state_dict())
     logger.info(f'repr(model): \n{repr(model)}')
     total_params = 0
     logger.info("Submodules and their parameter counts:")

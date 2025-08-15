@@ -12,6 +12,7 @@ except ImportError: write_ply_file = None
 from lib.metrics.pcqm_wrapper import pcqm
 from lib.metrics.graph_sim_wrapper import graph_sim
 from scripts.script_config import pc_error_path
+from scripts.script_config import avs_pc_evalue_path
 
 
 def if_ply_has_vertex_normal(file_path: str):
@@ -30,7 +31,7 @@ def if_ply_has_vertex_normal(file_path: str):
     return has
 
 
-_DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A->B).',
+_MPEG_DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A->B).',
              '2. Use infile2 (B) as reference, loop over B, use normals on A. (B->A).',
              '3. Final (symmetric).',
              'Job done!']
@@ -79,9 +80,9 @@ def mpeg_pc_error(
     for line in subp_stdout.splitlines():
         if line.startswith('Point cloud sizes for org version'):
             metric_dict['org points num'] = int(line.rstrip().rsplit(' ', 3)[1][:-1])
-        elif line.startswith(_DIVIDERS[0]):
+        elif line.startswith(_MPEG_DIVIDERS[0]):
             flag_read = True
-        elif line.startswith(_DIVIDERS[-1]):
+        elif line.startswith(_MPEG_DIVIDERS[-1]):
             break
         elif flag_read and ':' in line:
             line = line.strip()
@@ -101,4 +102,49 @@ def mpeg_pc_error(
             metric_dict['PCQM'] = pcqm(infile1, infile2, threads)
         if cal_graph_sim:
             metric_dict['GraphSIM'] = graph_sim(infile1, infile2, threads)
+    return metric_dict
+
+
+_AVS_DIVIDERS = ['1. Take original point cloud as reference:',
+                 '2. Take reconstruct point cloud as reference:',
+                 '3. Symmetric result:',
+                 'Point cloud evalue processing time']
+
+
+def avs_pc_evalue(
+        infile1: str, infile2: str, resolution: float,
+        hausdorff: bool = False, color: bool = False, command='',
+) -> Dict[str, float]:
+    if command == '': command = avs_pc_evalue_path
+    cmd_args = f'{command}' \
+               f' -f1 {infile1}' \
+               f' -f2 {infile2}' \
+               f' --peakvalue {resolution - 1}' \
+               f' --show_hausdorff {1 if hausdorff else 0}'
+    if color:
+        cmd_args += ' -cc'
+
+    subp_stdout = subprocess.run(
+        cmd_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        shell=True, check=True, text=True
+    ).stdout
+
+    metric_dict = {}
+    flag_read = False
+    for line in subp_stdout.splitlines():
+        if line.startswith(' point cloud size: '):
+            metric_dict['org points num'] = int(line.rstrip().rsplit(' ', 1)[-1])
+        elif line.startswith(_AVS_DIVIDERS[0]):
+            flag_read = True
+        elif line.startswith(_AVS_DIVIDERS[1]) or line.startswith(_AVS_DIVIDERS[2]):
+            pass
+        elif line.startswith(_AVS_DIVIDERS[-1]):
+            break
+        elif flag_read and ':' in line:
+            line = line.strip()
+            key, value = line.split(':', 1)
+            metric_dict[key.strip()] = float(value)
+
+    if metric_dict == {}:
+        raise RuntimeError(subp_stdout)
     return metric_dict

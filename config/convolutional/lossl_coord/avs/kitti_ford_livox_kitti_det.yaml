@@ -1,0 +1,43 @@
+# include "config/convolutional/lossl_coord/kitti.yaml"
+
+model:
+  channels: 128
+  max_stride_wo_recurrent: 16384
+  max_stride: 65536
+  fea_stride: 32
+  use_more_ch_for_multi_step_pred: False
+  cal_avs_pc_evalue: True
+
+
+train:
+  epochs: 80
+  scheduler: Step
+  lr_step_size: 80
+  lr_step_gamma: 0.3
+
+  dataset_module_path: 'lib.datasets.PlyVoxel.Base'
+  dataset:
+    root:
+      - 'datasets/AVS_AIPCC/Cat4A/kitti'
+      - 'datasets/AVS_AIPCC/Cat4A/Ford_01_AVS_1mm'
+      - 'datasets/AVS_AIPCC/Cat4A/Ford_02_AVS_1mm'
+      - 'datasets/AVS_AIPCC/Cat4A/Livox_01_all_in_one_1mm'
+      - 'datasets/AVS_AIPCC/Cat2A/kitti_det_train'
+    coord_scaler: 1.0
+    random_flip: True
+    morton_sort: True
+    morton_sort_inverse: True
+    resolution: 30001
+
+
+test:
+  dataset_module_path: 'lib.datasets.PlyVoxel.Base'
+  dataset:
+    root:
+      - 'datasets/AVS_AIPCC/Cat4B/kitti'
+      - 'datasets/AVS_AIPCC/Cat4B/Ford_03_AVS_1mm'
+      - 'datasets/AVS_AIPCC/Cat4B/Livox_02_all_in_one_1mm'
+      - 'datasets/AVS_AIPCC/Cat2B/kitti_det_val'
+    coord_scaler: 1.0
+    morton_sort: False
+    resolution: 30001

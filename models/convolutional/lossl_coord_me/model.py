@@ -303,7 +303,8 @@ class Model(nn.Module):
         self.minkowski_algorithm = getattr(ME.MinkowskiAlgorithm, cfg.minkowski_algorithm)
 
         self.cfg = cfg
-        self.evaluator = PCCEvaluator()
+        self.evaluator = PCCEvaluator(
+            cal_mpeg_pc_error=not cfg.cal_avs_pc_evalue, cal_avs_pc_evalue=cfg.cal_avs_pc_evalue)
 
         self.max_downsample_times_wo_recurrent = int(np.log2(cfg.max_stride_wo_recurrent))
         self.max_downsample_times = int(np.log2(cfg.max_stride))
@@ -326,6 +327,7 @@ class Model(nn.Module):
         self.fold2bin_conv = ME.MinkowskiConvolution(1, 8, (2, 2, 2), (2, 2, 2), bias=False, dimension=3)
         with torch.no_grad():
             self.fold2bin_conv.kernel[...] = fold2bin_kernel
+            self.fold2bin_conv.kernel.requires_grad_(False)
         self.register_buffer('bin2oct_kernel', torch.arange(7, -1, -1, dtype=torch.uint8), persistent=False)
         self.register_buffer('unfold_kernel', torch.tensor(
             ((0, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 1, 1, 0),
@@ -632,8 +634,8 @@ class Block(nn.Module):
         self.conv2 = ME.MinkowskiConvolution(ch, ch, 3, 1, 1, bias=True, dimension=3)
         self.act2 = ME.MinkowskiPReLU()
 
-    def forward(self, org: SparseTensor, coordinate_map_key=None):
-        x = self.conv(org, coordinate_map_key)
+    def forward(self, org: SparseTensor):
+        x = self.conv(org)
         x = self.act(x)
         x = self.conv2(x)
         x.F.add_(org.F)
@@ -644,7 +646,7 @@ class Block(nn.Module):
 class SparseSequential(nn.Sequential):
     def forward(self, x: SparseTensor, coordinate_map_key=None) -> SparseTensor:
         for module in self:
-            if coordinate_map_key is not None and isinstance(x, (ME.MinkowskiConvolution, Block)):
+            if coordinate_map_key is not None and isinstance(x, (ME.MinkowskiConvolution,)):
                 x = module(x, coordinate_map_key)
             else:
                 x = module(x)

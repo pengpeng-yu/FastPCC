@@ -1,4 +1,5 @@
 pc_error_path = 'bin/pc_error'
+avs_pc_evalue_path = 'bin/avs-pcc-pc_evalue'
 tmc3_path = 'bin/tmc3'
 metric_dict_filename = 'metric_dict.json'
 cuda_device = '0'

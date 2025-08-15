@@ -14,3 +14,4 @@ class Config(SimpleConfig):
     use_more_ch_for_multi_step_pred: bool = True
 
     skip_top_scales_num: int = 0  # Test phase
+    cal_avs_pc_evalue: bool = False
