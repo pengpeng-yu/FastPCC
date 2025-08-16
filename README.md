@@ -1,13 +1,11 @@
 This project contains an implementation of our ICME 2023 and TMM papers on learning-based point cloud compression.
-Contact me for any reproduction issue: <yupp5@mail2.sysu.edu.cn>
+Contact me for any reproduction issue: <yupp5@mail2.sysu.edu.cn>.
 
-
-## Highlights
-See our detailed experimental results on Intel Xeon Gold 5118 and NVIDIA 2080Ti at [OneDrive](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EbzFDM93okNPmceKE5ZLzhgBZPJ1Cb4L-GeoP3stilFJxQ).
+Detailed experimental results of [1, 2] on Intel Xeon Gold 5118 and NVIDIA 2080Ti are available at [OneDrive](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EbzFDM93okNPmceKE5ZLzhgBZPJ1Cb4L-GeoP3stilFJxQ).
 
 
 ## Models
-- `config/convolutional/lossl_coord/*.yaml`: Geometry lossless compression of LiDAR point clouds (coming soon). 
+- `config/convolutional/lossl_coord/*.yaml`: Real-time geometry lossless compression of LiDAR point clouds. 
 - `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression in [2]. 
 - `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression in [2]. 
 - `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model in [1] (Deprecated).
@@ -23,8 +21,18 @@ Please see detailed commands [below](#train--test).
 - ninja
 - open3d
 - plyfile
+
+For models `config/convolutional/lossl_coord` and `config/convolutional/lossy_coord_v3`:
+- pytorch >= 2.3 (for supporting `torch.uint16`)
+- [torchsparse]((https://github.com/mit-han-lab/torchsparse?tab=readme-ov-file#installation)) == 2.1.0 (Compiling requires [sparsehash](https://github.com/sparsehash/sparsehash), e.g., `sudo apt-get install libsparsehash-dev`)
+
+For the model `config/convolutional/lossl_coord_me`:
+- pytorch >= 2.3 (for supporting `torch.uint16`)
+- [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation) ≈ 0.5.4 (for compilation with CUDA 12.1/12.2, please refer to [this](https://github.com/daizhirui/MinkowskiEngine/tree/fix-for-cuda-12.2))
+
+For the remaining models:
 - pytorch >= 1.7
-- [pytorch3d](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) (only for knn_points in joint lossy compression. Conda installation suggested: conda install -c fvcore -c iopath -c conda-forge fvcore iopath; conda install pytorch3d -c pytorch3d)
+- [pytorch3d](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) (only for knn_points in joint lossy compression `config/convolutional/lossy_coord_lossy_color`. Conda installation suggested: conda install -c fvcore -c iopath -c conda-forge fvcore iopath; conda install pytorch3d -c pytorch3d)
 - [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation) ≈ 0.5.4 (for compilation with CUDA 12.1/12.2, please refer to [this](https://github.com/daizhirui/MinkowskiEngine/tree/fix-for-cuda-12.2))
 
 
