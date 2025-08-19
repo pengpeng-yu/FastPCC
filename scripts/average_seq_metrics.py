@@ -113,15 +113,19 @@ def main():
                         counts[target] += 1
             for k, v in counts.items():
                 if k not in new_metric_dict: continue
+                tmp_total_metric_dict = {}
+                total_metric_keys = ('compressed_bytes', 'encode time', 'decode time')
                 for metric_key, metric_values in new_metric_dict[k].items():
-                    if metric_key == 'compressed_bytes':
-                        tmp_compressed_bytes = deepcopy(new_metric_dict[k][metric_key])
+                    if metric_key in total_metric_keys:
+                        tmp_total_metric_dict['total_' + metric_key] = deepcopy(new_metric_dict[k][metric_key])
                     if isinstance(new_metric_dict[k][metric_key], List):
                         for i in range(len(new_metric_dict[k][metric_key])):
                             new_metric_dict[k][metric_key][i] /= v
                     else:
                         new_metric_dict[k][metric_key] /= v
-                new_metric_dict[k]['total_compressed_bytes'] = tmp_compressed_bytes
+                new_metric_dict[k].update(tmp_total_metric_dict)
+                if 'total_compressed_bytes' in tmp_total_metric_dict:
+                    new_metric_dict[k]['total_compressed_bits'] = tmp_total_metric_dict['total_compressed_bytes'] * 8
                 new_metric_dict[k]['samples_num'] = v
             if not osp.isfile(outfile):
                 os.rename(infile, outfile)
