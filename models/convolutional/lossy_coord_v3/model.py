@@ -39,6 +39,8 @@ class OneScalePredictor(nn.Module):
         for idx in range(num_latents):
             transforms = nn.ModuleList((
                 SparseSequential(
+                    nn.Linear(channels, channels, bias=True), nn.PReLU()),
+                SparseSequential(
                     nn.Linear(channels * 2, channels, bias=True), nn.PReLU(),
                     spnn.Conv3d(channels, channels, 3, 1, 1, bias=True), nn.PReLU(),
                     spnn.Conv3d(channels, self.compressed_channels, 3, 1, 1, bias=True)),
@@ -65,8 +67,9 @@ class OneScalePredictor(nn.Module):
                 spnn.Conv3d(channels, 8, 3, 1, 1, bias=True))
         if self.if_upsample:
             self.upsample = SparseSequential(
-                Block(channels + 8),
-                nn.Linear(channels + 8, channels * 8, bias=True))
+                nn.Linear(channels + 8, channels, bias=True), nn.PReLU(),
+                Block(channels),
+                nn.Linear(channels, channels * 8, bias=True))
         else:
             self.upsample = None
 
@@ -85,16 +88,16 @@ class OneScalePredictor(nn.Module):
             cur_rec = self.dec_init(cur_rec)
         cur_rec = self.dec(cur_rec)
 
-        cur_ref_f = cur_ref.F
         fea_loss_list = []
-        for transform1, transform2, dec in self.transforms:
-            cur_ref.F = torch.cat((cur_ref_f, cur_rec.F), 1)
-            cur_ref = transform1(cur_ref)
-            noisy_f, fea_loss = em(cur_ref.F)
+        for transform0, transform1, transform2, dec in self.transforms:
+            cur_ref_ = transform0(cur_ref)
+            cur_ref_.F = torch.cat((cur_ref_.F, cur_rec.F), 1)
+            cur_ref_ = transform1(cur_ref_)
+            noisy_f, fea_loss = em(cur_ref_.F)
             fea_loss = (fea_loss / scattered_points_num[:, None]).sum() * ((0.01 if warmup else 1) / batch_size)
             fea_loss_list.append(fea_loss)
-            cur_ref.F = noisy_f
-            cur_rec.F = torch.cat((cur_rec.F, transform2(cur_ref).F), 1)
+            cur_ref_.F = noisy_f
+            cur_rec.F = torch.cat((cur_rec.F, transform2(cur_ref_).F), 1)
             cur_rec = dec(cur_rec)
 
         cur_pred = self.pred(cur_rec).F
@@ -158,15 +161,15 @@ class OneScalePredictor(nn.Module):
             cur_rec = self.dec_init(cur_rec)
         cur_rec = self.dec(cur_rec)
 
-        cur_ref_f = cur_ref.F
         rounded_f_list = []
-        for transform1, transform2, dec in self.transforms:
-            cur_ref.F = torch.cat((cur_ref_f, cur_rec.F), 1)
-            cur_ref = transform1(cur_ref)
-            cur_ref.F.round_()
-            rounded_f = cur_ref.F
+        for transform0, transform1, transform2, dec in self.transforms:
+            cur_ref_ = transform0(cur_ref)
+            cur_ref_.F = torch.cat((cur_ref_.F, cur_rec.F), 1)
+            cur_ref_ = transform1(cur_ref_)
+            cur_ref_.F.round_()
+            rounded_f = cur_ref_.F
             rounded_f_list.append(rounded_f)
-            cur_rec.F = torch.cat((cur_rec.F, transform2(cur_ref).F), 1)
+            cur_rec.F = torch.cat((cur_rec.F, transform2(cur_ref_).F), 1)
             cur_rec = dec(cur_rec)
 
         if self.if_pred_oct_lossl:
@@ -194,7 +197,7 @@ class OneScalePredictor(nn.Module):
 
         latent = SparseTensor(None, cur_rec.C, cur_rec.stride, cur_rec.spatial_range)
         latent._caches = cur_rec._caches
-        for transform1, transform2, dec in self.transforms:
+        for transform0, transform1, transform2, dec in self.transforms:
             rounded_f = rans_decode_fea(
                 cur_rec.C.shape[0] * self.compressed_channels, device, torch.float
             ).reshape(cur_rec.C.shape[0], -1)
@@ -273,14 +276,6 @@ class Fold(nn.Module):
         )
 
 
-class Fold2(Fold):
-    def __init__(self):
-        super(Fold2, self).__init__()
-        self.register_buffer('kernel', torch.empty(8, 8, 8 * 8, dtype=torch.float), persistent=False)
-        with torch.no_grad():
-            self.kernel.reshape(8 * 8, 8 * 8)[...] = torch.eye(64)
-
-
 tmp_custom_coord: Optional[torch.Tensor] = None
 
 
@@ -341,7 +336,9 @@ class Model(nn.Module):
                 block_enc = Fold()
             elif idx == 1:
                 block_enc = SparseSequential(
-                    Fold2(), nn.Linear(64, cfg.channels, bias=True), nn.PReLU(), Block(cfg.channels))
+                    spnn.Conv3d(8, cfg.channels, 3, 1, bias=True), nn.PReLU(),
+                    spnn.Conv3d(cfg.channels, cfg.channels, 2, 2, bias=True),
+                    Block(cfg.channels))
             else:
                 block_enc = SparseSequential(
                     spnn.Conv3d(cfg.channels, cfg.channels, 2, 2, bias=True), Block(cfg.channels))
@@ -420,6 +417,7 @@ class Model(nn.Module):
         return sparse_pc
 
     def train_forward(self, xyz: torch.Tensor, points_num: List[int], training_step: int):
+        self.warmup_forward = training_step < self.cfg.warmup_steps
         org = self.get_init_pc(xyz)
         device = org.F.device
 
