@@ -339,6 +339,8 @@ class Model(nn.Module):
                     spnn.Conv3d(8, cfg.channels, 3, 1, bias=True), nn.PReLU(),
                     spnn.Conv3d(cfg.channels, cfg.channels, 2, 2, bias=True),
                     Block(cfg.channels))
+                if cfg.channels >= 256:
+                    block_enc.insert(3, nn.PReLU())
             else:
                 block_enc = SparseSequential(
                     spnn.Conv3d(cfg.channels, cfg.channels, 2, 2, bias=True), Block(cfg.channels))

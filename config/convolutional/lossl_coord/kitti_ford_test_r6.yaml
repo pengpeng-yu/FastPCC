@@ -1,0 +1,10 @@
+# include "config/convolutional/lossl_coord/kitti_ford_test_r1.yaml"
+
+model:
+  skip_top_scales_num: 5
+
+
+test:
+  dataset:
+    resolution: 2048
+    ply_file_coord_scaler: 0.0078125

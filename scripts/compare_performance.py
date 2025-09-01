@@ -237,7 +237,7 @@ def compute_multiple_bdrate():
     if_plot_dt = True
     tight_legend = False
     method_configs = {
-        # 'Ours': ('convolutional/lossl_coord/kitti_test_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Ours': ('convolutional/lossl_coord/kitti_ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Light EHEM': ('Light-EHEM', {'color': '#ff7f0e', 'marker': '.'}),
         # 'OctAttention': ('OctAttention-lidar', {'color': '#2ca02c', 'marker': '.'}),
         # 'RENO': ('RENO', {'color': '#9467bd', 'marker': '.'}),
@@ -246,9 +246,9 @@ def compute_multiple_bdrate():
         # 'Ours': ('convolutional/lossl_coord_unicorn_test_cond/*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Unicorn': ('Unicorn/intra', {'color': '#d62728', 'marker': '.'}),
 
-        # 'Baseline + GRED + XFP': ('convolutional/lossl_coord/kitti_test_r*', {'color': '#1f77b4', 'marker': '.'}),
-        # 'Baseline + GRED': ('convolutional/lossl_coord/kitti_wo_fea_prop_r*', {'color': '#2ca02c', 'marker': '.'}),
-        # 'Baseline': ('convolutional/lossl_coord/kitti_wo_fea_prop_wo_redens_r*', {'color': '#ff7f0e', 'marker': '.'}),
+        # 'Baseline + GRED + XFP': ('convolutional/lossl_coord/kitti_ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Baseline + GRED': ('convolutional/lossl_coord/kitti_ford_wo_fea_prop_r*', {'color': '#2ca02c', 'marker': '.'}),
+        # 'Baseline': ('convolutional/lossl_coord/kitti_ford_wo_fea_prop_wo_redens_r*', {'color': '#ff7f0e', 'marker': '.'}),
 
         # 'Ours': ('convolutional/lossl_coord/ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Light EHEM': ('Light-EHEM', {'color': '#ff7f0e', 'marker': '.'}),

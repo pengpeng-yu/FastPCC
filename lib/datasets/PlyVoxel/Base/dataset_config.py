@@ -17,8 +17,6 @@ class DatasetConfig(SimpleConfig):
     with_color: bool = False
     with_reflectance: bool = False
     random_flip: bool = False
-    random_rgb_offset: int = 0
-    random_rgb_perm: bool = False
     morton_sort: bool = False
     morton_sort_inverse: bool = False
 

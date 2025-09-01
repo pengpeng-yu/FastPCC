@@ -1,4 +1,4 @@
-# include "config/convolutional/lossl_coord/kitti.yaml"
+# include "config/convolutional/lossl_coord/kitti_ford.yaml"
 
 model_module_path: models.convolutional.lossl_coord_wo_fea_prop
 model:

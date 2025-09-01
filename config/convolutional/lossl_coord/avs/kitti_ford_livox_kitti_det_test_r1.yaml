@@ -5,5 +5,6 @@ model:
 
 
 test:
+  from_ckpt: weights/convolutional/lossl_coord/avs/kitti_ford_livox_kitti_det.pt
   dataset:
     coord_scaler: 1.0

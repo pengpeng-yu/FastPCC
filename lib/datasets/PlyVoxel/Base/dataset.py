@@ -127,15 +127,6 @@ class PlyVoxel(torch.utils.data.Dataset):
                 if np.random.rand() > 0.5:
                     xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max()
 
-            if self.cfg.random_rgb_offset != 0:
-                color += np.random.randint(
-                    -self.cfg.random_rgb_offset,
-                    self.cfg.random_rgb_offset + 1, (1, 3))
-                color = color.clip(0, 255)
-
-            if self.cfg.random_rgb_perm:
-                color = np.ascontiguousarray(color[:, torch.randperm(3).tolist()])
-
         xyz = torch.from_numpy(xyz)
         color = torch.from_numpy(color) if color is not None else None
         refl = torch.from_numpy(refl) if refl is not None else None

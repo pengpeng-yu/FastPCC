@@ -1,18 +1,18 @@
-# include "config/convolutional/lossl_coord/kitti.yaml"
+# include "config/convolutional/lossl_coord/kitti_ford.yaml"
 
 model:
   channels: 128
-  max_stride_wo_recurrent: 16384
-  max_stride: 65536
+  max_stride_wo_recurrent: 8192
+  max_stride: 32768
   fea_stride: 32
   use_more_ch_for_multi_step_pred: False
   cal_avs_pc_evalue: True
 
 
 train:
-  epochs: 80
+  epochs: 60
   scheduler: Step
-  lr_step_size: 80
+  lr_step_size: 60
   lr_step_gamma: 0.3
 
   dataset_module_path: 'lib.datasets.PlyVoxel.Base'

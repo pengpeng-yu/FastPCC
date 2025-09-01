@@ -161,13 +161,21 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
         Model = importlib.import_module(cfg.model_module_path).Model
     except Exception as e:
         raise ImportError(*e.args)
-    model = Model(cfg.model).to(device)
+    try:
+        model = Model(cfg.model, device)
+    except TypeError:
+        model = Model(cfg.model)
+    model = model.to(device)
     if cfg.train.ema is True:
         ema = ModelEmaV3(
             torch.nn.Sequential(),
             decay=cfg.train.ema_decay, use_warmup=cfg.train.ema_warmup, foreach=cfg.train.ema_foreach,
             warmup_gamma=cfg.train.ema_warmup_gamma, warmup_power=cfg.train.ema_warmup_power)
-        ema.module = Model(cfg.model).to(device).eval()
+        try:
+            ema.module = Model(cfg.model, device)
+        except TypeError:
+            ema.module = Model(cfg.model)
+        ema.module = ema.module.to(device).eval()
         ema.module.load_state_dict(model.state_dict())
     logger.info(f'repr(model): \n{repr(model)}')
     total_params = 0
@@ -401,12 +409,12 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
                 expected_total_time, eta = eta_by_seconds((total_steps - global_step - 1) * ave_time_onestep)
                 logger.info(
                     f'step '
-                    f'{step_idx}/{steps_one_epoch - 1} of epoch {epoch}/{cfg.train.epochs - 1}, '
-                    f'speed: '
+                    f'{step_idx}/{steps_one_epoch - 1} epoch {epoch}/{cfg.train.epochs - 1}, '
+                    f'speed '
                     f'{totaltime_by_seconds(ave_time_onestep * steps_one_epoch)}/e, '
-                    f'eta(cur): '
+                    f'eta(cur) '
                     f'{eta_by_seconds((steps_one_epoch - step_idx - 1) * ave_time_onestep)[1]}, '
-                    f'eta(total): '
+                    f'eta(total) '
                     f'{eta} in {expected_total_time}'
                 )
                 # tensorboard items
