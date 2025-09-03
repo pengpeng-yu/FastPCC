@@ -131,21 +131,21 @@ class ShapeNetCorev2(torch.utils.data.Dataset):
 
         if self.cfg.resolution != resolution:
             xyz *= self.cfg.resolution / resolution
-        # xyz = np.unique(xyz.astype(np.int32), axis=0)
-        xyz = xyz.astype(np.int32)
+        xyz = np.unique(xyz.astype(np.int32), axis=0)
 
-        par_num = self.cfg.kd_tree_partition_max_points_num
-        if par_num != 0 and xyz.shape[0] > par_num:
-            xyz = kd_tree_partition_randomly(xyz, par_num)
-            xyz -= xyz.min(0)
+        if self.is_training:
+            par_num = self.cfg.kd_tree_partition_max_points_num
+            if par_num != 0 and xyz.shape[0] > par_num:
+                par_num = self.cfg.kd_tree_partition_max_points_num
+                xyz = kd_tree_partition_randomly(xyz, par_num)
+                xyz -= xyz.min(0)
 
-        if self.cfg.random_offset != 0:
-            xyz += np.random.randint(0, self.cfg.random_offset, 3, dtype=np.int32)
+            if self.cfg.random_offset != 0:
+                xyz += np.random.randint(0, self.cfg.random_offset, 3, dtype=np.int32)
 
         xyz = torch.from_numpy(xyz)
         if self.cfg.morton_sort:
             xyz = xyz[torch.argsort(morton_encode_magicbits(xyz, inverse=self.cfg.morton_sort_inverse))]
-            xyz = torch.unique_consecutive(xyz, dim=0)
 
         return PCData(
             xyz=xyz,

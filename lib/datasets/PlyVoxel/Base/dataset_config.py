@@ -11,6 +11,7 @@ class DatasetConfig(SimpleConfig):
     file_path_pattern: Union[str, Tuple[str, ...]] = '**/*.ply'  # works if filelist does not exist
     list_sampling_interval: int = 1
 
+    ref_frames_num: int = 0
     kd_tree_partition_max_points_num: Union[int, Tuple[int, ...]] = 0
     coord_scaler: Union[float, Tuple[float, ...]] = 1.0
     random_batch_coord_scaler_log2: Tuple[int, ...] = (0,)

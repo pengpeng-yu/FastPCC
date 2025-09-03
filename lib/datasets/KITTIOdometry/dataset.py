@@ -94,25 +94,25 @@ class KITTIOdometry(torch.utils.data.Dataset):
             inv_scale = 1 / self.cfg.ply_file_coord_scaler
         xyz *= scale
         xyz = xyz.round().astype(np.int32)
+        xyz = np.unique(xyz, axis=0)
 
-        if self.cfg.random_flip:
-            if np.random.rand() > 0.5:
-                xyz[:, 0] = -xyz[:, 0] + xyz[:, 0].max()
-            if np.random.rand() > 0.5:
-                xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max()
+        if self.is_training:
+            par_num = self.cfg.kd_tree_partition_max_points_num
+            if par_num != 0 and xyz.shape[0] > par_num:
+                xyz = kd_tree_partition_randomly(xyz, par_num)
+                tmp_org_point = xyz.min(0)
+                xyz -= tmp_org_point
+                org_point += tmp_org_point
 
-        par_num = self.cfg.kd_tree_partition_max_points_num
-        if par_num != 0 and xyz.shape[0] > par_num:
-            xyz = kd_tree_partition_randomly(xyz, par_num)
-            xyz -= xyz.min(0)
+            if self.cfg.random_flip:
+                if np.random.rand() > 0.5:
+                    xyz[:, 0] = -xyz[:, 0] + xyz[:, 0].max()
+                if np.random.rand() > 0.5:
+                    xyz[:, 1] = -xyz[:, 1] + xyz[:, 1].max()
 
-        if not self.cfg.morton_sort:
-            xyz = np.unique(xyz, axis=0)
-            xyz = torch.from_numpy(xyz)
-        else:
-            xyz = torch.from_numpy(xyz)
+        xyz = torch.from_numpy(xyz)
+        if self.cfg.morton_sort:
             xyz = xyz[torch.argsort(morton_encode_magicbits(xyz, inverse=self.cfg.morton_sort_inverse))]
-            xyz = torch.unique_consecutive(xyz, dim=0)
 
         inv_trans = torch.from_numpy(np.concatenate((org_point.reshape(-1), (inv_scale,)), 0, dtype=np.float32))
         if flag_kitti_bin_file and not self.cfg.flag_sparsepcgc:
@@ -131,4 +131,4 @@ class KITTIOdometry(torch.utils.data.Dataset):
         )
 
     def collate_fn(self, batch):
-        return pc_data_collate_fn(batch)
+        return pc_data_collate_fn(batch, self.cfg.kd_tree_partition_max_points_num)

@@ -13,7 +13,7 @@ import torch
 
 def batched_coordinates(coords):
     N = [len(cs) for cs in coords]
-    bcoords = torch.zeros((sum(N), 4), dtype=torch.int32)
+    bcoords = torch.zeros((sum(N), coords[0].shape[1] + 1), dtype=torch.int32)
     s = 0
     for b, cs in enumerate(coords):
         cn = len(cs)
@@ -41,13 +41,17 @@ class SampleData:
 
 
 class PCData(SampleData):
-    tensor_to_tensor_items = ('color', 'reflectance')
+    tensor_to_tensor_items = ('color', 'reflectance', 'color_ref', 'reflectance_ref')
+    ref_items = ('color_ref', 'reflectance_ref')
 
     def __init__(self,
                  xyz: Union[torch.Tensor, List[torch.Tensor]],
                  color: Union[torch.Tensor, List[torch.Tensor]] = None,
                  reflectance: Union[torch.Tensor, List[torch.Tensor]] = None,
                  resolution: Union[float, List[float]] = None,
+                 xyzt_ref: Union[torch.Tensor, List[torch.Tensor]] = None,
+                 color_ref: Union[torch.Tensor, List[torch.Tensor]] = None,
+                 reflectance_ref: Union[torch.Tensor, List[torch.Tensor]] = None,
                  file_path: Union[str, List[str]] = None,
                  batch_size: int = 0,
                  points_num: List[int] = None,
@@ -58,6 +62,9 @@ class PCData(SampleData):
         self.xyz = xyz
         self.color = color
         self.reflectance = reflectance
+        self.xyzt_ref = xyzt_ref
+        self.color_ref = color_ref
+        self.reflectance_ref = reflectance_ref
         self.resolution = resolution
         self.file_path = file_path
         self.batch_size = batch_size
@@ -93,168 +100,186 @@ def pc_data_collate_fn(data_list: List[PCData],
     else:
         use_kd_tree_partition = False
 
-    data_dict: Dict[str, List] = defaultdict(list)
-    for data in data_list:
-        for key, value in data.__dict__.items():
-            if value is not None:
-                data_dict[key].append(value)
-
-    batched_data_dict = {'batch_size': len(data_list)}
     if not use_kd_tree_partition:
+        data_dict: Dict[str, List] = defaultdict(list)
+        for data in data_list:
+            for key, value in data.__dict__.items():
+                if value is not None:
+                    data_dict[key].append(value)
+        batched_data_dict = {'batch_size': len(data_list)}
         for key, value in data_dict.items():
             if key == 'xyz':
                 batched_data_dict[key], batched_data_dict['points_num'] = batched_coordinates(value)
+            elif key == 'xyzt_ref':
+                batched_data_dict[key] = batched_coordinates(value)[0]
             elif key in PCData.tensor_to_tensor_items:
                 batched_data_dict[key] = torch.cat(value, dim=0)
             elif key != 'batch_size':
                 batched_data_dict[key] = value
+        return PCData(**batched_data_dict)
 
     else:
         # Use kd-tree partition.
-        extras_dict = {item: data_dict[item][0]
-                       for item in PCData.tensor_to_tensor_items if item in data_dict}
-        if extras_dict == {}:
-            # Retain original coordinates in the head of list.
-            batched_data_dict['xyz'] = data_dict['xyz']
-            batched_data_dict['xyz'].extend(
-                kd_tree_partition(
-                    data_dict['xyz'][0], kd_tree_partition_max_points_num,
-                )
-            )
-        else:
-            xyz_partitions, extras = kd_tree_partition(
-                data_dict['xyz'][0], kd_tree_partition_max_points_num,
-                extras=list(extras_dict.values())
-            )
-            batched_data_dict['xyz'] = data_dict['xyz']
-            batched_data_dict['xyz'].extend(xyz_partitions)
-            for idx, key in enumerate(extras_dict):
-                batched_data_dict[key] = [extras_dict[key]]
-                batched_data_dict[key].extend(extras[idx])
-        for key, value in data_dict.items():
-            if key == 'xyz':
-                # Add batch dimension.
-                # The first one is supposed to be the original coordinates.
-                tmp_ls = [batched_data_dict[key][0]]
-                for tmp_ in batched_data_dict[key][1:]:
-                    tmp = torch.zeros((tmp_.shape[0], 4), dtype=torch.int32)
-                    tmp[:, 1:] = tmp_
-                    tmp_ls.append(tmp)
-                batched_data_dict[key] = tmp_ls
-            elif key in PCData.tensor_to_tensor_items:
-                pass
-            elif key != 'batch_size':
-                batched_data_dict[key] = value
+        pc_data = data_list[0]
+        pc_data.batch_size = 1
 
-    return PCData(**batched_data_dict)
+        attrs_list = []
+        attrs_ref_list = []
+        for k in PCData.tensor_to_tensor_items:
+            tmp_v = pc_data.__dict__[k]
+            if k not in PCData.ref_items:
+                attrs_list.append(tmp_v)
+            else:
+                attrs_ref_list.append(tmp_v)
+        xyz_list, attrs_list, xyzt_ref_list, attrs_ref_list = kd_tree_partition(
+            pc_data.xyz, kd_tree_partition_max_points_num,
+            attrs_list, pc_data.xyzt_ref, attrs_ref_list
+        )
+
+        pc_data.xyz = [pc_data.xyz, *xyz_list]
+        for i in range(len(pc_data.xyz)):
+            pc_data.xyz[i] = torch.nn.functional.pad(pc_data.xyz[i], (1, 0, 0, 0), value=0)
+        for k in PCData.tensor_to_tensor_items:
+            if k not in PCData.ref_items:
+                attr = attrs_list.pop(0)
+                if attr is not None:
+                    pc_data.__dict__[k] = [pc_data.__dict__[k], *attr]
+
+        if pc_data.xyzt_ref is not None:
+            pc_data.xyzt_ref = [pc_data.xyzt_ref, *xyzt_ref_list]
+            for i in range(len(pc_data.xyzt_ref)):
+                pc_data.xyzt_ref[i] = torch.nn.functional.pad(pc_data.xyzt_ref[i], (1, 0, 0, 0), value=0)
+            for k in PCData.ref_items:
+                attr = attrs_ref_list.pop(0)
+                if attr is not None:
+                    pc_data.__dict__[k] = [pc_data.__dict__[k], *attr]
+
+        for k in pc_data.__dict__:
+            if k != 'xyz' and k != 'xyzt_ref' and k != 'batch_size' \
+                    and k not in PCData.tensor_to_tensor_items and pc_data.__dict__[k] is not None:
+                pc_data.__dict__[k] = [pc_data.__dict__[k]]
+        return pc_data
 
 
-def kd_tree_partition(data: Union[np.ndarray, torch.Tensor], max_num: int,
-                      extras: Union[List[np.ndarray], List[torch.Tensor]] = None)\
-        -> Union[List[np.ndarray], List[torch.Tensor],
-                 Tuple[List[np.ndarray], List[List[np.ndarray]]],
-                 Tuple[List[torch.Tensor], List[List[torch.Tensor]]]]:
-    is_torch_tensor = isinstance(data, torch.Tensor)
-    if extras is None or extras == []:
-        if is_torch_tensor:
-            data = data.numpy()
-        data_list = kd_tree_partition_base(data, max_num)
-        if is_torch_tensor:
-            data_list = [torch.from_numpy(_) for _ in data_list]
-        return data_list
+def kd_tree_partition(coord: Union[np.ndarray, torch.Tensor], max_num: int,
+                      attrs: List[Union[np.ndarray, torch.Tensor, None]] = (),
+                      coord_ref: Optional[Union[np.ndarray, torch.Tensor]] = None,
+                      attrs_ref: List[Union[np.ndarray, torch.Tensor, None]] = ()):
+    is_torch_tensor = isinstance(coord, torch.Tensor)
+    if is_torch_tensor:
+        coord = coord.numpy()
+        attrs = [_.numpy() if _ is not None else None for _ in attrs]
+        if coord_ref is not None:
+            coord_ref = coord_ref.numpy()
+        attrs_ref = [_.numpy() if _ is not None else None for _ in attrs_ref]
+    coord_list, attrs_list, coord_ref_list, attrs_ref_list = \
+        _kd_tree_partition(coord, max_num, attrs, coord_ref, attrs_ref)
+    if is_torch_tensor:
+        coord_list = [torch.from_numpy(_) for _ in coord_list]
+        attrs_list = [[torch.from_numpy(_) for _ in __] if __ is not None else None
+                      for __ in attrs_list]
+        coord_ref_list = [torch.from_numpy(_) for _ in coord_ref_list]
+        attrs_ref_list = [[torch.from_numpy(_) for _ in __] if __ is not None else None
+                          for __ in attrs_ref_list]
+    return coord_list, attrs_list, coord_ref_list, attrs_ref_list
+
+
+def _kd_tree_partition(coord: np.ndarray, max_num: int, attrs: List[Optional[np.ndarray]] = (),
+                       coord_ref: Optional[np.ndarray] = None, attrs_ref: List[Optional[np.ndarray]] = ()) \
+        -> Tuple[List[np.ndarray], List[Optional[List[np.ndarray]]],
+                 List[np.ndarray], List[Optional[List[np.ndarray]]]]:
+    if len(coord) <= max_num:
+        return [coord], [[a] if a is not None else None for a in attrs], \
+               [coord_ref] if coord_ref is not None else [], \
+               [[a] if a is not None else None for a in attrs_ref]
+
+    dim_index = np.argmax(np.var(coord, 0)).item()
+    split_point = len(coord) // 2
+    split_value = torch.from_numpy(coord[:, dim_index]).kthvalue(split_point).values.numpy()
+    mask = coord[:, dim_index] <= split_value
+    if coord_ref is not None:
+        mask_ref = coord_ref[:, dim_index] <= split_value
     else:
-        if is_torch_tensor:
-            data = data.numpy()
-            extras = [_.numpy() for _ in extras]
-        data_list, extras_lists = kd_tree_partition_extended(data, max_num, extras)
-        if is_torch_tensor:
-            data_list = [torch.from_numpy(_) for _ in data_list]
-            extras_lists = [[torch.from_numpy(_) for _ in extras_list]
-                            for extras_list in extras_lists]
-        return data_list, extras_lists
-
-
-def kd_tree_partition_base(data: np.ndarray, max_num: int) -> List[np.ndarray]:
-    if len(data) <= max_num:
-        return [data]
-
-    dim_index = np.argmax(np.var(data, 0)).item()
-    split_point = len(data) // 2
-    split_value = torch.from_numpy(data[:, dim_index]).kthvalue(split_point).values.numpy()
-    mask = data[:, dim_index] <= split_value
+        mask_ref = None
 
     if split_point <= max_num:
-        return [data[mask], data[~mask]]
+        return [coord[mask], coord[~mask]],\
+               [[a[mask], a[~mask]] if a is not None else None for a in attrs], \
+               [coord_ref[mask_ref], coord_ref[~mask_ref]] if coord_ref is not None else [], \
+               [[a[mask_ref], a[~mask_ref]] if a is not None else None for a in attrs_ref]
     else:
-        left_partitions = kd_tree_partition_base(data[mask], max_num)
-        right_partitions = kd_tree_partition_base(data[~mask], max_num)
-        left_partitions.extend(right_partitions)
-
-    return left_partitions
-
-
-def kd_tree_partition_extended(data: np.ndarray, max_num: int, extras: List[np.ndarray]) \
-        -> Tuple[List[np.ndarray], List[List[np.ndarray]]]:
-    if len(data) <= max_num:
-        return [data], [[extra] for extra in extras]
-
-    dim_index = np.argmax(np.var(data, 0)).item()
-    split_point = len(data) // 2
-    split_value = torch.from_numpy(data[:, dim_index]).kthvalue(split_point).values.numpy()
-    mask = data[:, dim_index] <= split_value
-
-    if split_point <= max_num:
-        return [data[mask], data[~mask]], [[extra[mask], extra[~mask]] for extra in extras]
-    else:
-        left_partitions, left_extra_partitions = kd_tree_partition_extended(
-            data[mask], max_num,
-            [extra[mask] if extra is not None else extra for extra in extras]
+        left_partitions, left_extra_partitions, left_ref_partitions, left_extra_ref_partitions = _kd_tree_partition(
+            coord[mask], max_num,
+            [a[mask] if a is not None else None for a in attrs],
+            coord_ref[mask_ref] if coord_ref is not None else None,
+            [a[mask_ref] if a is not None else None for a in attrs_ref]
         )
         mask = np.logical_not(mask)
-        right_partitions, right_extra_partitions = kd_tree_partition_extended(
-            data[mask], max_num,
-            [extra[mask] if extra is not None else extra for extra in extras]
+        mask_ref = np.logical_not(mask_ref)
+        right_partitions, right_extra_partitions, right_ref_partitions, right_extra_ref_partitions = _kd_tree_partition(
+            coord[mask], max_num,
+            [a[mask] if a is not None else None for a in attrs],
+            coord_ref[mask_ref] if coord_ref is not None else None,
+            [a[mask_ref] if a is not None else None for a in attrs_ref]
         )
         left_partitions.extend(right_partitions)
+        left_ref_partitions.extend(right_ref_partitions)
         for idx, p in enumerate(right_extra_partitions):
-            left_extra_partitions[idx].extend(p)
+            if left_extra_partitions[idx] is not None:
+                left_extra_partitions[idx].extend(p)
+        for idx, p in enumerate(right_extra_ref_partitions):
+            if left_extra_ref_partitions[idx] is not None:
+                left_extra_ref_partitions[idx].extend(p)
 
-        return left_partitions, left_extra_partitions
+        return left_partitions, left_extra_partitions, left_ref_partitions, left_extra_ref_partitions
 
 
 def kd_tree_partition_randomly(
-        data: np.ndarray, target_num: int, extras: Tuple[Optional[np.ndarray], ...] = (),
+        coord: np.ndarray, target_num: int, attrs: Tuple[Optional[np.ndarray], ...] = (),
         choice_fn: Callable[[np.ndarray], int] = lambda d: np.argmax(np.var(d, 0)).item(),
-        cur_target_num_scaler: float = 0.5
-) -> Union[np.ndarray, Tuple[np.ndarray, Tuple[Optional[np.ndarray], ...]]]:
-    len_data = len(data)
-    if len_data <= target_num:
-        if len(extras) != 0:
-            return data, extras
-        else:
-            return data
+        coord_ref: Optional[np.ndarray] = None, attrs_ref: Tuple[Optional[np.ndarray], ...] = (),
+        cur_target_num_scaler: float = 0.5):
+    points_num = len(coord)
+    if points_num <= target_num:
+        ret = [coord]
+        if len(attrs) != 0:
+            ret.append(attrs)
+        if coord_ref is not None:
+            ret.append(coord_ref)
+        if len(attrs_ref) != 0:
+            ret.append(attrs_ref)
+        return tuple(ret) if len(ret) > 1 else ret[0]
 
-    dim_index = choice_fn(data)
-    cur_target_num = round(len_data * cur_target_num_scaler)
+    dim_index = choice_fn(coord)
+    cur_target_num = round(points_num * cur_target_num_scaler)
     if cur_target_num < target_num:
         cur_target_num = target_num
 
-    start_point = np.random.randint(len_data - cur_target_num + 1)
+    start_point = np.random.randint(points_num - cur_target_num + 1)
     end_points = start_point + cur_target_num - 1
-    start_value = torch.from_numpy(data[:, dim_index]).kthvalue(start_point + 1).values.numpy()
-    end_value = torch.from_numpy(data[:, dim_index]).kthvalue(end_points + 1).values.numpy()
-    mask = np.logical_and(data[:, dim_index] >= start_value, data[:, dim_index] <= end_value)
+    start_value = torch.from_numpy(coord[:, dim_index]).kthvalue(start_point + 1).values.numpy()
+    end_value = torch.from_numpy(coord[:, dim_index]).kthvalue(end_points + 1).values.numpy()
+    mask = np.logical_and(coord[:, dim_index] >= start_value, coord[:, dim_index] <= end_value)
 
-    data = data[mask]
-    extras = tuple(extra[mask] if isinstance(extra, np.ndarray) else extra for extra in extras)
+    coord = coord[mask]
+    attrs = tuple(a[mask] if a is not None else None for a in attrs)
+
+    if coord_ref is not None:
+        mask = np.logical_and(coord_ref[:, dim_index] >= start_value, coord_ref[:, dim_index] <= end_value)
+        coord_ref = coord_ref[mask]
+        attrs_ref = tuple(a[mask] if a is not None else None for a in attrs_ref)
 
     if cur_target_num <= target_num:
-        if len(extras) != 0:
-            return data, extras
-        else:
-            return data
+        ret = [coord]
+        if len(attrs) != 0:
+            ret.append(attrs)
+        if coord_ref is not None:
+            ret.append(coord_ref)
+        if len(attrs_ref) != 0:
+            ret.append(attrs_ref)
+        return tuple(ret) if len(ret) > 1 else ret[0]
     return kd_tree_partition_randomly(
-        data, target_num, extras, choice_fn
+        coord, target_num, attrs, choice_fn, coord_ref, attrs_ref
     )
 
 
