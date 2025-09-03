@@ -1,14 +1,14 @@
-This project contains an implementation of our ICME 2023 and TMM papers on learning-based point cloud compression.
+This project contains an implementation of our ICME 2023 and TMM papers on convolutional point cloud compression.
 Contact me for any reproduction issue: <yupp5@mail2.sysu.edu.cn>.
 
 Detailed experimental results of [1, 2] on Intel Xeon Gold 5118 and NVIDIA 2080Ti are available at [OneDrive](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EbzFDM93okNPmceKE5ZLzhgBZPJ1Cb4L-GeoP3stilFJxQ).
 
 
 ## Models
-- `config/convolutional/lossl_coord/*.yaml`: Real-time geometry lossless compression of LiDAR point clouds. 
-- `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression in [2]. 
-- `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression in [2]. 
-- `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model in [1] (Deprecated).
+- `config/convolutional/lossl_coord/*.yaml`: Real-time geometry lossless compression of LiDAR point clouds [[3]](https://arxiv.org/abs/2508.20466). 
+- `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression [[2]](https://ieeexplore.ieee.org/document/10980362). 
+- `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression [[2]](https://ieeexplore.ieee.org/document/10980362).
+- `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model [[1]](https://ieeexplore.ieee.org/document/10220062) (Deprecated).
 - `config/convolutional/lossy_coord/baseline.yaml`: A reimplementation of PCGCv2.
 
 Run these models using `python train.py/test.py [model yaml path] config_key_1=value_1 config_key_2=value_2 ...`. 
@@ -147,11 +147,18 @@ If this work is helpful to your research, please consider citing:
   year={2023},
   pages={2555-2560}
 }
-@inproceedings{yu2025hierarchical,
+@article{yu2025hierarchical,
   author={Yu, Pengpeng and Zhang, Ye and Liang, Fan and Li, Haoran and Guo, Yulan},
-  booktitle={IEEE Transactions on Multimedia}, 
+  journal={IEEE Transactions on Multimedia}, 
   title={Hierarchical Distortion Learning for Fast Lossy Compression of Point Clouds}, 
   year={2025},
   pages={1-16}
+}
+@article{yu2025redensification,
+  author={Yu, Pengpeng and Li, Haoran and Li, Dingquan and Jiang, Runqing and Wang, Jing and Lin, Liang and Guo, Yulan},
+  title={Re-Densification Meets Cross-Scale Propagation: Real-Time Compression of LiDAR Point Clouds}, 
+  year={2025},
+  journal={arXiv preprint},
+  pages={1-19}
 }
 ````
