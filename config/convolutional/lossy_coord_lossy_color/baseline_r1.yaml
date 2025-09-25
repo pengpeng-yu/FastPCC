@@ -39,20 +39,20 @@ train:
 
   dataset_module_path: 'lib.datasets.PlyVoxel.Base'
   dataset:
-    root: ['datasets/8iVFBv2', 'datasets/Owlii']
-    filelist_path: ['list_longdress_solider.txt', 'list_exercise_model.txt']
+    root: ['datasets/Owlii', 'datasets/8iVFBv2']
+    filelist_path: ['list_exercise_model.txt', 'list_longdress_solider.txt']
     kd_tree_partition_max_points_num: 200000
     with_color: True
     random_flip: True
-    resolution: [1024, 2048]
+    resolution: [2048, 1024]
 
 
 test:
   num_workers: 4
   dataset_module_path: 'lib.datasets.PlyVoxel.Base'
   dataset:
-    root: ['datasets/8iVFBv2', 'datasets/Owlii']
-    filelist_path: ['list_loot_redandblack.txt', 'list_basketball_player_dancer.txt']
+    root: ['datasets/Owlii', 'datasets/8iVFBv2']
+    filelist_path: ['list_basketball_player_dancer.txt', 'list_loot_redandblack.txt']
     kd_tree_partition_max_points_num: 2000000
     with_color: True
-    resolution: [1024, 2048]
+    resolution: [2048, 1024]

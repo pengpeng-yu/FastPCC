@@ -649,7 +649,7 @@ class Block(nn.Module):
 class SparseSequential(nn.Sequential):
     def forward(self, x: SparseTensor, coordinate_map_key=None) -> SparseTensor:
         for module in self:
-            if coordinate_map_key is not None and isinstance(x, (ME.MinkowskiConvolution,)):
+            if coordinate_map_key is not None and isinstance(module, (ME.MinkowskiConvolution,)):
                 x = module(x, coordinate_map_key)
             else:
                 x = module(x)

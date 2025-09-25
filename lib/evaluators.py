@@ -99,7 +99,7 @@ class PCCEvaluator(Evaluator):
                 assert file_path.endswith('.ply'), file_path
                 self.file_path_to_info_run_res[file_path] = self.pc_error_pool.apply_async(
                     avs_pc_evalue,
-                    (osp.abspath(file_path), osp.abspath(reconstructed_path), resolution, have_color)
+                    (osp.abspath(file_path), osp.abspath(reconstructed_path), resolution, True, have_color)
                 )
 
         if file_path in self.file_path_to_info:

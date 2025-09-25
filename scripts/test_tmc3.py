@@ -156,6 +156,7 @@ def run_single_file(file_path, resolution, file_list, default_config_paths, conf
     config_paths = glob(osp.join(config_dir, file_basename.lower(), '*', 'encoder.cfg'))
     flag_mvub = False
     flag_kitti = False
+    flag_ford = False
     flag_sparsepcgc = False
     if len(config_paths) == 0:
         if 'MVUB' in file_list:
