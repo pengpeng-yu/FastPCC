@@ -1,6 +1,6 @@
 # include "config/convolutional/lossy_coord_v3/dense_r1.yaml"
 
 model:
-  num_latents: [0, 0, 0, 2, 0]
+  num_latents: [0, 0, 0, 2, 2]
   lossl_geo_upsample: [0, 0, 0, 1, 1]
   coord_recon_loss_factor: 0.1

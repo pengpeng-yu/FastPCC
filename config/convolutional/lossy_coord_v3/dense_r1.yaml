@@ -1,6 +1,6 @@
 model_module_path: models.convolutional.lossy_coord_v3
 model:
-  num_latents: [0, 0, 2, 0, 0]
+  num_latents: [0, 0, 2, 2, 0]
   lossl_geo_upsample: [0, 1, 1, 1, 1]
   max_stride: 64
   coord_recon_loss_factor: 2.0
@@ -11,9 +11,9 @@ train:
   rundir_name: 'train_convolutional_<autoindex>'
   batch_size: 8
   num_workers: 8
-  optimizer: AdamW
+  optimizer: [AdamW, AdamW]
   momentum: 0.9
-  weight_decay: 0.0001
+  weight_decay: [0.0001, 0.0]
   max_grad_norm: 1.0
 
   ema: True
@@ -21,8 +21,8 @@ train:
   ema_warmup_gamma: 1.0
   ema_warmup_power: 0.75
 
-  learning_rate: 0.0001
-  epochs: 60
+  learning_rate: [0.0003, 0.0001]
+  epochs: 50
 
   scheduler: Step
   lr_step_size: 20

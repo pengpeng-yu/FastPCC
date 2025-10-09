@@ -25,11 +25,26 @@ from .rans_coder import RansEncoder, RansDecoder
 log2_e = math.log2(math.e)
 
 
+class BoundFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, bound):
+        ctx.save_for_backward(x, bound)
+        return torch.clip(x, -bound, bound)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        x, bound = ctx.saved_tensors
+        grad_output = grad_output.clone()
+        grad_output[x > bound] = 1
+        grad_output[x < -bound] = -1
+        return grad_output, None
+
+
 class OneScalePredictor(nn.Module):
     def __init__(self, channels, num_latents=0, if_pred_oct_lossl=True, if_upsample=True, allow_single_ch=False,
-                 coord_recon_loss_factor=None, max_lossy_stride=None):
+                 coord_recon_loss_factor=None, max_lossy_stride=None, compressed_channels=None):
         super(OneScalePredictor, self).__init__()
-        self.compressed_channels = 1
+        self.compressed_channels = compressed_channels
         if allow_single_ch is True:
             self.dec_init = spnn.Conv3d(1, channels, 3, 1, 1, bias=True)
         self.dec = Block(channels)
@@ -43,12 +58,13 @@ class OneScalePredictor(nn.Module):
                 SparseSequential(
                     nn.Linear(channels * 2, channels, bias=True), nn.PReLU(),
                     spnn.Conv3d(channels, channels, 3, 1, 1, bias=True), nn.PReLU(),
-                    spnn.Conv3d(channels, self.compressed_channels, 3, 1, 1, bias=True)),
+                    spnn.Conv3d(channels, compressed_channels, 3, 1, 1, bias=True)),
                 SparseSequential(
-                    nn.Linear(self.compressed_channels, channels, bias=True), nn.PReLU()),
+                    nn.Linear(compressed_channels, channels, bias=True), nn.PReLU()),
                 SparseSequential(
                     nn.Linear(channels * 2, channels, bias=True), nn.PReLU(),
-                    Block(channels))
+                    Block(channels)),
+                EntropyModel(batch_shape=torch.Size([compressed_channels]), init_scale=10,)
             ))
             self.transforms.append(transforms)
 
@@ -58,12 +74,12 @@ class OneScalePredictor(nn.Module):
         self.max_lossy_stride = max_lossy_stride
         if self.if_pred_oct_lossl:
             self.pred = SparseSequential(
-                Block(channels),
+                spnn.Conv3d(channels, channels, 3, 1, 1, bias=True), nn.PReLU(),
                 nn.Linear(channels, 255, bias=True))
         else:
             assert max_lossy_stride is not None
             self.pred = SparseSequential(
-                Block(channels),
+                spnn.Conv3d(channels, channels, 3, 1, 1, bias=True), nn.PReLU(),
                 spnn.Conv3d(channels, 8, 3, 1, 1, bias=True))
         if self.if_upsample:
             self.upsample = SparseSequential(
@@ -74,7 +90,7 @@ class OneScalePredictor(nn.Module):
             self.upsample = None
 
     def forward(self, cur_rec: SparseTensor, cur_ref: SparseTensor, up_ref: SparseTensor, cur_bin: torch.FloatTensor,
-                device, points_num: List[int], em, bin2oct_kernel, unfold_kernel,
+                device, points_num: List[int], bin2oct_kernel, unfold_kernel,
                 warmup: bool):
         if not self.if_upsample: assert up_ref.stride[0] == 1
         batch_size = len(points_num)
@@ -89,11 +105,11 @@ class OneScalePredictor(nn.Module):
         cur_rec = self.dec(cur_rec)
 
         fea_loss_list = []
-        for transform0, transform1, transform2, dec in self.transforms:
+        for transform0, transform1, transform2, dec, em in self.transforms:
             cur_ref_ = transform0(cur_ref)
             cur_ref_.F = torch.cat((cur_ref_.F, cur_rec.F), 1)
             cur_ref_ = transform1(cur_ref_)
-            noisy_f, fea_loss = em(cur_ref_.F)
+            noisy_f, fea_loss = em(BoundFunction.apply(cur_ref_.F, torch.tensor(20, device=cur_ref_.F.device)))
             fea_loss = (fea_loss / scattered_points_num[:, None]).sum() * ((0.01 if warmup else 1) / batch_size)
             fea_loss_list.append(fea_loss)
             cur_ref_.F = noisy_f
@@ -126,9 +142,7 @@ class OneScalePredictor(nn.Module):
                 mask_list = []
                 for b in range(batch_size):
                     sample = cur_pred[divider[b]: divider[b + 1]]
-                    sample_ = sample.reshape(-1, 8)
-                    mask = sample_ == sample_.amax(1, keepdim=True)
-                    mask = mask.reshape(-1, 8)
+                    mask = sample == sample.amax(1, keepdim=True)
                     kth_v = torch.kthvalue(
                         sample.reshape(-1), sample.shape[0] * 8 - up_points_num[b]
                     ).values
@@ -162,7 +176,7 @@ class OneScalePredictor(nn.Module):
         cur_rec = self.dec(cur_rec)
 
         rounded_f_list = []
-        for transform0, transform1, transform2, dec in self.transforms:
+        for transform0, transform1, transform2, dec, em in self.transforms:
             cur_ref_ = transform0(cur_ref)
             cur_ref_.F = torch.cat((cur_ref_.F, cur_rec.F), 1)
             cur_ref_ = transform1(cur_ref_)
@@ -197,7 +211,7 @@ class OneScalePredictor(nn.Module):
 
         latent = SparseTensor(None, cur_rec.C, cur_rec.stride, cur_rec.spatial_range)
         latent._caches = cur_rec._caches
-        for transform0, transform1, transform2, dec in self.transforms:
+        for transform0, transform1, transform2, dec, em in self.transforms:
             rounded_f = rans_decode_fea(
                 cur_rec.C.shape[0] * self.compressed_channels, device, torch.float
             ).reshape(cur_rec.C.shape[0], -1)
@@ -211,29 +225,11 @@ class OneScalePredictor(nn.Module):
             cur_bin = ((cur_oct[:, None] + 1) >> bin2oct_kernel).bitwise_and_(1).bool()
         else:
             cur_pred_f = cur_pred.F
-            if cur_rec.stride[0] == 2:
-                if self.max_lossy_stride != 2:
-                    kth_v = torch.kthvalue(
-                        cur_pred_f.reshape(-1), cur_pred_f.shape[0] * 8 - cached_points_num.pop()
-                    ).values
-                    mask = cur_pred_f > kth_v
-                else:
-                    cur_pred_f_ = cur_pred_f.reshape(-1, 8)
-                    mask = cur_pred_f_ == cur_pred_f_.amax(1, keepdim=True)
-                    mask = mask.reshape(-1, 8)
-                    non_local_max = cur_pred_f[~mask]
-                    kth_v = torch.kthvalue(
-                        non_local_max, non_local_max.shape[0] - cached_points_num.pop() + cur_pred_f.shape[0]
-                    ).values
-                    mask |= cur_pred_f > kth_v
-            else:
-                cur_pred_f_ = cur_pred_f.reshape(-1, 8)
-                mask = cur_pred_f_ == cur_pred_f_.amax(1, keepdim=True)
-                mask = mask.reshape(-1, 8)
-                kth_v = torch.kthvalue(
-                    cur_pred_f.reshape(-1), cur_pred_f.shape[0] * 8 - cached_points_num.pop()
-                ).values
-                mask |= cur_pred_f > kth_v
+            mask = cur_pred_f == cur_pred_f.amax(1, keepdim=True)
+            kth_v = torch.kthvalue(
+                cur_pred_f.reshape(-1), cur_pred_f.shape[0] * 8 - cached_points_num.pop()
+            ).values
+            mask |= cur_pred_f > kth_v
             cur_bin = mask
 
         if if_upsample:
@@ -307,6 +303,13 @@ SF.spdownsample = custom_spdownsample
 
 
 class Model(nn.Module):
+    @staticmethod
+    def params_divider(s: str) -> int:
+        if '.prior_weights.' in s or '.prior_biases.' in s or '.prior_factors.' in s:
+            return 1
+        else:
+            return 0
+
     def __init__(self, cfg: Config):
         super(Model, self).__init__()
         conv_config = SF.conv_config.get_default_conv_config(conv_mode=SF.get_conv_mode())
@@ -315,7 +318,8 @@ class Model(nn.Module):
         SF.conv_config.set_global_conv_config(conv_config)
 
         self.cfg = cfg
-        self.evaluator = PCCEvaluator()
+        self.evaluator = PCCEvaluator(
+            cal_mpeg_pc_error=not cfg.cal_avs_pc_evalue, cal_avs_pc_evalue=cfg.cal_avs_pc_evalue)
 
         self.max_downsample_times = int(np.log2(cfg.max_stride))
         assert self.max_downsample_times > len(cfg.num_latents)
@@ -355,12 +359,8 @@ class Model(nn.Module):
                     cfg.channels,
                     a, bool(b), idx != 0,
                     coord_recon_loss_factor=cfg.coord_recon_loss_factor,
-                    max_lossy_stride=self.max_lossy_stride))
-
-        if len(self.blocks_enc) != 0:
-            self.em = EntropyModel(batch_shape=torch.Size([1]), init_scale=10,)
-        else:
-            self.em = None
+                    max_lossy_stride=self.max_lossy_stride,
+                    compressed_channels=cfg.compressed_channels))
 
         self.register_buffer('fold2bin_kernel', torch.empty(8, 1, 1 * 8, dtype=torch.float), persistent=False)
         with torch.no_grad():
@@ -452,7 +452,7 @@ class Model(nn.Module):
                 tmp_custom_coord = None
             cur_rec, fea_loss_list, geo_bpp_loss = block_dec(
                 cur_rec, strided_list[idx], strided_list[idx - 1],
-                cur_bin, device, points_num, self.em, self.bin2oct_kernel, self.unfold_kernel,
+                cur_bin, device, points_num, self.bin2oct_kernel, self.unfold_kernel,
                 warmup=training_step < self.cfg.warmup_steps)
             loss_dict[f'stride{2 ** idx}_geo_loss'] = geo_bpp_loss
             for i, fea_loss in enumerate(fea_loss_list):
