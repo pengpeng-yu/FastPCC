@@ -1,0 +1,54 @@
+model_module_path: models.convolutional.lossy_coord_v3
+model:
+  compressed_channels: 1
+  num_latents: [0, 1, 1, 0, 0]
+  lossl_geo_upsample: [0, 1, 1, 1, 1]
+  coord_recon_loss_factor: 20.0
+  max_stride: 256
+  warmup_steps: 5000
+  cal_avs_pc_evalue: True
+
+
+train:
+  rundir_name: 'train_convolutional_<autoindex>'
+  batch_size: 8
+  num_workers: 8
+  optimizer: [AdamW, AdamW]
+  momentum: 0.9
+  weight_decay: [0.0001, 0.0]
+  max_grad_norm: 1.0
+
+  learning_rate: [0.0003, 0.0001]
+  epochs: 400
+
+  scheduler: Step
+  lr_step_size: 100
+  lr_step_gamma: 0.3
+
+  ckpt_frequency: 50
+  test_frequency: 0
+
+  dataset_module_path: 'lib.datasets.PlyVoxel.Base'
+  dataset:
+    root:
+      - 'datasets/AVS_AIPCC/Cat1A-1/RWTT'
+      - 'datasets/AVS_AIPCC/Cat1A-2/processed_coord'
+    kd_tree_partition_max_points_num: 400000
+    random_flip: True
+    morton_sort: True
+    morton_sort_inverse: True
+
+
+test:
+  from_ckpt: weights/convolutional/lossy_coord_v3/avs/r1.pt
+  num_workers: 4
+  dataset_module_path: 'lib.datasets.PlyVoxel.Base'
+  dataset:
+    root:
+      - 'datasets/AVS_AIPCC/Cat1B-1'
+      - 'datasets/AVS_AIPCC/Cat1B-2/10'
+      - 'datasets/AVS_AIPCC/Cat1B-2/11'
+      - 'datasets/AVS_AIPCC/Cat1B-2/12'
+    morton_sort: True
+    morton_sort_inverse: True
+    resolution: [1024, 1024, 2048, 4096]

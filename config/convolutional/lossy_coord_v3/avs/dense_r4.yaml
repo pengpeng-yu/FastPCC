@@ -1,0 +1,11 @@
+# include "config/convolutional/lossy_coord_v3/avs/dense_r1.yaml"
+
+model:
+  compressed_channels: 1
+  num_latents: [0, 0, 1, 1, 0]
+  lossl_geo_upsample: [0, 0, 1, 1, 1]
+  coord_recon_loss_factor: 0.1
+
+
+test:
+  from_ckpt: weights/convolutional/lossy_coord_v3/avs/r4.pt
