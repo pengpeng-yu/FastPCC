@@ -37,6 +37,7 @@ train:
     random_flip: True
     morton_sort: True
     morton_sort_inverse: True
+    resolution: 0
 
 
 test:
@@ -49,6 +50,5 @@ test:
       - 'datasets/AVS_AIPCC/Cat1B-2/10'
       - 'datasets/AVS_AIPCC/Cat1B-2/11'
       - 'datasets/AVS_AIPCC/Cat1B-2/12'
-    morton_sort: True
-    morton_sort_inverse: True
+    morton_sort: False
     resolution: [1024, 1024, 2048, 4096]

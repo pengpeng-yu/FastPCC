@@ -48,6 +48,3 @@ test:
   num_workers: 4
   dataset_module_path:
     'lib.datasets.PlyVoxel.MPEG_GPCC_CTC_Solid_MVUB'
-  dataset:
-    kd_tree_partition_max_points_num: [0, 0, 0, 0]
-    coord_scaler: [1.0, 1.0, 1.0, 1.0]

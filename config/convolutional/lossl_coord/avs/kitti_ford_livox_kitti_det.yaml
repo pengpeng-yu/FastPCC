@@ -23,7 +23,6 @@ train:
       - 'datasets/AVS_AIPCC/Cat4A/Ford_02_AVS_1mm'
       - 'datasets/AVS_AIPCC/Cat4A/Livox_01_all_in_one_1mm'
       - 'datasets/AVS_AIPCC/Cat2A/kitti_det_train'
-    coord_scaler: 1.0
     random_flip: True
     morton_sort: True
     morton_sort_inverse: True
@@ -38,6 +37,5 @@ test:
       - 'datasets/AVS_AIPCC/Cat4B/Ford_03_AVS_1mm'
       - 'datasets/AVS_AIPCC/Cat4B/Livox_02_all_in_one_1mm'
       - 'datasets/AVS_AIPCC/Cat2B/kitti_det_val'
-    coord_scaler: 1.0
     morton_sort: False
     resolution: 30001
