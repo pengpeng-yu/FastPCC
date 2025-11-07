@@ -147,7 +147,7 @@ class OneScaleMultiStepPredictor(nn.Module):
             self.embed = SparseSequential(
                 spnn.Conv3d(8, channels, 2 ** (pred_steps - 2), 2 ** (pred_steps - 2), bias=True))
             if channels >= 256:
-                self.self.embed.append(nn.PReLU())
+                self.embed.append(nn.PReLU())
             self.dec = SparseSequential(
                 nn.Linear(channels + channels, channels), nn.PReLU(),
                 Block(channels))

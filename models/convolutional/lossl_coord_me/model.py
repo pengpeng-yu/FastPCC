@@ -167,7 +167,7 @@ class OneScaleMultiStepPredictor(nn.Module):
             self.embed = SparseSequential(
                 ME.MinkowskiConvolution(8, channels, 2 ** (pred_steps - 2), 2 ** (pred_steps - 2), bias=True, dimension=3))
             if channels >= 256:
-                self.self.embed.append(ME.MinkowskiPReLU())
+                self.embed.append(ME.MinkowskiPReLU())
             self.dec = SparseSequential(
                 ME.MinkowskiLinear(channels + channels, channels), ME.MinkowskiPReLU(),
                 Block(channels))

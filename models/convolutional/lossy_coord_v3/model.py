@@ -42,7 +42,7 @@ class BoundFunction(torch.autograd.Function):
 
 class OneScalePredictor(nn.Module):
     def __init__(self, channels, num_latents=0, if_pred_oct_lossl=True, if_upsample=True, allow_single_ch=False,
-                 coord_recon_loss_factor=None, max_lossy_stride=None, compressed_channels=None):
+                 coord_recon_loss_factor=None, compressed_channels=None):
         super(OneScalePredictor, self).__init__()
         self.compressed_channels = compressed_channels
         if allow_single_ch is True:
@@ -71,13 +71,11 @@ class OneScalePredictor(nn.Module):
         self.if_pred_oct_lossl = if_pred_oct_lossl
         self.if_upsample = if_upsample  # Only False for stride2->stride1.
         self.coord_recon_loss_factor = coord_recon_loss_factor
-        self.max_lossy_stride = max_lossy_stride
         if self.if_pred_oct_lossl:
             self.pred = SparseSequential(
                 spnn.Conv3d(channels, channels, 3, 1, 1, bias=True), nn.PReLU(),
                 nn.Linear(channels, 255, bias=True))
         else:
-            assert max_lossy_stride is not None
             self.pred = SparseSequential(
                 spnn.Conv3d(channels, channels, 3, 1, 1, bias=True), nn.PReLU(),
                 spnn.Conv3d(channels, 8, 3, 1, 1, bias=True))
@@ -173,7 +171,10 @@ class OneScalePredictor(nn.Module):
                  bin2oct_kernel, if_upsample):
         if cur_rec.F.shape[1] == 1:
             cur_rec = self.dec_init(cur_rec)
-        cur_rec = self.dec(cur_rec)
+        if len(self.transforms) != 0 or self.if_pred_oct_lossl:
+            cur_rec = self.dec(cur_rec)
+        else:
+            cur_rec = None
 
         rounded_f_list = []
         for transform0, transform1, transform2, dec, em in self.transforms:
@@ -331,7 +332,6 @@ class Model(nn.Module):
             idx += 1
         assert all(_ == 1 for _ in cfg.lossl_geo_upsample[idx:])
         assert all(_ == 0 for _ in cfg.num_latents[:max(idx-1, 0)])
-        self.max_lossy_stride = 2 ** idx
 
         self.blocks_enc = nn.ModuleList()
         for idx, _ in enumerate(cfg.num_latents):
@@ -359,7 +359,6 @@ class Model(nn.Module):
                     cfg.channels,
                     a, bool(b), idx != 0,
                     coord_recon_loss_factor=cfg.coord_recon_loss_factor,
-                    max_lossy_stride=self.max_lossy_stride,
                     compressed_channels=cfg.compressed_channels))
 
         self.register_buffer('fold2bin_kernel', torch.empty(8, 1, 1 * 8, dtype=torch.float), persistent=False)

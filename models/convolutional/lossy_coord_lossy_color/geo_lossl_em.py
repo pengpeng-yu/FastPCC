@@ -106,7 +106,7 @@ class GeoLosslessEntropyModel(nn.Module):
         return binary_data_bytes
 
     def binary_decode(self, dist: torch.Tensor, binary_data_bytes):
-        symbols = np.empty((1, dist.shape.numel()), dtype=bool)
+        symbols = np.empty((1, dist.shape.numel()), dtype=np.bool_)
         self.binary_rans_coder.decode(
             [binary_data_bytes],
             self.init_prob(dist).reshape(1, -1), symbols)
