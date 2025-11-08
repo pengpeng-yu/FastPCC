@@ -13,10 +13,10 @@ typedef std::vector<uint32_t> VecUint32;
 typedef std::vector<int32_t> VecInt32;
 typedef std::vector<VecUint32> VecVecUint32;
 typedef std::vector<VecInt32> VecVecInt32;
-typedef py::array_t<int32_t, py::array::c_style | py::array::forcecast> PyArrayInt32;
-typedef py::array_t<uint32_t, py::array::c_style | py::array::forcecast> PyArrayUint32;
-typedef py::array_t<bool, py::array::c_style | py::array::forcecast> PyArrayBool;
-typedef py::array_t<double, py::array::c_style | py::array::forcecast> PyArrayDouble;
+typedef py::array_t<int32_t, py::array::c_style> PyArrayInt32;
+typedef py::array_t<uint32_t, py::array::c_style> PyArrayUint32;
+typedef py::array_t<bool, py::array::c_style> PyArrayBool;
+typedef py::array_t<double, py::array::c_style> PyArrayDouble;
 
 
 class IndexedRansCoder

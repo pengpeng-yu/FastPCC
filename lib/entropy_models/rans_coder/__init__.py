@@ -22,7 +22,7 @@ def _test(coder, symbol_array: List[List[int]], index_array: List[List[int]] = N
 def _bin_test(BinCoder):
     coder = BinCoder(2, 100)
     symbol_array = np.random.randint(0, 2, (2, 100), dtype=np.bool_)
-    prob_array = np.clip(np.round(np.random.rand(2, 100) * (1 << 16)), 1, (1 << 16) - 1)
+    prob_array = np.clip(np.round(np.random.rand(2, 100) * (1 << 16)), 1, (1 << 16) - 1).astype(np.uint32)
     encoded_list = coder.encode(symbol_array, prob_array)
     decoded_array = np.empty_like(symbol_array)
     coder.decode(encoded_list, prob_array, decoded_array)

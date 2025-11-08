@@ -9,8 +9,8 @@
 #define DEFAULT_ENC_BUF_SIZE (32 * 1024 * 1024)
 #define PRECISION (16u)
 #define PROB_SCALE (1u << 16u)
-typedef py::array_t<uint16_t, py::array::c_style | py::array::forcecast> PyArrayUint16;
-typedef py::array_t<bool, py::array::c_style | py::array::forcecast> PyArrayBool;
+typedef py::array_t<uint16_t, py::array::c_style> PyArrayUint16;
+typedef py::array_t<bool, py::array::c_style> PyArrayBool;
 
 
 class RansEncoder
