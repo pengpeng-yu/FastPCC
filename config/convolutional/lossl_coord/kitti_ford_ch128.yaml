@@ -1,0 +1,4 @@
+# include "config/convolutional/lossl_coord/kitti_ford.yaml"
+
+model:
+  channels: 128

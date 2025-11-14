@@ -1,0 +1,11 @@
+# include "config/convolutional/lossl_coord/kitti_ford_ch128.yaml"
+
+model:
+  skip_top_scales_num: 0
+
+
+test:
+  from_ckpt: weights/convolutional/lossl_coord/kitti_ford_ch128.pt
+  dataset:
+    resolution: 65536
+    ply_file_coord_scaler: 0.25

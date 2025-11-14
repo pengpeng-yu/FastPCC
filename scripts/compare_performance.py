@@ -250,7 +250,7 @@ def compute_multiple_bdrate():
         # 'Baseline + GRED': ('convolutional/lossl_coord/kitti_ford_wo_fea_prop_r*', {'color': '#2ca02c', 'marker': '.'}),
         # 'Baseline': ('convolutional/lossl_coord/kitti_ford_wo_fea_prop_wo_redens_r*', {'color': '#ff7f0e', 'marker': '.'}),
 
-        # 'Ours': ('convolutional/lossl_coord/ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Ours': ('convolutional/lossl_coord/kitti_ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Light EHEM': ('Light-EHEM', {'color': '#ff7f0e', 'marker': '.'}),
         # 'Unicorn': ('Unicorn/intra', {'color': '#d62728', 'marker': '.'}),
         # 'RENO': ('RENO', {'color': '#9467bd', 'marker': '.'}),
