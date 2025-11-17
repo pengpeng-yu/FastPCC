@@ -32,9 +32,9 @@ def if_ply_has_vertex_normal(file_path: str):
 
 
 _MPEG_DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on B. (A->B).',
-             '2. Use infile2 (B) as reference, loop over B, use normals on A. (B->A).',
-             '3. Final (symmetric).',
-             'Job done!']
+                  '2. Use infile2 (B) as reference, loop over B, use normals on A. (B->A).',
+                  '3. Final (symmetric).',
+                  'Job done!']
 
 
 def mpeg_pc_error(
@@ -131,9 +131,11 @@ def avs_pc_evalue(
 
     metric_dict = {}
     flag_read = False
+    flag_read_org_points_num = False
     for line in subp_stdout.splitlines():
-        if line.startswith(' point cloud size: '):
+        if not flag_read_org_points_num and line.startswith(' point cloud size: '):
             metric_dict['org points num'] = int(line.rstrip().rsplit(' ', 1)[-1])
+            flag_read_org_points_num = True
         elif line.startswith(_AVS_DIVIDERS[0]):
             flag_read = True
         elif line.startswith(_AVS_DIVIDERS[1]) or line.startswith(_AVS_DIVIDERS[2]):
