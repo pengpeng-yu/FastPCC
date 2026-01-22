@@ -88,7 +88,10 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         except Exception as e:
             raise ImportError(*e.args)
         device, cuda_ids = select_device(logger, local_rank=-1, device=cfg.test.device)
-        model = Model(cfg.model)
+        try:
+            model = Model(cfg.model, device)
+        except TypeError:
+            model = Model(cfg.model)
         if cfg.test.from_ckpt != '':
             ckpt_path = autoindex_obj(cfg.test.from_ckpt)
             logger.info(f'loading weights from {ckpt_path}')

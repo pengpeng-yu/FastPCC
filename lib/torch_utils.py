@@ -1,5 +1,6 @@
 import platform
 from typing import List, Tuple, Dict, Callable
+from itertools import chain
 
 import torch
 import torch.nn as nn
@@ -65,7 +66,7 @@ def unwrap_ddp(model):
     return model.module if isinstance(model, nn.parallel.DistributedDataParallel) else model
 
 
-def load_loose_state_dict(model: nn.Module, state_dict: Dict[str, nn.Parameter]) -> \
+def load_loose_state_dict(model: nn.Module, state_dict: Dict[str, torch.Tensor]) -> \
         Tuple[List[Tuple[str, torch.Size, torch.Size]], List[Tuple[str, torch.Size]], List[Tuple[str, torch.Size]]]:
     model = unwrap_ddp(model)
     try:
@@ -76,10 +77,13 @@ def load_loose_state_dict(model: nn.Module, state_dict: Dict[str, nn.Parameter])
         missing_keys = []
         existing_keys = []
         incompatible_keys = []
-        for key, param in model.named_parameters():
+        for key, value in chain(model.named_parameters(), model.named_buffers()):
             if key in state_dict:
                 existing_keys.append(key)
-                cur_shape = param.shape
+                if not hasattr(value, 'shape'):
+                    compatible_state_dict[key] = state_dict[key]
+                    continue
+                cur_shape = value.shape
                 new_shape = state_dict[key].shape
                 if cur_shape == new_shape:
                     compatible_state_dict[key] = state_dict[key]
@@ -87,9 +91,9 @@ def load_loose_state_dict(model: nn.Module, state_dict: Dict[str, nn.Parameter])
                     print(f'\nExperimentally load {key} (shape: {cur_shape}) from shape {new_shape}')
                     compatible_state_dict[key] = state_dict[key][tuple(slice(0, s) for s in cur_shape)]
                 else:
-                    incompatible_keys.append((key, param.shape, state_dict[key].shape))
+                    incompatible_keys.append((key, value.shape, state_dict[key].shape))
             else:
-                missing_keys.append((key, param.shape))
+                missing_keys.append((key, value.shape))
         unexpected_keys = [(key, getattr(state_dict[key], 'shape', None))
                            for key in state_dict if key not in existing_keys]
         missing_keys_, unexpected_keys_ = model.load_state_dict(compatible_state_dict, strict=False)
