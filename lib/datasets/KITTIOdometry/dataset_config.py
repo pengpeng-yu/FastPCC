@@ -12,6 +12,7 @@ class DatasetConfig(SimpleConfig):
     test_subset_index: Tuple[int, ...] = (11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21)
     list_sampling_interval: int = 1
     random_flip: bool = False
+    random_rotation: bool = False
     kd_tree_partition_max_points_num: int = 0
     morton_sort: bool = False
     morton_sort_inverse: bool = False

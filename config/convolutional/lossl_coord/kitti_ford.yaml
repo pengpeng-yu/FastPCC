@@ -13,7 +13,7 @@ train:
   ema: True
   ema_warmup: True
   ema_warmup_gamma: 1.0
-  ema_warmup_power: 0.8
+  ema_warmup_power: 0.75
 
   learning_rate: 0.0001
   epochs: 80
@@ -28,6 +28,7 @@ train:
   dataset_module_path: 'lib.datasets.KITTIOdometry'
   dataset:
     random_flip: True
+    kd_tree_partition_max_points_num: 100000
     morton_sort: True
     morton_sort_inverse: True
     resolution: 65536

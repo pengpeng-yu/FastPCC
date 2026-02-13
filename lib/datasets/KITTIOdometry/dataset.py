@@ -2,6 +2,7 @@ import os.path as osp
 import pathlib
 
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 import open3d as o3d
 import torch
 import torch.utils.data
@@ -84,14 +85,16 @@ class KITTIOdometry(torch.utils.data.Dataset):
                 if not osp.isfile(cache_path):
                     write_ply_file(org_xyz, cache_path, estimate_normals=True)
 
-        org_point = xyz.min(0)
-        xyz -= org_point
         if flag_kitti_bin_file:
             scale = (self.cfg.resolution - 1) / 400
             inv_scale = 400 / (self.cfg.resolution - 1)
         else:
             scale = self.cfg.ply_file_coord_scaler
             inv_scale = 1 / self.cfg.ply_file_coord_scaler
+        if self.is_training and self.cfg.random_rotation:
+            xyz = R.from_euler('z', np.random.rand() * (2 * np.pi)).apply(xyz)
+        org_point = xyz.min(0)
+        xyz -= org_point
         xyz *= scale
         xyz = xyz.round().astype(np.int32)
         xyz = np.unique(xyz, axis=0)
@@ -131,4 +134,10 @@ class KITTIOdometry(torch.utils.data.Dataset):
         )
 
     def collate_fn(self, batch):
-        return pc_data_collate_fn(batch, self.cfg.kd_tree_partition_max_points_num)
+        par_num = self.cfg.kd_tree_partition_max_points_num
+        if not self.is_training:
+            assert len(batch) == 1
+            ret = pc_data_collate_fn(batch, kd_tree_partition_max_points_num=par_num)
+        else:
+            ret = pc_data_collate_fn(batch)
+        return ret
