@@ -15,5 +15,3 @@ class Config(SimpleConfig):
 
     skip_top_scales_num: int = 0  # Test phase
     cal_avs_pc_evalue: bool = False
-    quantize_to_int_only: bool = False
-    int_param_save_path: str = 'int_param.pt'

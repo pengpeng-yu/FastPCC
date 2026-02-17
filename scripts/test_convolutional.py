@@ -14,21 +14,36 @@ weight_prefix = 'weights/convolutional'
 config_prefix = 'config/convolutional'
 output_prefix = f'{test_dir}/convolutional'
 config_paths = [
-    'lossy_coord_v2/baseline_r*.yaml',
-    'lossy_coord_v2/part6e5_r*.yaml',
-    'lossy_coord_v2/gpcc_based_r*.yaml',
-    'lossy_coord_v2/wo_residual_r*.yaml',
-    'lossy_coord/baseline.yaml',
-    'lossy_coord_lossy_color/baseline_r*.yaml',
-    'lossy_coord_v2/baseline_kitti_r*.yaml',
-    'lossy_coord_v2/baseline_kitti_q1mm_r*.yaml',
-    'lossl_coord/kitti_ford_test_r*.yaml',
-    'lossl_coord/avs/kitti_ford_livox_kitti_det_test_r*.yaml'
+    # 'lossy_coord_v2/baseline_r*.yaml',
+    # 'lossy_coord_v2/part6e5_r*.yaml',
+    # 'lossy_coord_v2/gpcc_based_r*.yaml',
+    # 'lossy_coord_v2/wo_residual_r*.yaml',
+    # 'lossy_coord/baseline.yaml',
+    # 'lossy_coord_lossy_color/baseline_r*.yaml',
+    # 'lossy_coord_v2/baseline_kitti_r*.yaml',
+    # 'lossy_coord_v2/baseline_kitti_q1mm_r*.yaml',
+
+    # 'lossl_coord/kitti_ford_test_r*.yaml',
+    # 'lossl_coord/kitti_ford_test_int_r*.yaml',
+    # 'lossl_coord/kitti_ford_ch128_test_r*.yaml',
+    # 'lossl_coord/kitti_ford_ch128_test_int_r*.yaml',
+    # 'lossl_coord/kitti_ford_wo_fea_prop_test_r*.yaml',
+    # 'lossl_coord/kitti_ford_wo_fea_prop_wo_redens_test_r*.yaml',
+    # 'lossl_coord/avs/kitti_ford_livox_kitti_det_test_r*.yaml'
 ]
+
+# Config file paths -> Weight paths
 sub_config_to_weight_path_maps = {
     'lossy_coord_v2/part6e5_r*.yaml': lambda _: _.replace('part6e5', 'baseline', 1),
     'lossy_coord_v2/baseline_kitti_q1mm_r*.yaml': lambda _: _.replace('_q1mm', '', 1),
+
+    # Remove the "_r" suffix
     'lossl_coord/kitti_ford_test_r*.yaml': lambda _: 'lossl_coord/kitti_ford',
+    'lossl_coord/kitti_ford_test_int_r*.yaml': lambda _: 'lossl_coord/kitti_ford_int',
+    'lossl_coord/kitti_ford_ch128_test_r*.yaml': lambda _: 'lossl_coord/kitti_ford_ch128',
+    'lossl_coord/kitti_ford_ch128_test_int_r*.yaml': lambda _: 'lossl_coord/kitti_ford_ch128_int',
+    'lossl_coord/kitti_ford_wo_fea_prop_test_r*.yaml': lambda _: 'lossl_coord/kitti_ford_wo_fea_prop',
+    'lossl_coord/kitti_ford_wo_fea_prop_wo_redens_test_r*.yaml': lambda _: 'lossl_coord/kitti_ford_wo_fea_prop_wo_redens',
     'lossl_coord/avs/kitti_ford_livox_kitti_det_test_r*.yaml': lambda _: 'lossl_coord/avs/kitti_ford_livox_kitti_det',
 }
 

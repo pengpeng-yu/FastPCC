@@ -15,6 +15,11 @@ from lib.torch_utils import TorchCudaMaxMemoryAllocated
 from lib.data_utils import PCData
 from lib.evaluators import PCCEvaluator
 from lib.morton_code import morton_encode_magicbits
+from lib.int_sparse_conv.cuda_ops import make_obs, SparseTensorHistogramObserver, \
+    SparseResBlockWithObs, SparseResBlockIn32W8Out32, \
+    SparseConvIn8Out8, SparseConvIn8W8Out32, SparseConvPReLUIn8W8Out8, SparseConvPReLUIn8W8Out32, \
+    PReLUIn32Out32, RequantFxpToScaledInt8,  \
+    LinearIn8W8Out8, LinearIn8W8Out32, LinearPReLUIn8W8Out8, LinearPReLUIn8W8Out32
 from .model_config import Config
 from models.convolutional.lossy_coord_v3.rans_coder import RansEncoder, RansDecoder
 
@@ -625,6 +630,17 @@ class Model(nn.Module):
         coord_recon_concat = torch.cat(coord_recon_list, 0)
         return coord_recon_concat
 
+    def pre_test_hook(self):
+        if self.cfg.quantize_to_int_only:
+            insert_obs_into_resblocks(self)
+            insert_obs_into_seqs(self)
+
+    def post_test_hook(self):
+        if self.cfg.quantize_to_int_only:
+            replace_resblocks_with_int_impl(self)
+            replace_seqs_with_int_impl(self)
+            torch.save({'state_dict': self.state_dict()}, self.cfg.int_param_save_path)
+
 
 class Block(nn.Module):
     def __init__(self, ch):
@@ -664,3 +680,209 @@ def int_to_bytes(x, length, byteorder: Literal['little', 'big'] = 'little', sign
 def bytes_to_int(s, byteorder: Literal['little', 'big'] = 'little', signed=False):
     assert isinstance(s, bytes)
     return int.from_bytes(s, byteorder=byteorder, signed=signed)
+
+
+def insert_obs_into_resblocks(model: nn.Module):
+    device = next(model.parameters()).device
+
+    def _rec(parent: nn.Module):
+        for child_name, child in list(parent._modules.items()):
+            if isinstance(child, Block):
+                new_block = SparseResBlockWithObs(child.ch).to(device)
+                new_block.load_state_dict(child.state_dict(), strict=False)
+                parent._modules[child_name] = new_block
+            else:
+                _rec(child)
+
+    _rec(model)
+
+
+def insert_obs_into_seqs(model: nn.Module):
+    device = next(model.parameters()).device
+
+    def _rec(parent: nn.Module):
+        modules = list(parent._modules.items())
+        for idx, (child_name, child) in enumerate(modules):
+            if isinstance(child, SparseSequential) and len(child) > 0:
+                new_children = [make_obs(
+                    torch.per_tensor_affine if isinstance(child[0], nn.Linear) else torch.per_tensor_symmetric
+                ).to(device)]
+                for i, m in enumerate(child):
+                    new_children.append(m)
+                    if i < len(child) - 1:
+                        obs = make_obs(
+                            torch.per_tensor_affine if len(child) >= i and isinstance(child[i + 1], nn.Linear) else
+                            torch.per_tensor_symmetric).to(device)
+                        new_children.append(obs)
+
+                parent._modules[child_name] = SparseSequential(*new_children)
+
+            else:
+                _rec(child)
+
+    _rec(model)
+
+
+def replace_resblocks_with_int_impl(model: nn.Module):
+    device = next(model.parameters()).device
+
+    def _rec(parent: nn.Module):
+        for name, child in list(parent._modules.items()):
+            if isinstance(child, SparseResBlockWithObs):
+                new_block = SparseResBlockIn32W8Out32(child.ch).to(device)
+                new_block.import_parameters(child)
+                parent._modules[name] = new_block
+            else:
+                _rec(child)
+
+    _rec(model)
+
+
+def replace_seqs_with_int_impl(model: nn.Module):
+    device = next(model.parameters()).device
+
+    # helper: find previous observer index (search backward)
+    def _find_prev_observer_idx(lst, idx):
+        for k in range(idx - 1, -1, -1):
+            if isinstance(lst[k], SparseTensorHistogramObserver):
+                return k
+        return None
+
+    # helper: find next non-observer index starting from idx+1
+    def _find_next_nonobs_idx(lst, idx):
+        for k in range(idx + 1, len(lst)):
+            if not isinstance(lst[k], SparseTensorHistogramObserver):
+                return k
+        return None
+
+    # helper: find next observer index after idx
+    def _find_next_observer_idx(lst, idx):
+        for k in range(idx + 1, len(lst)):
+            if isinstance(lst[k], SparseTensorHistogramObserver):
+                return k
+        return None
+
+    def _rec(parent: nn.Module):
+        for child_name, child in list(parent._modules.items()):
+            if isinstance(child, SparseSequential):
+                new_children = []
+                in_scaled_int = False
+
+                idx = 0
+                while idx < len(child):
+                    m = child[idx]
+
+                    if isinstance(m, SparseTensorHistogramObserver):
+                        idx += 1
+                        continue
+
+                    if isinstance(m, (nn.Linear, spnn.Conv3d)):
+                        prev_obs_idx = _find_prev_observer_idx(child, idx)
+                        scale_in, zero_point_in = child[prev_obs_idx].calculate_qparams()
+
+                        next_nonobs_idx = _find_next_nonobs_idx(child, idx)
+                        if next_nonobs_idx is not None and isinstance(child[next_nonobs_idx], nn.PReLU):
+                            fused_prelu = True
+                            prelu_module = child[next_nonobs_idx]
+                        else:
+                            fused_prelu = False
+                            prelu_module = None
+
+                        after_idx = next_nonobs_idx
+                        if fused_prelu:
+                            after_idx = _find_next_nonobs_idx(child, next_nonobs_idx)
+
+                        if after_idx is not None and (isinstance(child[after_idx], (nn.Linear, spnn.Conv3d))):
+                            out_scaled_int = True
+                        else:
+                            out_scaled_int = False
+
+                        if not in_scaled_int:
+                            requant = RequantFxpToScaledInt8().to(device)
+                            requant.import_parameters(scale_in, zero_point_in)
+                            new_children.append(requant)
+
+                        if out_scaled_int:
+                            fused_end_idx = idx if not fused_prelu else next_nonobs_idx
+                            next_obs_idx = _find_next_observer_idx(child, fused_end_idx)
+                            scale_out, zero_point_out = child[next_obs_idx].calculate_qparams()
+                        else:
+                            scale_out = zero_point_out = None
+
+                        if isinstance(m, nn.Linear):
+                            if fused_prelu:
+                                if out_scaled_int:
+                                    fused = LinearPReLUIn8W8Out8(m.in_features, m.out_features).to(device)
+                                    fused.import_parameters(scale_in, zero_point_in, scale_out, zero_point_out, m, prelu_module)
+                                else:
+                                    fused = LinearPReLUIn8W8Out32(m.in_features, m.out_features).to(device)
+                                    fused.import_parameters(scale_in, zero_point_in, m, prelu_module)
+                            else:
+                                if out_scaled_int:
+                                    fused = LinearIn8W8Out8(m.in_features, m.out_features).to(device)
+                                    fused.import_parameters(scale_in, zero_point_in, scale_out, zero_point_out, m)
+                                else:
+                                    fused = LinearIn8W8Out32(m.in_features, m.out_features).to(device)
+                                    fused.import_parameters(scale_in, zero_point_in, m)
+                        else:  # spnn.Conv3d
+                            in_ch = m.in_channels
+                            out_ch = m.out_channels
+                            kernel_size = m.kernel_size
+                            stride = m.stride
+                            if fused_prelu:
+                                if out_scaled_int:
+                                    fused = SparseConvPReLUIn8W8Out8(in_ch, out_ch, kernel_size, stride).to(device)
+                                    fused.import_parameters(scale_in, zero_point_in, scale_out, zero_point_out, m, prelu_module)
+                                else:
+                                    fused = SparseConvPReLUIn8W8Out32(in_ch, out_ch, kernel_size, stride).to(device)
+                                    fused.import_parameters(scale_in, zero_point_in, m, prelu_module)
+                            else:
+                                if out_scaled_int:
+                                    fused = SparseConvIn8W8Out32(in_ch, out_ch, kernel_size, stride).to(device)
+                                    fused.import_parameters(scale_in, zero_point_in, scale_out, zero_point_out, m)
+                                else:
+                                    fused = SparseConvIn8W8Out32(in_ch, out_ch, kernel_size, stride).to(device)
+                                    fused.import_parameters(scale_in, zero_point_in, m)
+
+                        new_children.append(fused)
+                        in_scaled_int = out_scaled_int
+
+                        if fused_prelu:
+                            idx = next_nonobs_idx + 1
+                        else:
+                            idx = idx + 1
+
+                    elif isinstance(m, nn.PReLU):
+                        if in_scaled_int:
+                            raise NotImplementedError
+                        new_m = PReLUIn32Out32().to(device)
+                        new_m.import_parameters(m)
+                        new_children.append(new_m)
+                        in_scaled_int = False
+                        idx += 1
+
+                    elif isinstance(m, SparseResBlockIn32W8Out32):
+                        if in_scaled_int:
+                            raise NotImplementedError
+                        new_children.append(m)
+                        in_scaled_int = False
+                        idx += 1
+                        continue
+
+                    else:
+                        raise NotImplementedError(m)
+
+                new_seq = SparseSequential(*new_children)
+                parent._modules[child_name] = new_seq
+
+            elif isinstance(child, spnn.Conv3d) and child_name.endswith('dec_init'):
+                # Special handling for dec_init, which is the only module not within a SparseSequential object.
+                new_m = SparseConvIn8W8Out32(1, child.out_channels, child.kernel_size, child.stride).to(device)
+                new_m.import_parameters(torch.tensor((1,), dtype=torch.float32, device=device),
+                                        torch.tensor((0,), dtype=torch.int32, device=device), child)
+                parent._modules[child_name] = new_m
+
+            else:
+                _rec(child)
+
+    _rec(model)

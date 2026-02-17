@@ -6,7 +6,7 @@ import torch
 def keep_state_dict_in_ckpt(dir_path):
     files = glob(osp.join(dir_path, '**', '*.pt'), recursive=True)
     for file in files:
-        ckpt = torch.load(file, map_location='cpu')
+        ckpt = torch.load(file, map_location='cpu', weights_only=False)
         if len(ckpt.keys()) != 1:
             key = 'ema_state_dict'
             if key not in ckpt: key = 'state_dict'

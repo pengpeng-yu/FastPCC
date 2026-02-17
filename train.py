@@ -320,7 +320,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     start_epoch = 0
     if cfg.train.from_ckpt != '':
         ckpt_path = autoindex_obj(cfg.train.from_ckpt)
-        ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
+        ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'), weights_only=False)
         if 'state_dict' in cfg.train.resume_items:
             incompatible_keys, missing_keys, unexpected_keys = load_loose_state_dict(
                 model, ckpt['state_dict'] if 'state_dict' in ckpt else ckpt['ema_state_dict'])

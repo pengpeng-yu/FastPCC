@@ -5,7 +5,8 @@ Detailed experimental results of [1, 2] on Intel Xeon Gold 5118 and NVIDIA 2080T
 
 
 ## Models
-- `config/convolutional/lossl_coord/*.yaml`: Real-time geometry lossless compression of LiDAR point clouds [[3]](https://arxiv.org/abs/2508.20466). 
+- `config/convolutional/lossl_coord/*.yaml`: Real-time geometry lossless compression of LiDAR point clouds [[3]](https://arxiv.org/abs/2508.20466).
+- `config/convolutional/lossl_coord_int/*.yaml`: Integer-only inference of the real-time geometry lossless compression of LiDAR point clouds.
 - `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression [[2]](https://ieeexplore.ieee.org/document/10980362). 
 - `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression [[2]](https://ieeexplore.ieee.org/document/10980362).
 - `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model [[1]](https://ieeexplore.ieee.org/document/10220062) (Deprecated).
@@ -17,6 +18,7 @@ Please see detailed commands [below](#train--test).
 
 ## Environment
 - python >= 3.7
+- pyyaml
 - loguru
 - ninja
 - open3d
@@ -25,6 +27,18 @@ Please see detailed commands [below](#train--test).
 For models `config/convolutional/lossl_coord` and `config/convolutional/lossy_coord_v3`:
 - pytorch >= 2.3 (for supporting `torch.uint16`)
 - [torchsparse]((https://github.com/mit-han-lab/torchsparse?tab=readme-ov-file#installation)) == 2.1.0 (Compiling requires [sparsehash](https://github.com/sparsehash/sparsehash), e.g., `sudo apt-get install libsparsehash-dev`)
+
+For integer-only inference with `config/convolutional/lossl_coord_int`:
+- torchsparse (only the SparseTensor class is used)
+- cutlass
+
+Manual compilation is required:
+```shell
+git clone https://github.com/NVIDIA/cutlass.git /your/path/to/cuttlass
+export CUTLASS_HOME=/your/path/to/cuttlass
+cd lib/int_sparse_conv
+python setup.py build
+```
 
 For the model `config/convolutional/lossl_coord_me`:
 - pytorch >= 2.3 (for supporting `torch.uint16`)

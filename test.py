@@ -95,7 +95,7 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         if cfg.test.from_ckpt != '':
             ckpt_path = autoindex_obj(cfg.test.from_ckpt)
             logger.info(f'loading weights from {ckpt_path}')
-            ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
+            ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'), weights_only=False)
             sd_key = 'ema_state_dict' if 'ema_state_dict' in ckpt else 'state_dict'
             incompatible_keys, missing_keys, unexpected_keys = load_loose_state_dict(model, ckpt[sd_key])
             del ckpt
@@ -111,6 +111,9 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
             logger.warning(f'no weight is loaded')
         model.to(device)
         model.eval()
+
+    if hasattr(model, 'pre_test_hook'):
+        model.pre_test_hook()
 
     logger.info(f'start testing using device {device}')
     steps_one_epoch = len(dataloader)
@@ -140,6 +143,9 @@ def test(cfg: Config, logger, run_dir, model: torch.nn.Module = None):
         metric_results = unwrap_ddp(model).evaluator.show(results_dir)
     except AttributeError:
         metric_results = {}
+
+    if hasattr(model, 'post_test_hook'):
+        model.post_test_hook()
 
     for value in metric_results.values():
         assert isinstance(value, int) or isinstance(value, float)
