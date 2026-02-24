@@ -108,8 +108,6 @@ at::Tensor prelu(
   const at::Tensor &input,
   const at::Tensor &slope);
 
-py::tuple compact_index_from_map(const at::Tensor& map);
-
 }
 
 

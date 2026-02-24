@@ -26,7 +26,7 @@ class TrainConfig(SimpleConfig):
     ema_warmup_gamma: float = 1.0
     ema_warmup_power: float = 3/4
     ema_foreach: bool = True
-    amp: bool = False
+    amp_float16: bool = False
 
     optimizer: str_or_seq = ('SGD', 'SGD')
     learning_rate: float_or_seq = 0.05

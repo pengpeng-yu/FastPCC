@@ -353,7 +353,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     logger.info('start training...')
     global_step = steps_one_epoch * start_epoch
     ave_time_onestep = None
-    scaler = amp.GradScaler(enabled=cfg.train.amp)
+    scaler = amp.GradScaler(enabled=cfg.train.amp_float16)
     for epoch in range(start_epoch, cfg.train.epochs):
         if not model.training:
             model.train()
@@ -379,7 +379,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
             no_sync = isinstance(model, DDP) and (global_step + 1) % cfg.train.grad_acc_steps != 0
             with model.no_sync() if no_sync else nullcontext():
-                with amp.autocast(enabled=cfg.train.amp):
+                with amp.autocast(enabled=cfg.train.amp_float16, dtype=torch.float16):
                     loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
                 scaler.scale(loss_dict['loss'] / cfg.train.grad_acc_steps).backward()
 
