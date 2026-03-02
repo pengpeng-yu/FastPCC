@@ -4,24 +4,29 @@ This script is based on the commit 436376cd95dea17096a0463116eb718af8d40dff of O
 import sys
 import os
 import os.path as osp
+from glob import glob
 import json
 import multiprocessing as mp
 from tqdm import tqdm
 import numpy as np
+import open3d as o3d
+
 sys.path.append(osp.dirname(osp.dirname(__file__)))
-from scripts.log_extract_utils import read_file_list_with_rel_path
+from scripts.log_extract_utils import read_file_list_with_rel_path, concat_values_for_dict_2
 from scripts.script_config import metric_dict_filename, cuda_device, test_dir
 
 
 octattention_path = '../OctAttention-lidar'
-reuse_distortion_metric = 'runs/tests/tmc3_geo/octree/metric_dict_bak.json'
 # I assume that you HAVE RUN test_tmc3.py on KITTI. So I simply reuse its distortion metrics.
-if not osp.isfile(reuse_distortion_metric):
-    reuse_distortion_metric = f'runs/tests/tmc3_geo/octree/{metric_dict_filename}'
+reuse_distortion_metrics = (f'runs/tests/tmc3_geo/octree/{metric_dict_filename}',
+                            f'runs/tests/tmc3_geo/octree/*/{metric_dict_filename}')
+reuse_rate_flag_kitti = list(range(1, 9))
+reuse_rate_flag_ford = list(range(0, 9))
 file_lists = (
     'datasets/KITTI/sequences/test_list.txt',
-    'datasets/KITTI/sequences/test_list_SparsePCGC110.txt',
+    'datasets/Ford/test_list.txt',
 )
+list_sampling_interval = 20
 # I look for keywords ('SparsePCGC') in the paths of file lists
 #   to flag whether special handling is needed.
 # Testing on the full KITTI dataset (> 20000 point clouds) is time-consuming,
@@ -45,8 +50,16 @@ def test():
     model.load_state_dict(saved)
 
     print('Test OctAttention-LiDAR encoding')
-    with open(reuse_distortion_metric, 'rb') as f:
+    with open(reuse_distortion_metrics[0], 'rb') as f:
         reused_metric_dict = json.load(f)
+    for _ in reuse_distortion_metrics[1:]:
+        for __ in glob(_, recursive=True):
+            with open(__, 'rb') as f:
+                concat_values_for_dict_2(reused_metric_dict, json.load(f))
+    for sample_name, metric_dict in reused_metric_dict.items():
+        sorted_indices = sorted(range(len(metric_dict['bpp'])), key=lambda _: metric_dict['bpp'][_])
+        for k, v in metric_dict.items():
+            metric_dict[k] = [(v[_] if len(v) > 1 else v) for _ in sorted_indices]
     os.makedirs(output_dir, exist_ok=True)
 
     all_file_metric_dict = {}
@@ -55,13 +68,15 @@ def test():
     subp.start()
 
     for file_list in file_lists:
-        file_paths = read_file_list_with_rel_path(file_list)
+        file_paths = read_file_list_with_rel_path(file_list)[::list_sampling_interval]
+        flag_kitti = 'KITTI' in file_list
+        flag_ford = 'Ford' in file_list
         for file_path in tqdm(file_paths):
             bpp_list = []
             oct_data_list, target_path, target_points_num = data_queue.get()
-            for rate_flag in range(1, 7, 1):
+            for idx, rate_flag in enumerate(reuse_rate_flag_kitti if flag_kitti else reuse_rate_flag_ford):
                 bpp_list.append(encoderTool.compress(
-                    oct_data_list[rate_flag - 1], None, model, False, print, False
+                    oct_data_list[idx], None, model, False, print, False
                 )[0] / target_points_num)
             sub_metric_dict = reused_metric_dict[target_path]
             del sub_metric_dict['encode time']
@@ -78,36 +93,43 @@ def test():
 
 def data_loader_manager(data_queue: mp.Queue):
     for file_list in file_lists:
-        flag_sparsepcgc = 'SparsePCGC' in file_list
-        file_paths = read_file_list_with_rel_path(file_list)
+        flag_kitti = 'KITTI' in file_list
+        flag_ford = 'Ford' in file_list
+        file_paths = read_file_list_with_rel_path(file_list)[::list_sampling_interval]
         pool = None
         for i in range((len(file_paths) // processes_num) + 1):
             if i % restart_steps == 0:
                 if pool is not None: pool.close()
                 pool = mp.Pool(processes_num)
             for res in pool.imap(
-                    data_loader, [(file_path, flag_sparsepcgc)
+                    data_loader, [(file_path, flag_kitti, flag_ford)
                                   for file_path in file_paths[processes_num * i: processes_num * (i + 1)]]):
                 data_queue.put(res)
         pool.close()
 
 
 def data_loader(args):
-    file_path, flag_sparsepcgc = args
-    target_path = osp.splitext(file_path)[0] + ('_q1mm_n.ply' if flag_sparsepcgc else '_n.ply')
-    org_xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
-    if flag_sparsepcgc:
-        # Quantization may reduce points num.
-        target_points_num = np.unique((org_xyz * 1000).round(), axis=0).shape[0]
-    else:
-        target_points_num = org_xyz.shape[0]
+    file_path, flag_kitti, flag_ford = args
+    if flag_kitti:
+        org_xyz = np.fromfile(file_path, '<f4').reshape(-1, 4)[:, :3]
+        target_path = osp.splitext(file_path)[0] + '_n.ply'
+    elif flag_ford:
+        org_xyz = np.asarray(o3d.io.read_point_cloud(file_path).points)
+        target_path = file_path
+    target_points_num = org_xyz.shape[0]
     oct_data_list = []
-    for rate_flag in range(1, 7, 1):
+    for rate_flag in reuse_rate_flag_kitti if flag_kitti else reuse_rate_flag_ford:
         # Same quantization as test_tmc3.py
-        scale_for_kitti = (2 ** (int(rate_flag) + 10) - 1) / 400
-        temp_xyz_q = org_xyz * scale_for_kitti
-        temp_xyz_q.round(out=temp_xyz_q)
-        temp_xyz_q = np.unique(temp_xyz_q, axis=0)
+        if flag_kitti:
+            scale_for_kitti = (2 ** (int(rate_flag) + 10) - 1) / 400
+            temp_xyz_q = org_xyz * scale_for_kitti
+            temp_xyz_q.round(out=temp_xyz_q)
+            temp_xyz_q = np.unique(temp_xyz_q, axis=0)
+        if flag_ford:
+            scale_for_ford = 2 ** (int(rate_flag) - 7)
+            temp_xyz_q = org_xyz * scale_for_ford
+            temp_xyz_q.round(out=temp_xyz_q)
+            temp_xyz_q = np.unique(temp_xyz_q, axis=0)
 
         oct_data_seq = dataPrepare(temp_xyz_q).astype(int)[:, -encoderTool.levelNumK:, 0:6]
         oct_data_list.append(oct_data_seq)

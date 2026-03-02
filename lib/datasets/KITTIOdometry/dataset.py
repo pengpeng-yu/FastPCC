@@ -29,10 +29,12 @@ class KITTIOdometry(torch.utils.data.Dataset):
         if not osp.exists(filelist_abs_path):
             self.file_list = [osp.join(cfg.root, _) for _ in self.gen_filelist(filelist_abs_path)]
         else:
-            self.file_list = self.load_filelist(cfg.root, filelist_abs_path)
+            self.file_list = self.load_filelist(cfg.root, filelist_abs_path, cfg.list_sampling_interval)
 
         if osp.exists(ply_file_abs_path):
-            self.file_list.extend(self.load_filelist(cfg.ply_file_root, ply_file_abs_path))
+            self.file_list.extend(self.load_filelist(
+                cfg.ply_file_root, ply_file_abs_path,
+                cfg.ply_list_sampling_interval if cfg.ply_list_sampling_interval > 0 else cfg.list_sampling_interval))
 
     def gen_filelist(self, filelist_abs_path):
         self.logger.info('no filelist is given. Trying to generate...')
@@ -47,10 +49,10 @@ class KITTIOdometry(torch.utils.data.Dataset):
             f.writelines((_ + '\n' for _ in file_list))
         return file_list
 
-    def load_filelist(self, root, filelist_abs_path):
+    def load_filelist(self, root, filelist_abs_path, sampling_interval):
         self.logger.info(f'using filelist: "{filelist_abs_path}"')
         with open(filelist_abs_path) as f:
-            file_list = [osp.join(root, line.strip()) for line in f.readlines()[::self.cfg.list_sampling_interval]]
+            file_list = [osp.join(root, line.strip()) for line in f.readlines()[::sampling_interval]]
         return file_list
 
     @staticmethod

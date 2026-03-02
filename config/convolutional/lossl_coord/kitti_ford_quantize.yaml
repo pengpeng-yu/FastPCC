@@ -9,6 +9,7 @@ model:
 test:
   from_ckpt: weights/convolutional/lossl_coord/kitti_ford.pt
   dataset:
-    resolution: 65536
-    ply_file_coord_scaler: 0.25
+    test_filelist_path: train_list.txt
     list_sampling_interval: 100
+    ply_file_test_filelist_path: train_list.txt
+    ply_list_sampling_interval: 50

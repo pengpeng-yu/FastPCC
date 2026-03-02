@@ -184,7 +184,7 @@ def plot_time(method_to_json: Dict[str, all_file_metric_dict_type], method_to_pl
                 handlelength=1.3, handletextpad=0.2, borderaxespad=0.1)
         else:
             legend_args = {}
-        ax.legend(loc='lower right', **legend_args)
+        ax.legend(loc='upper left', **legend_args)
         ax.figure.savefig(osp.join(
             output_dir, f'{y_label} {osp.splitext(osp.split(sample_name)[1])[0]}.pdf'
         ), bbox_inches="tight")
@@ -199,15 +199,15 @@ def list_mean(ls: List):
 def remove_non_overlapping_points(method_name, sample_name, sorted_indices):
     # Change the numbers below as needed.
     if method_name == 'G-PCC octree':
-        slice_val = (None, -1)
-    elif method_name == 'Baseline + GRED + XFP':
-        slice_val = (1, None)
+        slice_val = (None, -2)
     elif method_name == 'RENO':
         slice_val = (1, None)
     elif method_name == 'OctAttention':
-        slice_val = (1, None)
+        slice_val = (None, -2)
+    elif method_name == 'Light EHEM':
+        slice_val = (None, None)
     elif method_name == 'Unicorn':
-        slice_val = (1, -2)
+        slice_val = (2, -2)
     elif method_name == 'ADLPCC':
         slice_val = (None, -2)
     elif method_name == 'SparsePCGC':
@@ -237,24 +237,17 @@ def compute_multiple_bdrate():
     if_plot_dt = True
     tight_legend = False
     method_configs = {
-        # 'Ours': ('convolutional/lossl_coord/kitti_ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Ours (Float)': ('convolutional/lossl_coord/kitti_ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
+        # 'Ours (Integer)': ('convolutional/lossl_coord/kitti_ford_test_int_r*', {'color': '#ADD8E6', 'marker': '.'}),
         # 'Light EHEM': ('Light-EHEM', {'color': '#ff7f0e', 'marker': '.'}),
+        # 'Unicorn': ('Unicorn/intra', {'color': '#d62728', 'marker': '.'}),
         # 'OctAttention': ('OctAttention-lidar', {'color': '#2ca02c', 'marker': '.'}),
         # 'RENO': ('RENO', {'color': '#9467bd', 'marker': '.'}),
-        # 'G-PCC octree': ('tmc3_geo/octree', {'color': '#8c564b', 'marker': '.'}),
-
-        # 'Ours': ('convolutional/lossl_coord_unicorn_test_cond/*', {'color': '#1f77b4', 'marker': '.'}),
-        # 'Unicorn': ('Unicorn/intra', {'color': '#d62728', 'marker': '.'}),
+        # 'G-PCC octree': (['tmc3_geo/octree', 'tmc3_geo/octree/*/'], {'color': '#8c564b', 'marker': '.'}),
 
         # 'Baseline + GRED + XFP': ('convolutional/lossl_coord/kitti_ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
-        # 'Baseline + GRED': ('convolutional/lossl_coord/kitti_ford_wo_fea_prop_r*', {'color': '#2ca02c', 'marker': '.'}),
-        # 'Baseline': ('convolutional/lossl_coord/kitti_ford_wo_fea_prop_wo_redens_r*', {'color': '#ff7f0e', 'marker': '.'}),
-
-        # 'Ours': ('convolutional/lossl_coord/kitti_ford_test_r*', {'color': '#1f77b4', 'marker': '.'}),
-        # 'Light EHEM': ('Light-EHEM', {'color': '#ff7f0e', 'marker': '.'}),
-        # 'Unicorn': ('Unicorn/intra', {'color': '#d62728', 'marker': '.'}),
-        # 'RENO': ('RENO', {'color': '#9467bd', 'marker': '.'}),
-        # 'G-PCC octree': (['tmc3_geo/octree', 'tmc3_geo/octree/*/'], {'color': '#8c564b', 'marker': '.'}),
+        # 'Baseline + GRED': ('convolutional/lossl_coord/kitti_ford_wo_fea_prop_test_r*', {'color': '#2ca02c', 'marker': '.'}),
+        # 'Baseline': ('convolutional/lossl_coord/kitti_ford_wo_fea_prop_wo_redens_test_r*', {'color': '#ff7f0e', 'marker': '.'}),
 
         # 'Ours': ('convolutional/lossy_coord_v2/baseline_r*', {'color': '#1f77b4', 'marker': '.'}),
         # 'Ours w/o geometry residual':
@@ -329,7 +322,7 @@ def compute_multiple_bdrate():
             sorted_indices = sorted(range(len(metric_dict['bpp'])), key=lambda _: metric_dict['bpp'][_])
             sorted_indices = remove_non_overlapping_points(method_name, sample_name, sorted_indices)
             for k, v in metric_dict.items():
-                metric_dict[k] = [v[_] for _ in sorted_indices]
+                metric_dict[k] = [(v[_] if len(v) > 1 else v) for _ in sorted_indices]
 
     method_names_to_compare = [key for key in method_to_json if key != anchor_name]
     sample_names = list(method_to_json[anchor_name].keys())

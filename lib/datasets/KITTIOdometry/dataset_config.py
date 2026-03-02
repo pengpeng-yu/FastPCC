@@ -22,5 +22,6 @@ class DatasetConfig(SimpleConfig):
     ply_file_root: str = ''
     ply_file_train_filelist_path: str = 'train_list.txt'
     ply_file_test_filelist_path: str = 'test_list.txt'
+    ply_list_sampling_interval: int = -1
     ply_file_coord_scaler: float = 1.0
     ply_file_resolution: int = 0

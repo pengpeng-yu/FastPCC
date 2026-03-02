@@ -69,7 +69,6 @@ def main():
         f'{test_dir}/convolutional/lossy_coord_v2/baseline_kitti_r*/{metric_dict_filename}',
         f'{test_dir}/convolutional/lossy_coord_lossy_color/baseline_r*/{metric_dict_filename}',
         f'{test_dir}/convolutional/lossl_coord/*/{metric_dict_filename}',
-        f'{test_dir}/convolutional/lossl_coord_unicorn_test_cond/*/{metric_dict_filename}',
         f'{test_dir}/tmc3_geo/octree/{metric_dict_filename}',
         f'{test_dir}/tmc3_geo/octree/Ford_low_rate/{metric_dict_filename}',
         f'{test_dir}/tmc3/octree-predlift/{metric_dict_filename}',
@@ -77,7 +76,6 @@ def main():
         f'{test_dir}/tmc2/{metric_dict_filename}',
         f'{test_dir}/OctAttention-lidar/{metric_dict_filename}',
         f'{test_dir}/pcc-geo-color/{metric_dict_filename}',
-        f'{test_dir}/convolutional/lossl_coord/avs*/kitti_ford_livox_test_r*/{metric_dict_filename}',
     )
     for files in input_files:
         files = sorted(glob(files))
@@ -126,7 +124,6 @@ def main():
                 new_metric_dict[k].update(tmp_total_metric_dict)
                 if 'total_compressed_bytes' in tmp_total_metric_dict:
                     new_metric_dict[k]['total_compressed_bits'] = tmp_total_metric_dict['total_compressed_bytes'] * 8
-                new_metric_dict[k]['samples_num'] = v
             if not osp.isfile(outfile):
                 os.rename(infile, outfile)
             with open(file, 'w') as f:
