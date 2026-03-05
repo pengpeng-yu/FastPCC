@@ -29,7 +29,6 @@ void cutlass_gather_gemm_scatter_int8_impl(
   using LayoutInputC = cutlass::layout::RowMajor;
   using LayoutOutput = cutlass::layout::RowMajor;
 
-  // TODO: check occupancy
   using MMAOp = std::conditional_t<
     UseTensorOp, cutlass::arch::OpClassTensorOp, cutlass::arch::OpClassSimt
   >;
@@ -40,9 +39,15 @@ void cutlass_gather_gemm_scatter_int8_impl(
     UseTensorOp, cutlass::gemm::GemmShape<32, 32, 64>, cutlass::gemm::GemmShape<32, 32, 8>
   >;
   using InstructionShape = std::conditional_t<
-    UseTensorOp, cutlass::gemm::GemmShape<16, 8, 32>, cutlass::gemm::GemmShape<1, 1, 1>
+    UseTensorOp,
+    std::conditional_t<
+      std::is_same_v<SmArch, cutlass::arch::Sm75>,
+      cutlass::gemm::GemmShape<8, 8, 16>,
+      cutlass::gemm::GemmShape<16, 8, 32>
+    >,
+    cutlass::gemm::GemmShape<1, 1, 1>
   >;
-  static constexpr int NumStages = UseTensorOp ? 2 : 2;
+  static constexpr int NumStages = UseTensorOp ? (std::is_same_v<SmArch, cutlass::arch::Sm75> ? 2 : 2) : 2;
 
   using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;
 
@@ -226,10 +231,10 @@ void cutlass_gather_gemm_scatter_int8(
   CASE_SM(75);
 #endif
 #ifdef TARGET_SM72
-  CASE_SM(72);
+  else if (sm_arch == 72) cutlass_gather_gemm_scatter_int8_impl<cutlass::arch::Sm72, 1, 1, false>(A, B, C, D, gather_idx, scatter_idx);
 #endif
 #ifdef TARGET_SM70
-  CASE_SM(70);
+  else if (sm_arch == 70) cutlass_gather_gemm_scatter_int8_impl<cutlass::arch::Sm70, 1, 1, false>(A, B, C, D, gather_idx, scatter_idx);
 #endif
   else {
     TORCH_CHECK(false, "No available arch");

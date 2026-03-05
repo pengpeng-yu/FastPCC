@@ -17,6 +17,7 @@ Please see detailed commands [below](#train--test).
 
 
 ## Environment
+- pytorch >= 2.4
 - python >= 3.7
 - pyyaml
 - loguru
@@ -25,7 +26,6 @@ Please see detailed commands [below](#train--test).
 - plyfile
 
 For models `config/convolutional/lossl_coord` and `config/convolutional/lossy_coord_v3`:
-- pytorch >= 2.3 (for supporting `torch.uint16`)
 - [torchsparse]((https://github.com/mit-han-lab/torchsparse?tab=readme-ov-file#installation)) == 2.1.0 (Compiling requires [sparsehash](https://github.com/sparsehash/sparsehash), e.g., `sudo apt-get install libsparsehash-dev`)
 
 For integer-only inference with `config/convolutional/lossl_coord_int`:
@@ -41,11 +41,9 @@ python setup.py build
 ```
 
 For the model `config/convolutional/lossl_coord_me`:
-- pytorch >= 2.3 (for supporting `torch.uint16`)
 - [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation) ≈ 0.5.4 (for compilation with CUDA 12.1/12.2, please refer to [this](https://github.com/daizhirui/MinkowskiEngine/tree/fix-for-cuda-12.2))
 
 For the remaining models:
-- pytorch >= 1.7
 - [pytorch3d](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) (only for knn_points in joint lossy compression `config/convolutional/lossy_coord_lossy_color`. Conda installation suggested: conda install -c fvcore -c iopath -c conda-forge fvcore iopath; conda install pytorch3d -c pytorch3d)
 - [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation) ≈ 0.5.4 (for compilation with CUDA 12.1/12.2, please refer to [this](https://github.com/daizhirui/MinkowskiEngine/tree/fix-for-cuda-12.2))
 

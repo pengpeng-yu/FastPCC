@@ -57,6 +57,22 @@ def find_path_and_setup():
     src_dir = osp.abspath(osp.join(current_file_dir, 'src'))
     src_files = [osp.abspath(_) for _ in glob(osp.join(src_dir, '**/*.cu'), recursive=True)]
 
+    if sys.platform == 'win32':
+        cxx_args = ['/O2', '/std:c++17', '/Zc:__cplusplus']  # '/W3'
+        nvcc_args = [
+            '-O3',
+            '--expt-relaxed-constexpr',
+            '-Xcompiler', '/O2',
+            '-Xcompiler', '/std:c++17',
+            '-Xcompiler', '/Zc:__cplusplus',
+        ]
+    elif sys.platform == 'linux':
+        cxx_args = ['-O3', '-std=c++17', '-fno-strict-aliasing']  # '-Wall', '-Wextra', '-Wconversion',]
+        nvcc_args = ['-O3', '-std=c++17', '--expt-relaxed-constexpr',
+                     '-ftemplate-backtrace-limit=0']
+    else:
+        raise NotImplementedError(sys.platform)
+
     setup(
         name='int_sparse_conv_ext',
         ext_modules=[
@@ -65,13 +81,7 @@ def find_path_and_setup():
                 sources=src_files,
                 include_dirs=[cutlass_include, src_dir],
                 define_macros=[('CUTLASS_DEBUG_TRACE_LEVEL', 0)] + get_target_sm_arch(),
-                extra_compile_args={
-                    'cxx': ['-march=native', '-fno-strict-aliasing', '-O3']
-                            # '-Wall', '-Wextra', '-Wconversion',]
-                            if sys.platform != 'win32' else
-                            ['/O2'],  # '/W3'
-                    'nvcc': ['-O3', '--expt-relaxed-constexpr',
-                             '-ftemplate-backtrace-limit=0']},
+                extra_compile_args={'cxx': cxx_args, 'nvcc': nvcc_args},
             )],
         cmdclass={'build_ext': BuildExtension},
         options={
