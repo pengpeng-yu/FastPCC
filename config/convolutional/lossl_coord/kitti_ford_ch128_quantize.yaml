@@ -2,7 +2,7 @@
 
 model:
   skip_top_scales_num: 0
-  quantize_to_int_only: True
+  quantize_param: True
   int_param_save_path: weights/convolutional/lossl_coord/kitti_ford_ch128_int.pt
 
 

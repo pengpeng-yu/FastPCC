@@ -51,7 +51,7 @@ def find_path_and_setup():
         if not osp.isdir(cutlass_home):
             cutlass_home = osp.join(current_file_dir, 'cutlass')
             if not osp.isdir(cutlass_home):
-                raise FileNotFoundError
+                raise FileNotFoundError(cutlass_home)
 
     cutlass_include = osp.abspath(osp.join(cutlass_home, 'include'))
     src_dir = osp.abspath(osp.join(current_file_dir, 'src'))

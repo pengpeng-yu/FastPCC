@@ -631,12 +631,12 @@ class Model(nn.Module):
         return coord_recon_concat
 
     def pre_test_hook(self):
-        if self.cfg.quantize_to_int_only:
+        if self.cfg.quantize_param:
             insert_obs_into_resblocks(self)
             insert_obs_into_seqs(self)
 
     def post_test_hook(self):
-        if self.cfg.quantize_to_int_only:
+        if self.cfg.quantize_param:
             replace_resblocks_with_int_impl(self)
             replace_seqs_with_int_impl(self)
             torch.save({'state_dict': self.state_dict()}, self.cfg.int_param_save_path)
