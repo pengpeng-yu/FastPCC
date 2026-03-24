@@ -15,6 +15,7 @@ Licensed under the MIT License.
 #include <utility>
 #include "cuda_runtime.h"
 #include <torch/extension.h>
+#include <ATen/cuda/CUDAContext.h>
 
 namespace int_sparse_conv {
 
@@ -91,10 +92,10 @@ class GPUHashTable {
   const int _divisor;
   key_type* table_keys;
   val_type* table_vals;
-  void insert_many_coords(int *coords, const int n);
+  void insert_many_coords(int *coords, const int n, const at::Device& device);
   void lookup_many_coords(int *coords, val_type *results, 
     const int* kernel_sizes, const int* tensor_strides,
-    const int n, const int kernel_volume);
+    const int n, const int kernel_volume, const at::Device& device);
  public:
   GPUHashTable(const int capacity)
       : _capacity(capacity), free_pointers(true), _divisor(128){
@@ -113,8 +114,8 @@ class GPUHashTable {
       cudaFree(table_vals);
     }
   };
-  void insert_many(const key_type *keys, const int n);
-  void lookup_many(const key_type *keys, val_type *results, const int n);
+  void insert_many(const key_type *keys, const int n, const at::Device& device);
+  void lookup_many(const key_type *keys, val_type *results, const int n, const at::Device& device);
   void insert_vals(torch::Tensor keys);
   torch::Tensor lookup_vals(torch::Tensor keys);
   void insert_coords(torch::Tensor coords);
@@ -225,13 +226,17 @@ __global__ void lookup_coords_kernel(
 {
     int tidx = blockIdx.x * blockDim.x + threadIdx.x;
     int idx = tidx / kernel_volume;
+    if (idx >= n)
+    {
+        return;
+    }
     int _kernel_idx = tidx % kernel_volume;
     int kernel_idx = _kernel_idx;
-    int* in_coords = coords + 4 * idx;
+    const int* in_coords = coords + 4 * idx;
     int coords_out[4];
     coords_out[3] = in_coords[3];
-    
-    if constexpr (odd) 
+
+    if constexpr (odd)
     {
       #pragma unroll
       for(int i = 0; i <= 2; i++){
@@ -251,86 +256,94 @@ __global__ void lookup_coords_kernel(
         _kernel_idx /= kernel_sizes[i];
       }
     }
-    
-    if (idx < n)
-    {
-        key_type key = (key_type)(hash_func_64b(coords_out));
-        int slot = hash(key, _capacity);
+    key_type key = (key_type)(hash_func_64b(coords_out));
+    int slot = hash(key, _capacity);
 
-        while (true)
+    while (true)
+    {
+        key_type cur_key = table_keys[slot];
+        if (key == cur_key)
         {
-            key_type cur_key = table_keys[slot];
-            if (key == cur_key)
-            { 
-                vals[idx * kernel_volume + kernel_idx] = table_vals[slot];
-            }
-            if (table_keys[slot] == EMPTY_CELL)
-            {
-                return;
-            }
-            slot = (slot + 1) % _capacity;
+            vals[idx * kernel_volume + kernel_idx] = table_vals[slot];
         }
+        if (table_keys[slot] == EMPTY_CELL)
+        {
+            return;
+        }
+        slot = (slot + 1) % _capacity;
     }
 }
 
 
 template <typename key_type, typename val_type>
-void GPUHashTable<key_type, val_type>::insert_many(const key_type *keys, const int n){
-  insert_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(table_keys, table_vals, keys, n, _capacity);
+void GPUHashTable<key_type, val_type>::insert_many(
+  const key_type *keys, const int n, const at::Device& device){
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(device.index());
+  insert_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(
+    table_keys, table_vals, keys, n, _capacity);
 }
 
 template <typename key_type, typename val_type>
-void GPUHashTable<key_type, val_type>::insert_many_coords(int *coords, const int n){
-  insert_coords_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(table_keys, table_vals, coords, n, _capacity);
+void GPUHashTable<key_type, val_type>::insert_many_coords(
+  int *coords, const int n, const at::Device& device){
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(device.index());
+  insert_coords_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(
+    table_keys, table_vals, coords, n, _capacity);
 }
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::insert_vals(at::Tensor keys){
-  insert_many(keys.data_ptr<key_type>(), keys.size(0));
+  insert_many(keys.data_ptr<key_type>(), keys.size(0), keys.device());
 }
 
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::insert_coords(at::Tensor coords){
-  insert_many_coords(coords.data_ptr<int>(), coords.size(0));
+  insert_many_coords(coords.data_ptr<int>(), coords.size(0), coords.device());
 }
 
 template <typename key_type, typename val_type>
-void GPUHashTable<key_type, val_type>::lookup_many(const key_type *keys, val_type *results, const int n){
-  lookup_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(table_keys, table_vals, keys, results, n, _capacity);
+void GPUHashTable<key_type, val_type>::lookup_many(
+  const key_type *keys, val_type *results, const int n, const at::Device& device){
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(device.index());
+  lookup_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(
+    table_keys, table_vals, keys, results, n, _capacity);
 }
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::lookup_many_coords(
   int *coords, val_type *results, 
   const int* kernel_sizes, const int* strides,
-  const int n, const int kernel_volume){
+  const int n, const int kernel_volume, const at::Device& device){
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(device.index());
   if (kernel_volume % 2)
-    lookup_coords_kernel<key_type, val_type, true><<<(n * kernel_volume + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
+    lookup_coords_kernel<key_type, val_type, true><<<(n * kernel_volume + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(
       table_keys, table_vals, coords, results, kernel_sizes, strides,
       n, _capacity, kernel_volume);
   else
-    lookup_coords_kernel<key_type, val_type, false><<<(n * kernel_volume + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
+    lookup_coords_kernel<key_type, val_type, false><<<(n * kernel_volume + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(
       table_keys, table_vals, coords, results, kernel_sizes, strides,
       n, _capacity, kernel_volume);
 }
 
 template <typename key_type, typename val_type>
 at::Tensor GPUHashTable<key_type, val_type>::lookup_vals(at::Tensor keys){
+  at::Device device = keys.device();
   auto options =
-      torch::TensorOptions().dtype(at::ScalarType::Int).device(keys.device());
+      torch::TensorOptions().dtype(at::ScalarType::Int).device(device);
   at::Tensor results = torch::zeros({(keys.size(0) + _divisor - 1) / _divisor * _divisor}, options);
-  lookup_many(keys.data_ptr<key_type>(), results.data_ptr<val_type>(), keys.size(0));
+  lookup_many(keys.data_ptr<key_type>(), results.data_ptr<val_type>(), keys.size(0), device);
   return results;
 }
 
 template <typename key_type, typename val_type>
 at::Tensor GPUHashTable<key_type, val_type>::lookup_coords(at::Tensor coords, at::Tensor kernel_sizes, at::Tensor strides, int kernel_volume){
+  at::Device device = coords.device();
   auto options =
-      torch::TensorOptions().dtype(at::ScalarType::Int).device(coords.device());
+      torch::TensorOptions().dtype(at::ScalarType::Int).device(device);
   at::Tensor results = torch::zeros({(coords.size(0) + _divisor - 1) / _divisor * _divisor, kernel_volume}, options);
   lookup_many_coords(coords.data_ptr<int>(), results.data_ptr<val_type>(), 
-  kernel_sizes.data_ptr<int>(), strides.data_ptr<int>(), coords.size(0), kernel_volume);
+  kernel_sizes.data_ptr<int>(), strides.data_ptr<int>(), coords.size(0), kernel_volume, device);
   return results;
 }
 

@@ -22,7 +22,7 @@ void cutlass_gather_gemm_scatter_int8_impl(
   using ElementInputC = int32_t;
   using ElementOutput = ElementInputC;
   using ElementAccumulator = ElementOutput;
-  using ElementComputeEpilogue = ElementOutput; 
+  using ElementComputeEpilogue = ElementOutput;
 
   using LayoutInputA = cutlass::layout::RowMajor;
   using LayoutInputB = cutlass::layout::ColumnMajor;
@@ -139,11 +139,19 @@ void cutlass_gather_gemm_scatter_int8_impl(
     workspace_ptr = workspace.data_ptr();
   }
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(device.index());
-  status = gemm_op.initialize(arguments, workspace_ptr, stream);
+  status = gemm_op(arguments, workspace_ptr, stream);
   TORCH_CHECK(status == cutlass::Status::kSuccess, cutlass::cutlassGetStatusString(status));
+}
 
-  status = gemm_op();
-  TORCH_CHECK(status == cutlass::Status::kSuccess, cutlass::cutlassGetStatusString(status));
+namespace {
+
+template <typename Element>
+__inline__ bool is_aligned_address(const at::Tensor &tensor, int alignment_elements) {
+  std::uintptr_t address = reinterpret_cast<std::uintptr_t>(tensor.data_ptr<Element>());
+  size_t alignment_bytes = alignment_elements * sizeof(Element);
+  return (address % alignment_bytes) == 0;
+}
+
 }
 
 template <typename SmArch>
@@ -156,32 +164,48 @@ void cutlass_gather_gemm_scatter_int8_dispatch_align(
     const at::Tensor &scatter_idx) {
   int64_t K = A.size(1);
   int64_t N = B.size(0);
+  bool input_align16 = (K % 16 == 0) &&
+      is_aligned_address<int8_t>(A, 16) &&
+      is_aligned_address<int8_t>(B, 16);
+  bool input_align8 = (K % 8 == 0) &&
+      is_aligned_address<int8_t>(A, 8) &&
+      is_aligned_address<int8_t>(B, 8);
+  bool input_align4 = (K % 4 == 0) &&
+      is_aligned_address<int8_t>(A, 4) &&
+      is_aligned_address<int8_t>(B, 4);
 
-  if ((K % 16 == 0) && (N % 4 == 0)) {
+  bool output_align4 = (N % 4 == 0) &&
+      is_aligned_address<int32_t>(D, 4) &&
+      ((C.numel() == 0) || is_aligned_address<int32_t>(C, 4));
+  bool output_align2 = (N % 2 == 0) &&
+      is_aligned_address<int32_t>(D, 2) &&
+      ((C.numel() == 0) || is_aligned_address<int32_t>(C, 2));
+
+  if (input_align16 && output_align4) {
     cutlass_gather_gemm_scatter_int8_impl<SmArch, 16, 4, true>(A, B, C, D, gather_idx, scatter_idx);
   }
-  else if ((K % 16 == 0) && (N % 2 == 0)) {
+  else if (input_align16 && output_align2) {
     cutlass_gather_gemm_scatter_int8_impl<SmArch, 16, 2, true>(A, B, C, D, gather_idx, scatter_idx);
   }
-  else if ((K % 16 == 0)) {
+  else if (input_align16) {
     cutlass_gather_gemm_scatter_int8_impl<SmArch, 16, 1, true>(A, B, C, D, gather_idx, scatter_idx);
   }
-  else if ((K % 8 == 0) && (N % 4 == 0)) {
+  else if (input_align8 && output_align4) {
     cutlass_gather_gemm_scatter_int8_impl<SmArch, 8, 4, true>(A, B, C, D, gather_idx, scatter_idx);
   }
-  else if ((K % 8 == 0) && (N % 2 == 0)) {
+  else if (input_align8 && output_align2) {
     cutlass_gather_gemm_scatter_int8_impl<SmArch, 8, 2, true>(A, B, C, D, gather_idx, scatter_idx);
   }
-  else if ((K % 8 == 0)) {
+  else if (input_align8) {
     cutlass_gather_gemm_scatter_int8_impl<SmArch, 8, 1, true>(A, B, C, D, gather_idx, scatter_idx);
   }
-  else if ((K % 4 == 0) && (N % 4 == 0)) {
+  else if (input_align4 && output_align4) {
     cutlass_gather_gemm_scatter_int8_impl<SmArch, 4, 4, true>(A, B, C, D, gather_idx, scatter_idx);
   }
-  else if ((K % 4 == 0) && (N % 2 == 0)) {
+  else if (input_align4 && output_align2) {
     cutlass_gather_gemm_scatter_int8_impl<SmArch, 4, 2, true>(A, B, C, D, gather_idx, scatter_idx);
   }
-  else if (K % 4 == 0) {
+  else if (input_align4) {
     cutlass_gather_gemm_scatter_int8_impl<SmArch, 4, 1, true>(A, B, C, D, gather_idx, scatter_idx);
   }
   else {

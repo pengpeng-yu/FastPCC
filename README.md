@@ -18,7 +18,7 @@ Please see detailed commands [below](#train--test).
 
 ## Environment
 - pytorch >= 2.4
-- python >= 3.7
+- python >= 3.10
 - pyyaml
 - loguru
 - ninja

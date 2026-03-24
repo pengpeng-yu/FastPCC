@@ -70,6 +70,7 @@ __global__ void softmax_int32_kernel(
   }
   __syncthreads();
   int32_t row_max = sdata[0] + (1 << 6);  // plus (1 << 6) for rounding
+  __syncthreads();
 
   int32_t local_sum = 0;
   for (uint32_t idx = row_start_idx; idx < row_end_idx; idx += blockDim.x) {
@@ -112,7 +113,7 @@ std::vector<int32_t> build_lut() {
   for (uint32_t k = 0; k < EXP_LUT_SIZE; ++k) {
     double x = -((double)k) / 512.0;
     double v = std::exp(x);
-    int32_t val = (int32_t)std::llround(v * 65536.0); // scale = 2^16
+    int32_t val = (int32_t)std::llround(v * 65536.0);  // scale = 2^16
     lut[k] = val;
   }
   return lut;
