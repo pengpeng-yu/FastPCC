@@ -34,17 +34,17 @@ For integer-only inference with `config/convolutional/lossl_coord_int`:
 
 Manual compilation is required:
 ```shell
-git clone https://github.com/NVIDIA/cutlass.git /your/path/to/cuttlass
+git clone https://github.com/pengpeng-yu/cutlass.git /your/path/to/cuttlass
 export CUTLASS_HOME=/your/path/to/cuttlass
 cd lib/int_sparse_conv
 python setup.py build
 ```
 
-For the model `config/convolutional/lossl_coord_me`:
+For the model `config/convolutional/lossy_coord_lossy_color`:
+- [pytorch3d](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) (only for knn_points. Conda installation suggested: conda install -c fvcore -c iopath -c conda-forge fvcore iopath; conda install pytorch3d -c pytorch3d)
 - [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation) ≈ 0.5.4 (for compilation with CUDA 12.1/12.2, please refer to [this](https://github.com/daizhirui/MinkowskiEngine/tree/fix-for-cuda-12.2))
 
 For the remaining models:
-- [pytorch3d](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) (only for knn_points in joint lossy compression `config/convolutional/lossy_coord_lossy_color`. Conda installation suggested: conda install -c fvcore -c iopath -c conda-forge fvcore iopath; conda install pytorch3d -c pytorch3d)
 - [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation) ≈ 0.5.4 (for compilation with CUDA 12.1/12.2, please refer to [this](https://github.com/daizhirui/MinkowskiEngine/tree/fix-for-cuda-12.2))
 
 
