@@ -5,15 +5,20 @@ Detailed experimental results of [1, 2] on Intel Xeon Gold 5118 and NVIDIA 2080T
 
 
 ## Models
-- `config/convolutional/lossl_coord/*.yaml`: Real-time geometry lossless compression of LiDAR point clouds [[3]](https://arxiv.org/abs/2508.20466).
-- `config/convolutional/lossl_coord_int/*.yaml`: Integer-only inference of the real-time geometry lossless compression of LiDAR point clouds.
+LiDAR: 
+- `config/convolutional/lossl_coord/*.yaml`: Real-time geometry lossless compression of LiDAR point clouds [[3]](https://arxiv.org/abs/2603.25260).
+- `config/convolutional/lossl_coord_int/*.yaml`: Integer-only [Cross-platform consistent](lib/int_sparse_conv) inference.
+
+Objects: 
 - `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression [[2]](https://ieeexplore.ieee.org/document/10980362). 
 - `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression [[2]](https://ieeexplore.ieee.org/document/10980362).
-- `config/convolutional/lossy_coord/lossl_based*.yaml`: The configs of model [[1]](https://ieeexplore.ieee.org/document/10220062) (Deprecated).
+- `config/convolutional/lossy_coord/lossl_based*.yaml`: Geometry lossy compression [[1]](https://ieeexplore.ieee.org/document/10220062) (Deprecated).
 - `config/convolutional/lossy_coord/baseline.yaml`: A reimplementation of PCGCv2.
 
 Run these models using `python train.py/test.py [model yaml path] config_key_1=value_1 config_key_2=value_2 ...`. 
-Please see detailed commands [below](#train--test).   
+Please see detailed commands [below](#train--test).
+
+Some models have been adopted in the [AI-based PCC standard draft](https://openi.pcl.ac.cn/yupengpeng/avs-ai-pcrm) by the [AVS Workgroup of China](https://www.avs.org.cn/index/list?catid=22).
 
 
 ## Environment
@@ -30,7 +35,7 @@ For models `config/convolutional/lossl_coord` and `config/convolutional/lossy_co
 
 For integer-only inference with `config/convolutional/lossl_coord_int`:
 - torchsparse (only the SparseTensor class is used)
-- cutlass
+- cutlass (the 2.x GEMM API in the official repository contains unresolved bugs in indexed GEMM; please use the following bug-fixed version)
 
 Manual compilation is required:
 ```shell
@@ -138,9 +143,10 @@ you need to create soft links or edit these configurations manually.
 
 
 ## Other content
+- [`lib/int_sparse_conv`](lib/int_sparse_conv) implements sparse convolution–related operations using integer-only arithmetic and requires a CUDA architecture of SM75 or newer.
 - [`lib/simple_config.py`](lib/simple_config.py) is a simple configuration system supports separate configuration definitions, inheritance of yaml files, basic checks of argument types, and mixed use of yaml files and command line arguments.
+- `lib/entropy_models/rans_coder` is a minor wrapper of RANS coder for simple python calls. `models/convolutional/lossy_coord_v3/rans_coder` is a simpler version.
 - `lib/entropy_models` is a minor PyTorch-based re-implementation of the continuous indexed entropy models in tensorflow_compression.
-- `lib/entropy_models/rans_coder` is a minor wrapper of RANS coder for simple python calls.
 - `scripts` contains useful scripts for batch testing PCC models, summarizing test results and plotting RD curves (note that you should use `python scripts/xxx.py` instead of `python xxx.py` to run these scripts).
 
 
@@ -164,13 +170,33 @@ If this work is helpful to your research, please consider citing:
   journal={IEEE Transactions on Multimedia}, 
   title={Hierarchical Distortion Learning for Fast Lossy Compression of Point Clouds}, 
   year={2025},
-  pages={1-16}
+  volume={27},
+  pages={6031-6046}
 }
-@article{yu2025redensification,
-  author={Yu, Pengpeng and Li, Haoran and Li, Dingquan and Jiang, Runqing and Wang, Jing and Lin, Liang and Guo, Yulan},
-  title={Re-Densification Meets Cross-Scale Propagation: Real-Time Compression of LiDAR Point Clouds}, 
-  year={2025},
-  journal={arXiv preprint},
-  pages={1-19}
+@article{yu2026towards,
+  author={Yu, Pengpeng and Li, Haoran and Jiang, Runqing and Li, Dingquan and Wang, Jing and Lin, Liang and Guo, Yulan},
+  title={Towards Practical Lossless Neural Compression for LiDAR Point Clouds}, 
+  year={2026},
+  journal={arXiv preprint arXiv:2603.25260},
+  pages={1-18}
 }
 ````
+
+
+## Acknowledgements
+We sincerely acknowledge and appreciate the outstanding contributions of the following projects and resources:
+- [tensorflow_compression](https://github.com/tensorflow/compression)
+- [rANS](https://github.com/rygorous/ryg_rans)
+- [MinkowskiEngine](https://github.com/NVIDIA/MinkowskiEngine)
+- [torchsparse](https://github.com/mit-han-lab/torchsparse)
+- [Morton code “Magic Bits” method](https://forceflow.be/2013/10/07/morton-encodingdecoding-through-bit-interleaving-implementations/)
+- [EMA implementation in timm](https://github.com/huggingface/pytorch-image-models/blob/main/timm/utils/model_ema.py)
+- [OctAttention](https://github.com/zb12138/OctAttention)
+- [PCGCv2](https://github.com/NJUVISION/PCGCv2)
+- [ADLPCC](https://github.com/aguarda/ADLPCC)
+- [pcc-geo-color](https://github.com/mmspg/pcc-geo-color)
+- [G-PCC](https://github.com/MPEGGroup/mpeg-pcc-tmc13)
+- [V-PCC](https://github.com/MPEGGroup/mpeg-pcc-tmc2)
+- [Bjontegaard metric implementation](https://github.com/google/compare-codecs/blob/master/lib/visual_metrics.py)
+- [PCQM](https://github.com/MEPP-team/PCQM)
+- [GraphSIM](https://github.com/NJUVISION/GraphSIM)
