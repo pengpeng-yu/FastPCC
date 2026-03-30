@@ -19,7 +19,7 @@ import torch
 import torch.utils.data
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.cuda import amp
+from torch import amp
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.modules.module import _EXTRA_STATE_KEY_SUFFIX as MODULE_EXTRA_STATE_KEY_SUFFIX
 import torch.backends.cudnn as cudnn
@@ -353,7 +353,9 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
     logger.info('start training...')
     global_step = steps_one_epoch * start_epoch
     ave_time_onestep = None
-    scaler = amp.GradScaler(enabled=cfg.train.amp_float16)
+    amp_enabled = cfg.train.amp_dtype != ''
+    amp_dtype = getattr(torch, cfg.train.amp_dtype, None)
+    scaler = amp.GradScaler(enabled=amp_enabled and amp_dtype == torch.float16)
     for epoch in range(start_epoch, cfg.train.epochs):
         if not model.training:
             model.train()
@@ -379,7 +381,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
 
             no_sync = isinstance(model, DDP) and (global_step + 1) % cfg.train.grad_acc_steps != 0
             with model.no_sync() if no_sync else nullcontext():
-                with amp.autocast(enabled=cfg.train.amp_float16, dtype=torch.float16):
+                with amp.autocast('cuda', enabled=amp_enabled, dtype=amp_dtype):
                     loss_dict: Dict[str, Union[float, torch.Tensor]] = model(batch_data)
                 scaler.scale(loss_dict['loss'] / cfg.train.grad_acc_steps).backward()
 

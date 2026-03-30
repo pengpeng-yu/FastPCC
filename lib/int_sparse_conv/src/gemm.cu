@@ -206,19 +206,19 @@ void cutlass_gemm_int8(
   else if (sm_arch == (SM)) cutlass_gemm_int8_dispatch_align<cutlass::arch::Sm##SM>(A, B, C, D)
 
   if (0) {}
-#ifdef TARGET_SM120
+#if defined(TARGET_SM120) || defined(TARGET_SM120A) || defined(TARGET_SM120F)
   CASE_SM(120);
 #endif
-#ifdef TARGET_SM103
+#if defined(TARGET_SM103) || defined(TARGET_SM103A) || defined(TARGET_SM103F)
   CASE_SM(103);
 #endif
-#ifdef TARGET_SM101
+#if defined(TARGET_SM101) || defined(TARGET_SM101A) || defined(TARGET_SM101F)
   CASE_SM(101);
 #endif
-#ifdef TARGET_SM100
+#if defined(TARGET_SM100) || defined(TARGET_SM100A) || defined(TARGET_SM100F)
   CASE_SM(100);
 #endif
-#ifdef TARGET_SM90
+#if defined(TARGET_SM90) || defined(TARGET_SM90A)
   CASE_SM(90);
 #endif
 #ifdef TARGET_SM89

@@ -26,7 +26,7 @@ class TrainConfig(SimpleConfig):
     ema_warmup_gamma: float = 1.0
     ema_warmup_power: float = 3/4
     ema_foreach: bool = True
-    amp_float16: bool = False
+    amp_dtype: str = ''  # '' | 'float16' | 'bfloat16'
 
     optimizer: str_or_seq = ('SGD', 'SGD')
     learning_rate: float_or_seq = 0.05
@@ -66,6 +66,7 @@ class TrainConfig(SimpleConfig):
         for item in self.resume_items:
             assert item in all_resume_items
         assert self.ckpt_frequency > 0
+        assert self.amp_dtype in ('', 'float16', 'bfloat16')
         if isinstance(self.optimizer, str):
             self.optimizer = (self.optimizer,)
 
