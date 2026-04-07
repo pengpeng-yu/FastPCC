@@ -144,6 +144,7 @@ you need to create soft links or edit these configurations manually.
 
 ## Other content
 - [`lib/int_sparse_conv`](lib/int_sparse_conv) implements sparse convolution–related operations using integer-only arithmetic and requires a CUDA architecture of SM75 or newer.
+- [`lib/space_filling_curves`](lib/space_filling_curves) implements fast 3D Morton and Hilbert code generation on CUDA.
 - [`lib/simple_config.py`](lib/simple_config.py) is a simple configuration system supports separate configuration definitions, inheritance of yaml files, basic checks of argument types, and mixed use of yaml files and command line arguments.
 - `lib/entropy_models/rans_coder` is a minor wrapper of RANS coder for simple python calls. `models/convolutional/lossy_coord_v3/rans_coder` is a simpler version.
 - `lib/entropy_models` is a minor PyTorch-based re-implementation of the continuous indexed entropy models in tensorflow_compression.
@@ -190,6 +191,7 @@ We sincerely acknowledge and appreciate the outstanding contributions of the fol
 - [MinkowskiEngine](https://github.com/NVIDIA/MinkowskiEngine)
 - [torchsparse](https://github.com/mit-han-lab/torchsparse)
 - [Morton code “Magic Bits” method](https://forceflow.be/2013/10/07/morton-encodingdecoding-through-bit-interleaving-implementations/)
+- [Fastest implementations of 2D and 3D hilbert curve functions](https://github.com/rawrunprotected/hilbert_curves)
 - [EMA implementation in timm](https://github.com/huggingface/pytorch-image-models/blob/main/timm/utils/model_ema.py)
 - [OctAttention](https://github.com/zb12138/OctAttention)
 - [PCGCv2](https://github.com/NJUVISION/PCGCv2)
