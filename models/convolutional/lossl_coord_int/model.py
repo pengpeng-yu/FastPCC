@@ -12,7 +12,7 @@ from lib.utils import Timer
 from lib.torch_utils import TorchCudaMaxMemoryAllocated
 from lib.data_utils import PCData
 from lib.evaluators import PCCEvaluator
-from lib.morton_code import morton_encode_magicbits
+from lib.space_filling_curves import morton_encode_magicbits
 from lib.int_sparse_conv.cuda_ops import softmax_int32, SharedFxpShift, \
     sparse_conv_in8w8out32, SparseResBlockIn32W8Out32, \
     SparseConvIn8W8Out8, SparseConvIn8W8Out32, SparseConvPReLUIn8W8Out8, SparseConvPReLUIn8W8Out32, \

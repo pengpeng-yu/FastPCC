@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import MinkowskiEngine as ME
 from MinkowskiEngine.MinkowskiSparseTensor import SparseTensorQuantizationMode
 
-from lib.morton_code import morton_encode_magicbits
+from lib.space_filling_curves import morton_encode_magicbits
 from lib.utils import Timer
 from lib.torch_utils import TorchCudaMaxMemoryAllocated, concat_loss_dicts
 from lib.data_utils import PCData

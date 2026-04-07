@@ -8,7 +8,7 @@ import torch
 import torch.utils.data
 
 from lib.data_utils import PCData, pc_data_collate_fn, write_ply_file, kd_tree_partition_randomly
-from lib.morton_code import morton_encode_magicbits
+from lib.space_filling_curves import morton_encode_magicbits
 from lib.datasets.KITTIOdometry.dataset_config import DatasetConfig
 
 

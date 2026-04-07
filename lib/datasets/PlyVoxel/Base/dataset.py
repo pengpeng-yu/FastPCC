@@ -8,7 +8,7 @@ import torch
 import torch.utils.data
 
 from lib.data_utils import PCData, pc_data_collate_fn, kd_tree_partition_randomly
-from lib.morton_code import morton_encode_magicbits
+from lib.space_filling_curves import morton_encode_magicbits
 from lib.datasets.PlyVoxel.Base.dataset_config import DatasetConfig
 
 

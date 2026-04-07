@@ -15,7 +15,7 @@ from lib.utils import Timer
 from lib.torch_utils import TorchCudaMaxMemoryAllocated
 from lib.data_utils import PCData
 from lib.evaluators import PCCEvaluator
-from lib.morton_code import morton_encode_magicbits
+from lib.space_filling_curves import morton_encode_magicbits
 from lib.entropy_models.distributions.deep_factorized import DeepFactorized
 from lib.entropy_models.distributions.uniform_noise import NoisyDeepFactorized
 from .model_config import Config

@@ -122,6 +122,7 @@ std::vector<int32_t> build_lut() {
 at::Tensor softmax_int32(const at::Tensor &input) {
   at::Device device = input.device();
   TORCH_CHECK(device.is_cuda());
+  TORCH_CHECK(input.is_contiguous());
 
   int64_t N = input.size(0);
   int64_t C = input.size(1);

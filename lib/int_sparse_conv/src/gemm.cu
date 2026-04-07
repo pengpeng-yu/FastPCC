@@ -146,21 +146,21 @@ void cutlass_gemm_int8_dispatch_align(
   int64_t K = A.size(1);
   int64_t N = B.size(0);
   bool input_align16 = (K % 16 == 0) &&
-      is_aligned_address<int8_t>(A, 16) &&
-      is_aligned_address<int8_t>(B, 16);
+       is_aligned_address<int8_t>(A, 16) &&
+       is_aligned_address<int8_t>(B, 16);
   bool input_align8 = (K % 8 == 0) &&
-      is_aligned_address<int8_t>(A, 8) &&
-      is_aligned_address<int8_t>(B, 8);
+       is_aligned_address<int8_t>(A, 8) &&
+       is_aligned_address<int8_t>(B, 8);
   bool input_align4 = (K % 4 == 0) &&
-      is_aligned_address<int8_t>(A, 4) &&
-      is_aligned_address<int8_t>(B, 4);
+       is_aligned_address<int8_t>(A, 4) &&
+       is_aligned_address<int8_t>(B, 4);
 
   bool output_align4 = (N % 4 == 0) &&
-      is_aligned_address<int32_t>(D, 4) &&
-      ((C.numel() == 0) || is_aligned_address<int32_t>(C, 4));
+       is_aligned_address<int32_t>(D, 4) &&
+       ((C.numel() == 0) || is_aligned_address<int32_t>(C, 4));
   bool output_align2 = (N % 2 == 0) &&
-      is_aligned_address<int32_t>(D, 2) &&
-      ((C.numel() == 0) || is_aligned_address<int32_t>(C, 2));
+       is_aligned_address<int32_t>(D, 2) &&
+       ((C.numel() == 0) || is_aligned_address<int32_t>(C, 2));
 
   if (input_align16 && output_align4) {
     cutlass_gemm_int8_impl<SmArch, 16, 4, true>(A, B, C, D);

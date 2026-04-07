@@ -14,7 +14,7 @@ from lib.utils import Timer
 from lib.torch_utils import TorchCudaMaxMemoryAllocated
 from lib.data_utils import PCData
 from lib.evaluators import PCCEvaluator
-from lib.morton_code import morton_encode_magicbits
+from lib.space_filling_curves import morton_encode_magicbits
 from .model_config import Config
 from models.convolutional.lossy_coord_v3.rans_coder import RansEncoder, RansDecoder
 

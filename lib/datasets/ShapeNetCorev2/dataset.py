@@ -10,7 +10,7 @@ import torch.utils.data
 
 from lib.data_utils import PCData, pc_data_collate_fn, kd_tree_partition_randomly
 from lib.data_utils import o3d_coords_sampled_from_triangle_mesh, normalize_coords
-from lib.morton_code import morton_encode_magicbits
+from lib.space_filling_curves import morton_encode_magicbits
 from lib.datasets.ShapeNetCorev2.dataset_config import DatasetConfig
 
 
