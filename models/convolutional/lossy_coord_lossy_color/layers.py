@@ -4,10 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import MinkowskiEngine as ME
-try:
-    from pytorch3d.ops import knn_points
-except Exception:
-    knn_points = None
+from lib.knn3d import knn3d
 
 from lib.metrics.misc import gen_rgb_to_yuvbt709_param
 from lib.minkowski_sparse_conv_layers import \
@@ -288,10 +285,11 @@ def sample_wise_recolor(
     recolored_pred_rgb = torch.zeros_like(pred_xyz, dtype=tgt_rgb.dtype)
 
     def recolor_backward():
-        tgt_to_pt_dist, tgt_to_pt_idx = knn_points(
-            tgt_xyz[None], pred_xyz[None], K=search_range, return_sorted=False
-        )[:2]
-        tgt_to_pt_dist, tgt_to_pt_idx = tgt_to_pt_dist[0], tgt_to_pt_idx[0]
+        tgt_to_pt_idx, tgt_to_pt_dist = knn3d(
+            tgt_xyz.to(torch.float32, memory_format=torch.contiguous_format, copy=False),
+            pred_xyz.to(torch.float32, memory_format=torch.contiguous_format, copy=False),
+            K=search_range,
+        )
         tgt_to_pt_zero_mask = tgt_to_pt_dist == 0
         tgt_to_pt_mask = tgt_to_pt_dist == tgt_to_pt_dist.amin(1, keepdim=True)
         tgt_to_pt_mask.logical_and_(~tgt_to_pt_zero_mask.any(1).unsqueeze(1))
@@ -320,10 +318,11 @@ def sample_wise_recolor(
     def recolor_forward():
         if torch.any(empty_rgb_mask):
             empty_rgb_xyz = pred_xyz[empty_rgb_mask]
-            empty_rgb_to_tgt_dist, empty_rgb_to_tgt_idx = knn_points(
-                empty_rgb_xyz[None], tgt_xyz[None], K=search_range, return_sorted=False
-            )[:2]
-            empty_rgb_to_tgt_dist, empty_rgb_to_tgt_idx = empty_rgb_to_tgt_dist[0], empty_rgb_to_tgt_idx[0]
+            empty_rgb_to_tgt_idx, empty_rgb_to_tgt_dist = knn3d(
+                empty_rgb_xyz.to(torch.float32, memory_format=torch.contiguous_format, copy=False),
+                tgt_xyz.to(torch.float32, memory_format=torch.contiguous_format, copy=False),
+                K=search_range,
+            )
             empty_rgb_to_tgt_mask = empty_rgb_to_tgt_dist == empty_rgb_to_tgt_dist.amin(1, keepdim=True)
             recolored_pred_rgb[empty_rgb_mask] = torch.sum(
                 tgt_rgb[empty_rgb_to_tgt_idx] * empty_rgb_to_tgt_mask[:, :, None], dim=1

@@ -1,11 +1,46 @@
+import sys
+import os
+import os.path as osp
+from glob import glob
 from typing import Union
 
 import numpy as np
 import torch
+from torch.utils.cpp_extension import load
 
-from .src import space_filling_curves_ext
 
 VALID_AXIS_ORDERS_3D = ('xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx')
+
+
+def _load_ext():
+    if sys.platform == 'win32':
+        cxx_args = ['/O2']
+        nvcc_args = ['-O3']
+    elif sys.platform == 'linux':
+        cxx_args = ['-O3']
+        nvcc_args = ['-O3']
+    else:
+        raise NotImplementedError(sys.platform)
+
+    current_file_dir = osp.dirname(osp.abspath(__file__))
+    build_directory = osp.join(current_file_dir, 'build')
+    os.makedirs(build_directory, exist_ok=True)
+    src_dir = osp.join(current_file_dir, 'src')
+    src_files = [osp.abspath(_) for _ in glob(osp.join(src_dir, '**/*.cu'), recursive=True)]
+
+    space_filling_curves_ext = load(
+        name='space_filling_curves_ext',
+        extra_include_paths=[current_file_dir],
+        sources=src_files,
+        extra_cflags=cxx_args,
+        extra_cuda_cflags=nvcc_args,
+        build_directory=build_directory,
+        verbose=True
+    )
+    return space_filling_curves_ext
+
+
+space_filling_curves_ext = _load_ext()
 
 
 def _split_by_3(a: Union[np.ndarray, torch.Tensor]):

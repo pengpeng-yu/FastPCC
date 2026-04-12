@@ -54,11 +54,13 @@ class PCCEvaluator(Evaluator):
             resolution: float,
             results_dir: str = None,
             pred_color: torch.Tensor = None,
+            pred_reflectance: torch.Tensor = None,
             extra_info_dict: Dict[str, Union[str, int, float]] = None):
         """
         "pred" is the reconstructed coordinates with a specified resolution.
         "file_path" stores the original point cloud.
         "pred_color" are RGB colors. (0 ~ 255).
+        "pred_reflectance" is reflectance. (0 ~ 255).
         """
         if not self.working:
             self.reset()
@@ -66,6 +68,7 @@ class PCCEvaluator(Evaluator):
             self.working = True
 
         have_color = pred_color is not None
+        have_reflectance = pred_reflectance is not None
         assert pred.ndim == 2
         assert pred.shape[1] == 3
 
@@ -87,19 +90,30 @@ class PCCEvaluator(Evaluator):
             reconstructed_path = out_file_path + '_recon.ply'
             with open(compressed_path, 'wb') as f:
                 f.write(compressed_bytes)
-            write_ply_file(pred, reconstructed_path, rgb=pred_color if have_color else None)
+            write_ply_file(
+                pred,
+                reconstructed_path,
+                rgb=pred_color if have_color else None,
+                reflectance=pred_reflectance if have_reflectance else None,
+            )
 
             if self.cal_mpeg_pc_error:
                 assert file_path.endswith('.ply'), file_path
                 self.file_path_to_info_run_res[file_path] = self.pc_error_pool.apply_async(
                     mpeg_pc_error,
-                    (osp.abspath(file_path), osp.abspath(reconstructed_path), resolution, '', False, have_color)
+                    (
+                        osp.abspath(file_path), osp.abspath(reconstructed_path), resolution,
+                        '', False, have_color, have_reflectance
+                    )
                 )
             elif self.cal_avs_pc_evalue:
                 assert file_path.endswith('.ply'), file_path
                 self.file_path_to_info_run_res[file_path] = self.pc_error_pool.apply_async(
                     avs_pc_evalue,
-                    (osp.abspath(file_path), osp.abspath(reconstructed_path), resolution, True, have_color)
+                    (
+                        osp.abspath(file_path), osp.abspath(reconstructed_path), resolution,
+                        True, have_color, have_reflectance
+                    )
                 )
 
         if file_path in self.file_path_to_info:

@@ -1,13 +1,10 @@
 from typing import Tuple, List, Dict, Union, Optional
 
 import torch
-try:
-    from pytorch3d.ops import knn_points
-except ImportError:
-    knn_points = None
 import MinkowskiEngine as ME
 from torch import nn as nn
 
+from lib.knn3d import knn3d
 from lib.metrics.misc import precision_recall
 
 
@@ -152,9 +149,11 @@ class GenerativeUpsample(nn.Module):
                     strided_target_one_sample = strided_target[strided_target[:, 0] == sample_idx][:, 1:]
                     sample_mapping = fea.C[:, 0] == sample_idx
                     pred_coord_one_sample = pred.C[sample_mapping][:, 1:]
-                    dists = knn_points(pred_coord_one_sample[None].type(torch.float),
-                                       strided_target_one_sample[None].type(torch.float),
-                                       K=1, return_sorted=False).dists[0, :, 0]
+                    dists = knn3d(
+                        pred_coord_one_sample.to(torch.float32, memory_format=torch.contiguous_format, copy=False),
+                        strided_target_one_sample.to(torch.float32, memory_format=torch.contiguous_format, copy=False),
+                        K=1,
+                    )[1][:, 0]
                     loss_target[sample_mapping] = dists
 
                 pred_mask = pred.F.squeeze(dim=1) > self.square_dist_upper_bound

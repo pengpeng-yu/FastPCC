@@ -69,7 +69,8 @@ at::Tensor requant(
   int64_t threads = 256;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(device.index());
   int64_t total = N * Ch;
-  int64_t blocks = std::min(int64_t(4096), (total + threads - 1) / threads);
+  const auto* prop = at::cuda::getDeviceProperties(device.index());
+  int64_t blocks = std::min<int64_t>((total + threads - 1) / threads, prop->maxGridSize[0]);
   requant_kernel<T><<<blocks, threads, 0, stream>>>(
     input.data_ptr<int32_t>(),
     requant_mul.data_ptr<uint32_t>(),

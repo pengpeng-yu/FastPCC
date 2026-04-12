@@ -288,6 +288,9 @@ def write_ply_file(
         file_path: str,
         xyz_dtype: str = '<f4',
         rgb: Union[torch.Tensor, np.ndarray] = None,
+        rgb_dtype: str = 'uint8',
+        reflectance: Union[torch.Tensor, np.ndarray] = None,
+        reflectance_dtype: str = 'uint8',
         write_ascii: bool = False,
         make_dirs: bool = False,
         estimate_normals: bool = False,
@@ -298,21 +301,33 @@ def write_ply_file(
         xyz = xyz.cpu().numpy()
     if isinstance(rgb, torch.Tensor):
         rgb = rgb.cpu().numpy()
+    if isinstance(reflectance, torch.Tensor):
+        reflectance = reflectance.cpu().numpy()
     if isinstance(normals, torch.Tensor):
         normals = normals.cpu().numpy()
     assert xyz.shape[1] == 3
     xyz = xyz.astype(xyz_dtype, copy=False)
-    rgb_dtype = np.uint8
     if rgb is not None:
         assert rgb.shape[1] == 3 and rgb.shape[0] == xyz.shape[0]
         assert rgb.dtype in (np.float32, rgb_dtype)
         rgb = rgb.astype(rgb_dtype, copy=False)
+    if reflectance is not None:
+        if reflectance.ndim == 2:
+            assert reflectance.shape[1] == 1 and reflectance.shape[0] == xyz.shape[0]
+            reflectance = reflectance[:, 0]
+        else:
+            assert reflectance.ndim == 1 and reflectance.shape[0] == xyz.shape[0]
+        if reflectance.dtype == np.float32:
+            reflectance = np.rint(reflectance)
+        reflectance = reflectance.astype(reflectance_dtype, copy=False)
 
     el_with_properties_dtype = [('x', xyz_dtype), ('y', xyz_dtype), ('z', xyz_dtype)]
     if estimate_normals or normals is not None:
         el_with_properties_dtype.extend([('nx', np.float32), ('ny', np.float32), ('nz', np.float32)])
     if rgb is not None:
         el_with_properties_dtype.extend([('red', rgb_dtype), ('green', rgb_dtype), ('blue', rgb_dtype)])
+    if reflectance is not None:
+        el_with_properties_dtype.append(('reflectance', reflectance_dtype))
 
     el_with_properties = np.empty(len(xyz), dtype=el_with_properties_dtype)
     el_with_properties['x'] = xyz[:, 0]
@@ -330,6 +345,8 @@ def write_ply_file(
         el_with_properties['red'] = rgb[:, 0]
         el_with_properties['green'] = rgb[:, 1]
         el_with_properties['blue'] = rgb[:, 2]
+    if reflectance is not None:
+        el_with_properties['reflectance'] = reflectance
     el = PlyElement.describe(el_with_properties, 'vertex')
     PlyData([el], text=write_ascii).write(file_path)
 

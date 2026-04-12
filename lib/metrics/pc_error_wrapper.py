@@ -39,7 +39,8 @@ _MPEG_DIVIDERS = ['1. Use infile1 (A) as reference, loop over A, use normals on 
 
 def mpeg_pc_error(
         infile1: str, infile2: str, resolution: float, normal_file: str = '',
-        hausdorff: bool = False, color: bool = False, threads: int = 2, command='',
+        hausdorff: bool = False, color: bool = False, reflectance: bool = False,
+        threads: int = 2, command='',
         cal_pcqm=False, cal_graph_sim=False
 ) -> Dict[str, float]:
     if command == '': command = pc_error_path
@@ -49,6 +50,7 @@ def mpeg_pc_error(
                f' --resolution={resolution - 1}' \
                f' --hausdorff={int(hausdorff)}' \
                f' --color={int(color)}' \
+               f' --lidar={int(reflectance)}' \
                f' --nbThreads={threads}'
 
     # Priority: arg "normal_file" -> infile1's normals -> existing *_n.ply -> generate *_n.ply using infile1
@@ -113,7 +115,7 @@ _AVS_DIVIDERS = ['1. Take original point cloud as reference:',
 
 def avs_pc_evalue(
         infile1: str, infile2: str, resolution: float,
-        hausdorff: bool = False, color: bool = False, command='',
+        hausdorff: bool = False, color: bool = False, reflectance: bool = False, command='',
 ) -> Dict[str, float]:
     if command == '': command = avs_pc_evalue_path
     cmd_args = f'{command}' \
@@ -123,6 +125,8 @@ def avs_pc_evalue(
                f' --show_hausdorff {1 if hausdorff else 0}'
     if color:
         cmd_args += ' -cc'
+    if reflectance:
+        cmd_args += ' -cr -rod 8'
 
     subp_stdout = subprocess.run(
         cmd_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

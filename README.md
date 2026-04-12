@@ -45,10 +45,6 @@ cd lib/int_sparse_conv
 python setup.py build
 ```
 
-For the model `config/convolutional/lossy_coord_lossy_color`:
-- [pytorch3d](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) (only for knn_points. Conda installation suggested: conda install -c fvcore -c iopath -c conda-forge fvcore iopath; conda install pytorch3d -c pytorch3d)
-- [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation) ≈ 0.5.4 (for compilation with CUDA 12.1/12.2, please refer to [this](https://github.com/daizhirui/MinkowskiEngine/tree/fix-for-cuda-12.2))
-
 For the remaining models:
 - [minkowskiengine](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation) ≈ 0.5.4 (for compilation with CUDA 12.1/12.2, please refer to [this](https://github.com/daizhirui/MinkowskiEngine/tree/fix-for-cuda-12.2))
 
@@ -188,6 +184,7 @@ If this work is helpful to your research, please consider citing:
 We sincerely acknowledge and appreciate the outstanding contributions of the following projects and resources:
 - [tensorflow_compression](https://github.com/tensorflow/compression)
 - [rANS](https://github.com/rygorous/ryg_rans)
+- [KNN in pytorch3d](https://github.com/facebookresearch/pytorch3d/tree/main/pytorch3d/csrc/knn)
 - [MinkowskiEngine](https://github.com/NVIDIA/MinkowskiEngine)
 - [torchsparse](https://github.com/mit-han-lab/torchsparse)
 - [Morton code “Magic Bits” method](https://forceflow.be/2013/10/07/morton-encodingdecoding-through-bit-interleaving-implementations/)
