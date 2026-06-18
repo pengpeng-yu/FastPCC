@@ -1,4 +1,4 @@
-This project contains an implementation of our ICME 2023 and TMM papers on convolutional point cloud compression.
+This project contains an implementation of our ICME 2023, TMM, and ECCV 2026 papers on convolutional point cloud compression.
 Contact me for any reproduction issue: <yupp5@mail2.sysu.edu.cn>.
 
 Detailed experimental results of [1, 2] on Intel Xeon Gold 5118 and NVIDIA 2080Ti are available at [OneDrive](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EbzFDM93okNPmceKE5ZLzhgBZPJ1Cb4L-GeoP3stilFJxQ).
@@ -170,11 +170,11 @@ If this work is helpful to your research, please consider citing:
   volume={27},
   pages={6031-6046}
 }
-@article{yu2026towards,
+@inproceedings{yu2026towards,
   author={Yu, Pengpeng and Li, Haoran and Jiang, Runqing and Li, Dingquan and Wang, Jing and Lin, Liang and Guo, Yulan},
   title={Towards Practical Lossless Neural Compression for LiDAR Point Clouds}, 
   year={2026},
-  journal={arXiv preprint arXiv:2603.25260},
+  booktitle={European Conference on Computer Vision},
   pages={1-18}
 }
 ````

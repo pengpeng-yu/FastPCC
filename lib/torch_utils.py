@@ -13,10 +13,12 @@ def select_device(logger, local_rank, device='', batch_size=None) -> Tuple[torch
     device = str(device).strip().lower().replace('cuda:', '')
     cuda = device.lower() != 'cpu'
     if cuda:
-        devices = [int(_) for _ in device.split(',') if _] if device else '0'
+        devices = [int(_) for _ in device.split(',') if _] if device else [0]
         n = len(devices)
-        assert torch.cuda.is_available() and torch.cuda.device_count() >= n, \
+        cuda_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        assert cuda_count > 0 and all(0 <= d < cuda_count for d in devices), \
             f'CUDA unavailable, invalid device {device} requested'
+        assert len(set(devices)) == n, f'duplicated CUDA device ids in {device}'
         if n > 1 and batch_size:  # check that batch_size is compatible with device_count
             assert batch_size % n == 0, f'batch-size {batch_size} not multiple of GPU count {n}'
         for d in devices:
@@ -35,7 +37,7 @@ def select_device(logger, local_rank, device='', batch_size=None) -> Tuple[torch
         cuda_ids = [-1]
         torch_device = torch.device('cpu')
 
-    logger.info(s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s)  # emoji-safe
+    logger.info(s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s)
     return torch_device, cuda_ids
 
 

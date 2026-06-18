@@ -212,7 +212,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             if state_name.endswith(MODULE_EXTRA_STATE_KEY_SUFFIX):
                 dpp_params_and_buffers_to_ignore.append(state_name)
         DDP._set_params_and_buffers_to_ignore_for_model(model, dpp_params_and_buffers_to_ignore)
-        model = DDP(model.to(device), device_ids=[local_rank], output_device=local_rank,
+        model = DDP(model, device_ids=[cuda_ids[0]], output_device=cuda_ids[0],
                     find_unused_parameters=cfg.train.find_unused_parameters,
                     bucket_cap_mb=cfg.train.bucket_cap_mb or None)
         if not cfg.train.shuffle:
@@ -481,6 +481,7 @@ def train(cfg: Config, local_rank, logger, tb_writer=None, run_dir=None, ckpts_d
             torch.cuda.empty_cache()
 
     if tb_writer is not None: tb_writer.close()
+    if dist.is_initialized(): dist.destroy_process_group()
     logger.info('train end')
 
 
