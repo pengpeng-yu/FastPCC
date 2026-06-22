@@ -1,15 +1,13 @@
 This project contains an implementation of our ICME 2023, TMM, and ECCV 2026 papers on convolutional point cloud compression.
 Contact me for any reproduction issue: <yupp5@mail2.sysu.edu.cn>.
 
-Detailed experimental results of [1, 2] on Intel Xeon Gold 5118 and NVIDIA 2080Ti are available at [OneDrive](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EbzFDM93okNPmceKE5ZLzhgBZPJ1Cb4L-GeoP3stilFJxQ).
-
 
 ## Models
-LiDAR: 
+LiDAR point clouds: 
 - `config/convolutional/lossl_coord/*.yaml`: Real-time geometry lossless compression of LiDAR point clouds [[3]](https://arxiv.org/abs/2603.25260).
-- `config/convolutional/lossl_coord_int/*.yaml`: Integer-only [Cross-platform consistent](lib/int_sparse_conv) inference.
+- `config/convolutional/lossl_coord/*int*.yaml`: Integer-only [Cross-platform consistent](lib/int_sparse_conv) inference.
 
-Objects: 
+Object point clouds: 
 - `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression [[2]](https://ieeexplore.ieee.org/document/10980362). 
 - `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression [[2]](https://ieeexplore.ieee.org/document/10980362).
 - `config/convolutional/lossy_coord/lossl_based*.yaml`: Geometry lossy compression [[1]](https://ieeexplore.ieee.org/document/10220062) (Deprecated).
@@ -17,6 +15,8 @@ Objects:
 
 Run these models using `python train.py/test.py [model yaml path] config_key_1=value_1 config_key_2=value_2 ...`. 
 Please see detailed commands [below](#train--test).
+
+Detailed experimental results of lossy objects on Intel Xeon Gold 5118 and NVIDIA 2080Ti are available at [OneDrive](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EbzFDM93okNPmceKE5ZLzhgBZPJ1Cb4L-GeoP3stilFJxQ).
 
 Some models have been adopted in the [AI-based PCC standard draft](https://openi.pcl.ac.cn/yupengpeng/avs-ai-pcrm) by the [AVS Workgroup of China](https://www.avs.org.cn/index/list?catid=22).
 
@@ -33,7 +33,7 @@ Some models have been adopted in the [AI-based PCC standard draft](https://openi
 For models `config/convolutional/lossl_coord` and `config/convolutional/lossy_coord_v3`:
 - [torchsparse]((https://github.com/mit-han-lab/torchsparse?tab=readme-ov-file#installation)) == 2.1.0 (Compiling requires [sparsehash](https://github.com/sparsehash/sparsehash), e.g., `sudo apt-get install libsparsehash-dev`)
 
-For integer-only inference with `config/convolutional/lossl_coord_int`:
+For integer-only inference with `config/convolutional/lossl_coord/*int*.yaml`:
 - torchsparse (only the SparseTensor class is used)
 - cutlass (the 2.x GEMM API in the official repository contains unresolved bugs in indexed GEMM; please use the following bug-fixed version)
 
@@ -52,7 +52,7 @@ For the remaining models:
 ## Requirements
 - [Examples of datasets folder and bin folder (with binary tools compiled on Ubuntu 16.04)](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EWQeTYD3y8dDr1-lvq7YawQB-JoJ2_GQw2jSOgpS2i6xLw)
 - [Test set of geometry compression](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/Ed9ljLgHJD9Ipd_Sd8nP9NABxJbywu1kT1pPo4vdNIZWjg)
-- [Trained model weights](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EUIl3GRmQL5KvKCwwipEOhkBzoNXfyDwMs_BHju7M70ayg)
+- [Trained model weights (lossy objects)](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/EUIl3GRmQL5KvKCwwipEOhkBzoNXfyDwMs_BHju7M70ayg) or [Trained model weights (lossless LiDAR)](https://mssysueducn-my.sharepoint.com/:u:/g/personal/yupp5_ms_sysu_edu_cn/IQB5LKKlfYcERZqFWxxMKSnuAeFlFnuHxSHCy9J_YPgwGUQ?e=6uYeNi)
 - [ShapeNetCorev2 of OBJ format](https://huggingface.co/datasets/ShapeNet/ShapeNetCore/tree/main) (for training geometry compression)
 - [KITTI Odometry](https://www.cvlibs.net/datasets/kitti/eval_odometry.php) (for LiDAR geometry compression)
 - [8iVFBv2](https://plenodb.jpeg.org/pc/8ilabs) & [Owlii](https://mpeg-pcc.org/index.php/pcc-content-database/owlii-dynamic-human-textured-mesh-sequence-dataset/) (for joint geometry and color compression)
