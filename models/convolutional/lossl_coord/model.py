@@ -17,7 +17,7 @@ from lib.evaluators import PCCEvaluator
 from lib.space_filling_curves import morton_encode_magicbits
 from lib.int_sparse_conv.cuda_ops import make_obs, SparseTensorHistogramObserver, \
     SparseResBlockWithObs, SparseResBlockIn32W8Out32, \
-    SparseConvIn8Out8, SparseConvIn8W8Out32, SparseConvPReLUIn8W8Out8, SparseConvPReLUIn8W8Out32, \
+    SparseConvIn8W8Out8, SparseConvIn8W8Out32, SparseConvPReLUIn8W8Out8, SparseConvPReLUIn8W8Out32, \
     PReLUIn32Out32, RequantFxpToScaledInt8,  \
     LinearIn8W8Out8, LinearIn8W8Out32, LinearPReLUIn8W8Out8, LinearPReLUIn8W8Out32
 from .model_config import Config
@@ -838,7 +838,7 @@ def replace_seqs_with_int_impl(model: nn.Module):
                                     fused.import_parameters(scale_in, zero_point_in, m, prelu_module)
                             else:
                                 if out_scaled_int:
-                                    fused = SparseConvIn8W8Out32(in_ch, out_ch, kernel_size, stride).to(device)
+                                    fused = SparseConvIn8W8Out8(in_ch, out_ch, kernel_size, stride).to(device)
                                     fused.import_parameters(scale_in, zero_point_in, scale_out, zero_point_out, m)
                                 else:
                                     fused = SparseConvIn8W8Out32(in_ch, out_ch, kernel_size, stride).to(device)
