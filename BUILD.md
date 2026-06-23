@@ -1,13 +1,25 @@
 ## Build MinkowskiEngine
 ```shell
 # Please refer to https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation
-git clone https://github.com/daizhirui/MinkowskiEngine.git
-cd MinkowskiEngine
-git checkout fix-for-cuda-12.2  # checkout this branch if you are using cuda 12.1/12.2
+sudo apt install build-essential python3-dev libopenblas-dev
 python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
 nvcc -V
-sudo apt install build-essential python3-dev libopenblas-dev
+
+# For cuda <12
+git clone https://github.com/NVIDIA/MinkowskiEngine.git
+cd MinkowskiEngine
 python setup.py install --blas_include_dirs=${CONDA_PREFIX}/include --blas=openblas
+
+# For cuda 12
+git clone https://github.com/daizhirui/MinkowskiEngine.git
+cd MinkowskiEngine
+git checkout fix-for-cuda-12.2
+python setup.py install --blas_include_dirs=${CONDA_PREFIX}/include --blas=openblas
+
+# For cuda 13
+git clone https://github.com/AzharSindhi/MinkowskiEngineCuda13.git
+cd MinkowskiEngineCuda13
+python setup.py install --blas_include_dirs=${CONDA_PREFIX}/include,/usr/local/cuda/include/cccl --blas=openblas
 ```
 
 
