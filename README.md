@@ -1,16 +1,16 @@
-This project contains an implementation of our ICME 2023, TMM, and ECCV 2026 papers on convolutional point cloud compression.
+This project contains an implementation of our [ICME 2023](https://ieeexplore.ieee.org/document/10220062), [TMM 2025](https://ieeexplore.ieee.org/document/10980362), and [ECCV 2026](https://arxiv.org/abs/2603.25260) papers on convolutional point cloud compression.
 Contact me for any reproduction issue: <yupp5@mail2.sysu.edu.cn>.
 
 
 ## Models
-LiDAR point clouds: 
-- `config/convolutional/lossl_coord/*.yaml`: Real-time geometry lossless compression of LiDAR point clouds [[3]](https://arxiv.org/abs/2603.25260).
-- `config/convolutional/lossl_coord/*int*.yaml`: Integer-only [Cross-platform consistent](lib/int_sparse_conv) inference.
+**LiDAR point clouds**: 
+- `config/convolutional/lossl_coord/kitti_ford_test_r*.yaml`: Real-time geometry lossless compression.
+- `config/convolutional/lossl_coord/kitti_ford_test_int_r*.yaml`: Integer-only Cross-platform consistent inference.
 
-Object point clouds: 
-- `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression [[2]](https://ieeexplore.ieee.org/document/10980362). 
-- `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression [[2]](https://ieeexplore.ieee.org/document/10980362).
-- `config/convolutional/lossy_coord/lossl_based*.yaml`: Geometry lossy compression [[1]](https://ieeexplore.ieee.org/document/10220062) (Deprecated).
+**Object point clouds**: 
+- `config/convolutional/lossy_coord_v2/baseline_r*.yaml`: Improved geometry lossy compression.
+- `config/convolutional/lossy_coord_lossy_color/baseline_r*.yaml`: Joint lossy compression.
+- `config/convolutional/lossy_coord/lossl_based*.yaml`: Geometry lossy compression (Deprecated).
 - `config/convolutional/lossy_coord/baseline.yaml`: A reimplementation of PCGCv2.
 
 Run these models using `python train.py/test.py [model yaml path] config_key_1=value_1 config_key_2=value_2 ...`. 

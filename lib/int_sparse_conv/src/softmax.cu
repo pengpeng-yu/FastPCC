@@ -2,7 +2,7 @@
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 
-#define EXP_LUT_SIZE (12 * 512 + 1)  // indices 0..6145 for [-12,0] with step 1/512
+#define EXP_LUT_SIZE (12 * 512 + 1)  // indices 0..6144 for [-12,0] with step 1/512
 
 namespace int_sparse_conv {
 
@@ -66,11 +66,10 @@ __global__ void softmax_int32_kernel(
       v = max(v, sdata[i]);
     }
     const int32_t m = warp_reduce_max(v);
-    if (lane_idx == 0) sdata[0] = m;
+    if (lane_idx == 0) sdata[n_warps] = m;
   }
   __syncthreads();
-  const int32_t row_max = sdata[0] + (1 << 6);  // plus (1 << 6) for rounding
-  __syncthreads();
+  const int32_t row_max = sdata[n_warps] + (1 << 6);  // plus (1 << 6) for rounding
 
   int32_t local_sum = 0;
   for (uint32_t idx = row_start_idx; idx < row_end_idx; idx += blockDim.x) {
@@ -92,7 +91,7 @@ __global__ void softmax_int32_kernel(
   __syncthreads();
   const int32_t row_sum = sdata[0];
 
-  // If row_sum == 0, fallback to uniform distribution
+  // If row_sum == 0, fallback
   const uint64_t inv = row_sum > 0
     ? ((uint64_t(1) << 32) + (row_sum >> 1)) / (uint64_t)row_sum
     : (uint64_t(1) << 32) / (uint64_t)C;
@@ -132,7 +131,8 @@ at::Tensor softmax_int32(const at::Tensor &input) {
 
   int64_t threads = std::min(int64_t(256), ((C + int64_t(31)) / 32) * 32);
   int64_t blocks = N;
-  size_t shared_bytes = sizeof(int32_t) * ((threads + 31) / 32);
+  int64_t n_warps = (threads + 31) / 32;
+  size_t shared_bytes = sizeof(int32_t) * (n_warps + 1);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(device.index());
   softmax_int32_kernel<<<blocks, threads, shared_bytes, stream>>>(

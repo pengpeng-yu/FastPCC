@@ -186,7 +186,7 @@ class LoadSaveUint32RequantMul(nn.Module):
             state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
 
-class SparseConvIn8Out8(LoadSaveUint32RequantMul):
+class SparseConvIn8W8(LoadSaveUint32RequantMul):
     def __init__(self, in_ch: int, out_ch: int, kernel_size: Tuple[int, int, int], stride: Tuple[int, int, int],
                  with_prelu: bool, out_scaled_int: bool, eps=None, requant_mul_guard_bits=None):
         super().__init__()
@@ -405,7 +405,7 @@ class SparseConvIn8Out8(LoadSaveUint32RequantMul):
         return out_feats, hashmap_kv, in_out_maps
 
 
-class SparseConvIn8W8Out8(SparseConvIn8Out8):
+class SparseConvIn8W8Out8(SparseConvIn8W8):
     def __init__(self, in_ch: int, out_ch: int, kernel_size: Tuple[int, int, int] = (3, 3, 3),
                  stride: Tuple[int, int, int] = (1, 1, 1), *args, **kwargs):
         super().__init__(in_ch, out_ch, kernel_size, stride, False, True, *args, **kwargs)
@@ -418,7 +418,7 @@ class SparseConvIn8W8Out8(SparseConvIn8Out8):
         super().import_parameters(scale_in, zero_point_in, scale_out, zero_point_out, conv, None)
 
 
-class SparseConvIn8W8Out32(SparseConvIn8Out8):
+class SparseConvIn8W8Out32(SparseConvIn8W8):
     def __init__(self, in_ch: int, out_ch: int, kernel_size: Tuple[int, int, int] = (3, 3, 3),
                  stride: Tuple[int, int, int] = (1, 1, 1), *args, **kwargs):
         super().__init__(in_ch, out_ch, kernel_size, stride, False, False, *args, **kwargs)
@@ -430,7 +430,7 @@ class SparseConvIn8W8Out32(SparseConvIn8Out8):
         super().import_parameters(scale_in, zero_point_in, None, None, conv, None)
 
 
-class SparseConvPReLUIn8W8Out8(SparseConvIn8Out8):
+class SparseConvPReLUIn8W8Out8(SparseConvIn8W8):
     def __init__(self, in_ch: int, out_ch: int, kernel_size: Tuple[int, int, int] = (3, 3, 3),
                  stride: Tuple[int, int, int] = (1, 1, 1), *args, **kwargs):
         super().__init__(in_ch, out_ch, kernel_size, stride, True, True, *args, **kwargs)
@@ -443,7 +443,7 @@ class SparseConvPReLUIn8W8Out8(SparseConvIn8Out8):
         super().import_parameters(scale_in, zero_point_in, scale_out, zero_point_out, conv, prelu)
 
 
-class SparseConvPReLUIn8W8Out32(SparseConvIn8Out8):
+class SparseConvPReLUIn8W8Out32(SparseConvIn8W8):
     def __init__(self, in_ch: int, out_ch: int, kernel_size: Tuple[int, int, int] = (3, 3, 3),
                  stride: Tuple[int, int, int] = (1, 1, 1), *args, **kwargs):
         super().__init__(in_ch, out_ch, kernel_size, stride, True, False, *args, **kwargs)
